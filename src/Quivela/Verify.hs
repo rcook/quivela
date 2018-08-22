@@ -56,8 +56,11 @@ data Invariant = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
 -- they're not.
 -- | A monad for generating and discharging verification conditions, which
 -- allows generating free variables and calling external solvers.
-newtype Verify a = Verify { unVerify :: RWST () () VerifyState IO a }
-  deriving (Monad, MonadState VerifyState, MonadIO, Applicative, Functor)
+newtype Verify a = Verify { unVerify :: RWST SymEvalEnv () VerifyState IO a }
+  deriving ( Monad, MonadState VerifyState, MonadIO, Applicative, Functor
+           , MonadReader SymEvalEnv )
+-- Right now, we only need the same environment as symbolic evaluation, so we reuse
+-- that type here.
 
 -- | Keeps track of fresh variables
 data VerifyState = VerifyState
@@ -128,10 +131,10 @@ newVerifyState = do
                      , _z3Proc = (hin, hout, procHandle) }
 
 -- | Run a Verify action
-runVerify :: Verify a -> IO a
-runVerify act = do
+runVerify :: Verify a -> SymEvalEnv -> IO a
+runVerify action env = do
   initState <- newVerifyState
-  (res, state, _) <- runRWST (unVerify act) () initState
+  (res, state, _) <- runRWST (unVerify action) env initState
   return res
 
 -- | Verification conditions
@@ -217,6 +220,12 @@ invToVC assms addrL (_, ctxL, pathCondL) addrR (_, ctxR, pathCondR) inv =
           }]
     UnivInvariant formals e -> return []
 
+-- | Symbolic evaluation lifted to Verify monad:
+symEvalV :: Config -> Verify Results
+symEvalV cfg = do
+  env <- ask
+  symEval' env cfg
+
 -- | Convert an invariant into assumptions. Note that for universal
 -- invariants, this produces several assumptions.
 invToAsm :: Result -> Result -> Invariant -> Verify [Prop]
@@ -230,8 +239,8 @@ invToAsm (VRef addrL, ctxL, pathCondL) (VRef addrR, ctxR, pathCondR) inv =
       args <- symArgs formals
       let scope = M.fromList (zip (map fst formals)
                                   (zip args (map snd formals)))
-      pathsL <- symEval' (e, set ctxThis addrL (set ctxScope scope ctxL), pathCondL)
-      pathsR <- symEval' (e, set ctxThis addrR (set ctxScope scope ctxR), pathCondR)
+      pathsL <- symEvalV (e, set ctxThis addrL (set ctxScope scope ctxL), pathCondL)
+      pathsR <- symEvalV (e, set ctxThis addrR (set ctxScope scope ctxR), pathCondR)
       let argNames = map (\(Sym (SymVar name t)) -> (name, t)) args
       foreachM (return $ pathsL ++ pathsR) $ \(res, ctxI, pathCondI) -> do
         return [Forall argNames (
@@ -251,7 +260,7 @@ invToVCnonRelational assms addr res@(v, ctx, pathCond) inv =
       args <- symArgs formals
       let scope = M.fromList (zip (map fst formals)
                                   (zip args (map snd formals)))
-      paths <- symEval' (e, set ctxThis addr (set ctxScope scope ctx), pathCond)
+      paths <- symEvalV (e, set ctxThis addr (set ctxScope scope ctx), pathCond)
       foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
         return $ [VC { _assumptions = nub $ pathCondI ++ assms
                      , _conditionName = "univInvPreserved"
@@ -302,8 +311,8 @@ methodEquivalenceVCs mtd invs args
                      (VRef a1', ctx1', pathCond1') = do
   ctxH1 <- havocContext ctx1
   ctxH1' <- havocContext ctx1'
-  results <- liftIO $ symEval' (ECall (EConst (VRef a1)) (mtd ^. methodName) (map EConst  args), ctxH1, pathCond1)
-  results' <- liftIO $ symEval' (ECall (EConst (VRef a1')) (mtd ^. methodName) (map EConst  args), ctxH1', pathCond1')
+  results <- symEvalV (ECall (EConst (VRef a1)) (mtd ^. methodName) (map EConst  args), ctxH1, pathCond1)
+  results' <- symEvalV (ECall (EConst (VRef a1')) (mtd ^. methodName) (map EConst  args), ctxH1', pathCond1')
   vcs <- resultsToVCs invs (VRef a1, ctxH1, pathCond1) results (VRef a1', ctxH1', pathCond1') results'
   -- debug $ "VCs before pruning: " ++ show (length vcs)
   filterM (\vc -> do
@@ -646,9 +655,9 @@ checkEqv useSolvers prefix invs lhs rhs = do
     return []
   else do
     (_, prefixCtx, pathCond) <- fmap singleResult .
-                                symEval' $ (prefix, emptyCtx, [])
-    res1@(VRef a1, ctx1, _) <- singleResult <$> symEval' (lhs, prefixCtx, pathCond)
-    res1'@(VRef a1', ctx1', _) <- singleResult <$> symEval' (rhs, prefixCtx, pathCond)
+                                symEvalV $ (prefix, emptyCtx, [])
+    res1@(VRef a1, ctx1, _) <- singleResult <$> symEvalV (lhs, prefixCtx, pathCond)
+    res1'@(VRef a1', ctx1', _) <- singleResult <$> symEvalV (rhs, prefixCtx, pathCond)
     -- check that invariants hold initially
     invLHS <- concat <$> mapM (invToVCnonRelational [] a1 res1) invs
     invRHS <- concat <$> mapM (invToVCnonRelational [] a1' res1') invs

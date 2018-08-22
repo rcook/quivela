@@ -4,7 +4,7 @@ module Quivela.Examples.ETM where
 
 import Quivela
 
-prove
+prove emptySymEvalEnv
   ([prog'|
 method MacI(mac) {
     new (const mac=mac,tg=0) {

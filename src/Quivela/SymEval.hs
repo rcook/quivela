@@ -39,7 +39,7 @@ type Addr = Integer
 type Var = String
 type Scope = M.Map Var (Value, Type)
 type Env = M.Map Var Value
-data Type = TInt | TTuple [Type] | TMap Type Type | TAny
+data Type = TInt | TTuple [Type] | TMap Type Type | TAny | TNamed String
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- | Symbolic values representing unknowns and operations on the
@@ -126,6 +126,11 @@ data Object = Object { _objLocals :: M.Map Var Local
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 makeLenses ''Object
 
+-- | Named types are identifiers of more complex types whose semantics are given
+-- as Haskell expressions.
+type TypeName = String
+
+
 data Context = Context { _ctxObjs :: M.Map Addr Object
                        , _ctxThis :: Addr
                        , _ctxScope :: Scope -- ^ Keeps track of local variables and arguments in a
@@ -136,15 +141,29 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
 
 makeLenses ''Context
 
+-- | The denotation of a named type specifies what can be assumed about objects of more complex types
+-- and what must be shown when assigning to a field of that type.
+data TypeDenotation = ObjectType { _methodEffects :: M.Map Var ([Value] -> Context -> [(Value, Context)]) }
+  deriving (Typeable)
+makeLenses ''TypeDenotation
+
+
 -- | We don't need any state (other than contexts and path conditions with are passed explicitly)
 -- but we might need in the future, so we leave this stub here.
 data SymEvalState = SymEvalState { }
 makeLenses ''SymEvalState
 
+
+-- | The fixed environment for symbolic evaluation. Currently this
+-- only contains information about named types which are defined outside of quivela.
+data SymEvalEnv = SymEvalEnv { _typeDenotations :: M.Map TypeName TypeDenotation }
+  deriving Typeable
+makeLenses ''SymEvalEnv
+
 -- | A monad for symbolic evaluation. Right now this is unnecessary, but at least
 -- the IO part is probably going to become necessary in the future for solver calls
 -- to rule out some paths that we don't need to explore.
-newtype SymEval a = SymEval { unSymEval :: RWST () () SymEvalState IO a }
+newtype SymEval a = SymEval { unSymEval :: RWST SymEvalEnv () SymEvalState IO a }
   deriving (Monad, Applicative, Functor)
 
 -- | Propositions. These are used both to keep track of the path condition
@@ -530,12 +549,12 @@ symEval (ENew fields body, ctx, pathCond) =
       return [(VRef (nextAddr ctx'), set ctxThis (ctx' ^. ctxThis) ctx'''', pathCond'')]
 symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
-evalSymEval :: MonadIO m => SymEval a -> m a
-evalSymEval action = liftIO (fst <$> evalRWST (unSymEval action) () (SymEvalState))
+evalSymEval :: MonadIO m => SymEvalEnv -> SymEval a -> m a
+evalSymEval env action = liftIO (fst <$> evalRWST (unSymEval action) env SymEvalState)
 
-symEval' :: MonadIO m => Config -> m Results
-symEval' cfg = do
-  results <- evalSymEval (symEval cfg)
+symEval' :: MonadIO m => SymEvalEnv -> Config -> m Results
+symEval' env cfg = do
+  results <- evalSymEval env (symEval cfg)
   when (all ((== VError) . (\(a, _, _) -> a)) results) $
     liftIO $ putStrLn $ "WARN: Only VError as possible result of evaluation. Probably a bug?"
   return results
@@ -547,3 +566,6 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                    , _ctxThis = 0
                    , _ctxAdvCalls = []
                    , _ctxScope = M.empty }
+
+emptySymEvalEnv :: SymEvalEnv
+emptySymEvalEnv = SymEvalEnv { _typeDenotations = M.empty }
