@@ -232,6 +232,11 @@ findVar x ctx
 constAssignError :: a
 constAssignError =  error "Assignment to constant variable"
 
+illTypedAssignError :: Var -> Type -> Type -> a
+illTypedAssignError x varType exprType =
+  error $ "Ill-typed assignment to variable " ++ x ++ " of type " ++
+          show varType ++ " of expression of type " ++ show exprType
+
 -- | Update the value of a variable. If the variable already exists,
 -- just use the lens from `findVar` to set it. Otherwise add it
 -- to the current scope if we are in a non-global method call, and
@@ -240,7 +245,8 @@ updateVar :: Var -> Value -> Context -> Context
 updateVar x val ctx
   | Just (lens, isConst, t) <- findVar x ctx =
     if isConst then constAssignError
-    else set lens val ctx
+    else if typeOfValue val <: t then set lens val ctx
+         else illTypedAssignError x t (typeOfValue val)
   | ctx ^. ctxThis > 0 = (ctxScope . at x) ?~ val $ ctx
   | otherwise =
       ctxObjs . ix 0 . objLocals . at x ?~ (Local val TAny False) $ ctx
@@ -250,31 +256,41 @@ updateVar x val ctx
 -- findIdxVar :: Addr -> Var -> Value -> Context -> Maybe (Lens' Context Value, Context)
 findObjVar addr name ctx
   | Just loc <- ctx ^? ctxObjs . ix addr . objLocals . ix name =
-      Just (ctxObjs . ix addr . objLocals . ix name . localValue, loc ^. localImmutable)
+      -- construction of the lens is duplicated here due to GHC getting confused
+      -- about the polymorphic types involved.
+      Just ( ctxObjs . ix addr . objLocals . ix name . localValue
+           , loc ^. localImmutable
+           , loc ^. localType)
   | otherwise = Nothing
 
 
 updateECVar :: Value -> Var -> Value -> Value -> Context -> Context
 updateECVar (VRef a) name idx newValue ctx
-  | Just (lens, isConst) <- findObjVar a name ctx =
+  | Just (lens, isConst, varType) <- findObjVar a name ctx,
+    valueType <- typeOfValue newValue =
       if isConst then constAssignError else
+      if not (valueType <: varType)
+      then illTypedAssignError name varType valueType
+      else
       case idx of
         VNil -> set lens newValue ctx
-        _ -> let Just (lens', _) = findObjVar a name ctx
+        _ -> let Just (lens', _, _) = findObjVar a name ctx
              in case ctx ^? lens' of
                   Just (VMap vs) -> lens . valMap . at idx ?~ newValue $ ctx
                   Just (Sym sv) -> set lens (Sym (Insert idx newValue (Sym sv))) ctx
                   Just _ -> set lens (VMap (M.singleton idx newValue)) ctx
 updateECVar VNil name VNil newValue ctx = updateVar name newValue ctx
 updateECVar VNil name idx newValue ctx
-  | Just (lens, isConst) <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just (lens', _) <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just v <- ctx ^? lens' =
+  | Just (lens, isConst, varType) <- findObjVar (ctx ^. ctxThis) name ctx,
+    Just (lens', _, _) <- findObjVar (ctx ^. ctxThis) name ctx,
+    Just v <- ctx ^? lens', valueType <- typeOfValue newValue =
       if isConst then constAssignError else
-      case v of
-        VMap vs -> lens . valMap . at idx ?~ newValue $ ctx
-        Sym sv -> set lens (Sym (Insert idx newValue (Sym sv))) ctx
-        _ -> set lens (VMap (M.singleton idx newValue)) ctx
+      if not (valueType <: varType)
+      then illTypedAssignError name varType valueType
+      else case v of
+             VMap vs -> lens . valMap . at idx ?~ newValue $ ctx
+             Sym sv -> set lens (Sym (Insert idx newValue (Sym sv))) ctx
+             _ -> set lens (VMap (M.singleton idx newValue)) ctx
 updateECVar VNil name idx newValue ctx =
   error $ "Unhandled case VNil." ++ name ++ "." ++ show idx ++ " |-> " ++ show newValue
 
@@ -294,27 +310,31 @@ lookupIndex _ idx = [(VError, [])]
 -- | Look up a variable access of the for obj.name[idx], where both
 -- obj or idx can be nil.
 lookupECVar (VRef a) name idx ctx
-  | Just (lens, isConst) <- findObjVar a name ctx,
+  | Just (lens, isConst, varType) <- findObjVar a name ctx,
     Just v <- ctx ^? lens = fst . head $ lookupIndex v idx
   | otherwise = error "Lookup on non-existent object"
 lookupECVar (VTuple vs) name (VInt i) ctx
   | fromInteger i < length vs = vs !! fromInteger i
   | otherwise = error "Invalid tuple lookup"
 lookupECVar VNil name idx ctx
-  | Just (lens, isConst) <- findObjVar (ctx ^. ctxThis) name ctx,
+  | Just (lens, isConst, varType) <- findObjVar (ctx ^. ctxThis) name ctx,
     Just v <- ctx ^? lens = fst . head $ lookupIndex v idx
-  | Just (lens, isConst) <- findObjVar 0 name ctx,
+  | Just (lens, isConst, varType) <- findObjVar 0 name ctx,
     Just v <- ctx ^? lens = fst . head $ lookupIndex v idx
 
 
 -- Debugging functions for printing out a context in a nicer way.
+-- | Turn a local into a human-readable string
 printLocal :: Var -> Local -> String
 printLocal name loc =
   "\t\t" ++ name ++ " = " ++ show (loc ^. localValue) ++ " : " ++ show (loc ^. localType)
 
+-- | Turn a method into a human-readable string
+printMethod :: Var -> Method -> String
 printMethod name mtd = unlines
   ["\t\t" ++ name ++ " { " ++ show (mtd ^. methodBody) ++ " } "]
 
+-- | Turn an object into a human-readable string
 printObject :: Addr -> Object -> String
 printObject addr obj = unlines $
   ["  " ++ show addr ++ " |-> "
@@ -324,7 +344,7 @@ printObject addr obj = unlines $
   ["\tMethods:"] ++
   (map (uncurry printMethod) (M.toList (obj ^. objMethods)))
 
-
+-- | Turn a context into a human-readable string
 printContext :: Context -> String
 printContext ctx =
   unlines [ "this: " ++ show (ctx ^. ctxThis)

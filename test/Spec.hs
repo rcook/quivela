@@ -34,6 +34,8 @@ tests = TestList
   , TestCase $ assertVerified "simple const annotation" nop constExample
   , TestCase $ assertEvalError "assigning to constant variable" assignConst
   , TestCase $ assertEvalError "assigning to constant variable" assignConst'
+  , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign
+  , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign'
   ]
 
 main :: IO ()
