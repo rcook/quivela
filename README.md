@@ -91,9 +91,6 @@ For a larger proof, please refer to <src/Quivela/Examples/ETM.hs>.
 ## Open issues
 There are number of side conditions that are currently not checked:
 
-- Assignments to typed variables currently don't check that the new value has
-  the right type.
-
 - Programs are not checked for termination
 
 - Adversaries should also get access to the method name that was called on
