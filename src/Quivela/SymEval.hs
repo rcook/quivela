@@ -166,17 +166,66 @@ type Config = (Expr, Context, PathCond)
 type Result = (Value, Context, PathCond)
 type Results = [Result]
 
--- findVar :: Var -> Context -> Lens' Context Value
+-- | Subtyping relation. @t <: s@ holds iff t is a subtype of s.
+(<:) :: Type -> Type -> Bool
+x <: TAny = True
+TMap tk tv <: TMap tk' tv' = tk <: tk' && tv <: tv'
+TTuple ts <: TTuple ts' = length ts == length ts' && and (zipWith (<:) ts ts')
+TInt <: TInt = True
+_ <: _ = False
+
+-- | Infer type of a symbolic value. Will return 'TAny' for most operations
+-- except plain variables and inserting into a well-typed map.
+typeOfSymValue :: SymValue -> Type
+typeOfSymValue (SymVar x t) = t
+typeOfSymValue (Proj tup idx) = TAny
+-- we could have more precise type information here if the idx was constant
+typeOfSymValue (Insert key val map)
+  | TMap tk tv <- typeOfValue map =
+  let tk' = if typeOfValue key == tk then tk else TAny
+      tv' = if typeOfValue val == tv then tv else TAny
+  in TMap tk' tv'
+  | otherwise = TMap (typeOfValue key) (typeOfValue val)
+  -- Insert always calls turns 'map' into an actual TMap
+typeOfSymValue (Lookup idx map) = TAny
+  -- we don't know if idx is going to be in the map, so
+  -- we can't give more precise type information here.
+
+typeOfSymValue (AdversaryCall _) = TAny
+
+-- | Infer the type of a value. 'TAny' is returned when the inference can't
+-- figure out anything more precise.
+typeOfValue :: Value -> Type
+typeOfValue (VInt i) = TInt
+typeOfValue VError = TAny
+typeOfValue VNil = TAny
+typeOfValue (VRef a) = TAny
+typeOfValue (Sym sv) = typeOfSymValue sv
+typeOfValue (VTuple vs) = TTuple $ map typeOfValue vs
+typeOfValue (VMap vs) = TMap tk tv
+  where keyTypes = map typeOfValue . M.keys $ vs
+        valueTypes = map typeOfValue . M.elems $ vs
+        tk | [t] <- nub keyTypes = t -- all keys have same type
+           | otherwise = TAny
+        tv | [t] <- nub valueTypes = t
+           | otherwise = TAny
+
 -- | Return a lens to a given variable in the context:
 -- If the variable is in the current scope, return that;
 -- If the variable is a local of the current object, return that
--- Otherwise try looking up the variable in the global object
+-- Otherwise try looking up the variable in the global object.
+-- If findVar x ctx = Just (lens, isConst, t), then the variable
+-- can be accessed via lens, isConst is True iff the variable is
+-- mutable and t is the variable's type.
+-- @findVar :: Var -> Context -> (Lens' Context Value, Bool, Type)@
 findVar x ctx
   | Just v <- M.lookup x (ctx ^. ctxScope) =
-      Just (ctxScope . ix x, False)
+      Just (ctxScope . ix x, False, TAny) -- Local variables don't have types at the moment
   | otherwise =
     case ctx ^? lens of
-      Just loc -> Just (ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue, loc ^. localImmutable)
+      Just loc -> Just ( ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue
+                       , loc ^. localImmutable
+                       , loc ^. localType)
       _ -> Nothing
   where lens = ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x
 
@@ -189,8 +238,9 @@ constAssignError =  error "Assignment to constant variable"
 -- add it as a global otherwise
 updateVar :: Var -> Value -> Context -> Context
 updateVar x val ctx
-  | Just (lens, isConst) <- findVar x ctx =
-    if isConst then constAssignError else set lens val ctx
+  | Just (lens, isConst, t) <- findVar x ctx =
+    if isConst then constAssignError
+    else set lens val ctx
   | ctx ^. ctxThis > 0 = (ctxScope . at x) ?~ val $ ctx
   | otherwise =
       ctxObjs . ix 0 . objLocals . at x ?~ (Local val TAny False) $ ctx
@@ -289,7 +339,7 @@ evalError s ctx =
 
 lookupVar :: Var -> Context -> Value
 lookupVar x ctx
-  | Just (lens, _) <- findVar x ctx, Just v <- ctx ^? lens = v
+  | Just (lens, _, _) <- findVar x ctx, Just v <- ctx ^? lens = v
   | otherwise = evalError ("No such variable: " ++ x) ctx
 
 -- | Take a list of monadic actions producing lists and map another monadic function over
