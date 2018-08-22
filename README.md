@@ -4,8 +4,10 @@
 
 ## Installation
 
-`Quivela2` is written in Haskell and requires the (stack)[https://docs.haskellstack.org/en/stable/README/]
-tool to be installed. To build Quivela, run `stack build` in the source directory.
+`Quivela2` is written in Haskell and requires the
+(stack)[https://docs.haskellstack.org/en/stable/README/] tool to be installed.
+To build Quivela, run `stack build` in the source directory. To get a GHCi REPL
+with the quivela modules loaded, run `stack ghci`.
 
 To run, `quivela2` requires both (z3)[https://github.com/Z3Prover/z3] and
 (dafny)[https://github.com/Microsoft/dafny] to be installed and executable (i.e.
