@@ -29,6 +29,7 @@ library:
   - Quivela.Verify
   - Quivela.SymEval
   - Quivela.QuasiQuote
+  - Quivela.Examples
   - Quivela
   other-modules:
   - LexQuivela
