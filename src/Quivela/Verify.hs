@@ -228,7 +228,8 @@ invToAsm (VRef addrL, ctxL, pathCondL) (VRef addrR, ctxR, pathCondR) inv =
       return [asm]
     UnivInvariant formals e -> do
       args <- symArgs formals
-      let scope = M.fromList (zip (map fst formals) args)
+      let scope = M.fromList (zip (map fst formals)
+                                  (zip args (map snd formals)))
       pathsL <- symEval' (e, set ctxThis addrL (set ctxScope scope ctxL), pathCondL)
       pathsR <- symEval' (e, set ctxThis addrR (set ctxScope scope ctxR), pathCondR)
       let argNames = map (\(Sym (SymVar name t)) -> (name, t)) args
@@ -248,7 +249,8 @@ invToVCnonRelational assms addr res@(v, ctx, pathCond) inv =
   case inv of
     UnivInvariant formals e -> do
       args <- symArgs formals
-      let scope = M.fromList (zip (map fst formals) args)
+      let scope = M.fromList (zip (map fst formals)
+                                  (zip args (map snd formals)))
       paths <- symEval' (e, set ctxThis addr (set ctxScope scope ctx), pathCond)
       foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
         return $ [VC { _assumptions = nub $ pathCondI ++ assms

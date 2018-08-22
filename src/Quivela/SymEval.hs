@@ -37,7 +37,7 @@ See https://github.com/ekmett/lens/wiki for details.
 
 type Addr = Integer
 type Var = String
-type Scope = M.Map Var Value
+type Scope = M.Map Var (Value, Type)
 type Env = M.Map Var Value
 data Type = TInt | TTuple [Type] | TMap Type Type | TAny
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
@@ -219,8 +219,8 @@ typeOfValue (VMap vs) = TMap tk tv
 -- mutable and t is the variable's type.
 -- @findVar :: Var -> Context -> (Lens' Context Value, Bool, Type)@
 findVar x ctx
-  | Just v <- M.lookup x (ctx ^. ctxScope) =
-      Just (ctxScope . ix x, False, TAny) -- Local variables don't have types at the moment
+  | Just (v, t) <- M.lookup x (ctx ^. ctxScope) =
+      Just (ctxScope . ix x . _1, False, t) -- Local variables don't have types at the moment
   | otherwise =
     case ctx ^? lens of
       Just loc -> Just ( ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue
@@ -247,7 +247,7 @@ updateVar x val ctx
     if isConst then constAssignError
     else if typeOfValue val <: t then set lens val ctx
          else illTypedAssignError x t (typeOfValue val)
-  | ctx ^. ctxThis > 0 = (ctxScope . at x) ?~ val $ ctx
+  | ctx ^. ctxThis > 0 = (ctxScope . at x) ?~ (val, TAny) $ ctx
   | otherwise =
       ctxObjs . ix 0 . objLocals . at x ?~ (Local val TAny False) $ ctx
 
@@ -411,7 +411,7 @@ findMethod addr name ctx = ctx ^? ctxObjs . ix addr . objMethods . ix name
 callMethod :: Addr -> Method -> [Value] -> Context -> PathCond -> SymEval Results
 callMethod addr mtd args ctx pathCond =
   let scope = M.fromList (zip (map fst (mtd ^. methodFormals))
-                              args)
+                              (zip args (map snd (mtd ^. methodFormals))))
       ctx' = set ctxThis addr (set ctxScope scope ctx)
   in foreachM (symEval (mtd ^. methodBody, ctx', pathCond)) $ \(val, ctx'', pathCond') ->
        return [(val, set ctxThis (ctx ^. ctxThis) (set ctxScope (ctx ^. ctxScope) ctx''),

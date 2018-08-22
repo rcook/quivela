@@ -36,6 +36,7 @@ tests = TestList
   , TestCase $ assertEvalError "assigning to constant variable" assignConst'
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign'
+  , TestCase $ assertEvalError "ill-typed assignment to method parameter" illTypedParamAssign
   ]
 
 main :: IO ()
