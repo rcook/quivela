@@ -28,6 +28,7 @@ library:
   - Quivela.Parse
   - Quivela.Verify
   - Quivela.SymEval
+  - Quivela.QuasiQuote
   - Quivela
   other-modules:
   - LexQuivela
@@ -46,6 +47,7 @@ library:
   - time
   - cereal
   - bytestring
+  - template-haskell
   - microtimer
   - HUnit
   - deepseq
