@@ -30,6 +30,7 @@ library:
   - Quivela.SymEval
   - Quivela.QuasiQuote
   - Quivela.Examples
+  - Quivela.Examples.ETM
   - Quivela
   other-modules:
   - LexQuivela
