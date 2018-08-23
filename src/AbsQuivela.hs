@@ -22,6 +22,10 @@ data Expr
     | ENot Expr
     | EEq Expr Expr
     | EAssign Expr Expr
+    | EMul Expr Expr
+    | EDiv Expr Expr
+    | EAdd Expr Expr
+    | ESub Expr Expr
     | EOr Expr Expr
     | EAmp Expr Expr
     | EMethod Id [Arg] Expr

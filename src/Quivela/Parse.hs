@@ -57,6 +57,14 @@ normalizeAST e =
       ECall (EConst VNil) "==" [normalizeAST e1, normalizeAST e2]
     P.ENot e ->
       ECall (EConst VNil) "!" [normalizeAST e]
+    P.EAdd e1 e2 ->
+      ECall (EConst VNil) "+" (map normalizeAST [e1, e2])
+    P.ESub e1 e2 ->
+      ECall (EConst VNil) "-" (map normalizeAST [e1, e2])
+    P.EMul e1 e2 ->
+      ECall (EConst VNil) "*" (map normalizeAST [e1, e2])
+    P.EDiv e1 e2 ->
+      ECall (EConst VNil) "/" (map normalizeAST [e1, e2])
     P.ESeq e1 e2 ->
       ESeq (normalizeAST e1) (normalizeAST e2)
     _ -> error $ "[normalizeAST] Unhandled case: " ++ show e
