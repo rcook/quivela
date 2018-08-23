@@ -123,3 +123,10 @@ postIncrExample3 =
   ≈
   [prog| new () { method f() { 1 } } |]
   : []
+
+postIncrementInMap :: [ProofPart]
+postIncrementInMap =
+  [prog| new (m=0) { method f() { x = 0; m = 0; m[x++] = 42; m[0] } } |]
+  ≈
+  [prog| new (m=0) { method f() { 42 } } |]
+  : []

@@ -43,6 +43,7 @@ tests = TestList
   , TestCase $ assertVerified "post-increment example 1" nop postIncrExample3
   , TestCase $ assertVerified "post-increment example 2" nop postIncrExample2
   , TestCase $ assertVerified "post-increment example 3" nop postIncrExample1
+  , TestCase $ assertVerified "post-increment in a map index" nop postIncrementInMap
   ]
 
 main :: IO ()
