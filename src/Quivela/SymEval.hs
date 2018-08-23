@@ -215,6 +215,8 @@ x <: TAny = True
 TMap tk tv <: TMap tk' tv' = tk <: tk' && tv <: tv'
 TTuple ts <: TTuple ts' = length ts == length ts' && and (zipWith (<:) ts ts')
 TInt <: TInt = True
+_ <: TNamed _ = True -- FIXME
+_ <: TMap _ _ = True -- FIXME: just for testing
 _ <: _ = False
 
 -- | Infer type of a symbolic value. Will return 'TAny' for most operations
@@ -252,6 +254,50 @@ typeOfValue (VMap vs) = TMap tk tv
            | otherwise = TAny
         tv | [t] <- nub valueTypes = t
            | otherwise = TAny
+
+-- | Monadic version of 'all'
+allM :: Monad m => (a -> m Bool) -> [a] -> m Bool
+allM pred list = and <$> mapM pred list
+
+-- | Check whether value has given type (or a subtype of it). In the case of
+-- object types we may need to symbolically evaluate methods, so this is not a
+-- pure function.
+valueHasType :: Context -> Value -> Type -> Verify Bool
+valueHasType ctx _ TAny = return True
+valueHasType ctx (VInt i) TInt = return True
+valueHasType ctx (VTuple vs) (TTuple ts)
+  | length vs == length ts = allM (uncurry (valueHasType ctx)) (zip vs ts)
+  | otherwise = return False
+valueHasType ctx (VMap values) (TMap tk tv) =
+  (&&) <$> allM (\key -> valueHasType ctx key tk) (M.keys values)
+       <*> allM (\val -> valueHasType ctx val tv) (M.elems values)
+valueHasType ctx (Sym sv) t = symValueHasType ctx sv t
+valueHasType ctx (VRef a) (TNamed typeName)
+  | Just obj <- ctx ^? ctxObjs . ix a = do
+  maybeTypeDen <- view (typeDenotations . at typeName)
+  case maybeTypeDen of
+    Nothing -> error $ "Named type not found: " ++ typeName
+    Just (ObjectType mtdEffects)
+      | M.keys mtdEffects == M.keys (obj ^. objMethods) ->
+         and <$> (forM (M.elems $ obj ^. objMethods) $ \mtd -> do
+                     mtdPaths <- symEval (mtd ^. methodBody, emptyCtx, [])
+                     undefined
+         )
+    _ -> return False
+valueHasType _ _ _ = return False
+
+-- | Check if symbolic value has a given type.
+symValueHasType :: Context -> SymValue -> Type -> Verify Bool
+symValueHasType ctx sv TAny = return True
+symValueHasType ctx (SymVar _ t') t = return $ t == t'
+symValueHasType ctx (Insert k v m) (TMap tk tv) = do
+  -- TODO: this could be more precise: if we know that m is definitely not
+  -- a map at this point, we can return True if k has type tk and v has type tv
+  -- we should call the solver to check if this is the case to figure this out.
+  and <$> sequence [ valueHasType ctx k tk
+                   , valueHasType ctx v tv
+                   , valueHasType ctx m (TMap tk tv)]
+symValueHasType ctx _ _ = return False
 
 -- | Return a lens to a given variable in the context:
 -- If the variable is in the current scope, return that;
