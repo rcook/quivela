@@ -479,8 +479,8 @@ symEvalCall VNil name args ctx pathCond
 symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
   | TMap tk tv <- typeOfValue m,
     typeOfValue k <: tk = do
-  -- TODO: merge Verify and SymEval monads, so we can generate fresh variables here as well
-  res <- symEvalCall (Sym (SymVar "foo" tv)) name args ctx (Not (e :=: VError) : pathCond)
+  fv <- freshVar "sym_lookup"
+  res <- symEvalCall (Sym (SymVar fv tv)) name args ctx (Not (e :=: VError) : pathCond)
   return $ (VError, ctx, (e :=: VError) : pathCond) : res
 symEvalCall (Sym sv) name args ctx pathCond
   | TNamed typeName <- typeOfSymValue sv = do
