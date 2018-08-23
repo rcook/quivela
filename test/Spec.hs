@@ -10,7 +10,7 @@ import Quivela.Examples
 assertVerified :: String -> Expr -> [ProofPart] -> Assertion
 assertVerified msg prefix proof = do
   clearCache
-  res <- prove' emptySymEvalEnv prefix proof
+  res <- prove' emptyVerifyEnv prefix proof
   assertEqual msg 0 res
 
 assertError :: String -> IO a -> Assertion
@@ -25,7 +25,7 @@ assertError msg x = do
      handler _ = pure True
 
 assertEvalError :: String -> Expr -> Assertion
-assertEvalError msg e = assertError msg $ symEval' emptySymEvalEnv (e, emptyCtx, [])
+assertEvalError msg e = assertError msg . runVerify emptyVerifyEnv $ symEval (e, emptyCtx, [])
 
 tests :: Test
 tests = TestList

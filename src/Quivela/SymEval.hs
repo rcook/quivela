@@ -24,6 +24,8 @@ import Data.Typeable
 import qualified Data.Map as M
 import qualified Data.Set as S
 import GHC.Generics
+import System.Process
+import System.IO
 {- Lenses
 
 Since interpreting quivela programs uses a lot of nested records, we use
@@ -141,11 +143,6 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
 
 makeLenses ''Context
 
--- | We don't need any state (other than contexts and path conditions with are passed explicitly)
--- but we might need in the future, so we leave this stub here.
-data SymEvalState = SymEvalState { }
-makeLenses ''SymEvalState
-
 -- | Propositions. These are used both to keep track of the path condition
 -- as well as for the verification conditions we generate later on.
 data Prop = Value :=: Value
@@ -160,6 +157,53 @@ data Prop = Value :=: Value
 -- These could be stored as just one big conjunction instead, but representing
 -- them as a list simplifies reasoning about which paths are prefixes of others.
 type PathCond = [Prop]
+
+-- | The denotation of a named type specifies what can be assumed about objects of more complex types
+-- and what must be shown when assigning to a field of that type.
+data TypeDenotation =
+  ObjectType { _methodEffects :: M.Map Var ([Value] -> Context -> [(Value, Context, PathCond)])  }
+  deriving (Typeable)
+makeLenses ''TypeDenotation
+
+-- | The fixed environment for symbolic evaluation. Currently this
+-- only contains information about named types which are defined outside of quivela.
+data VerifyEnv = VerifyEnv { _typeDenotations :: M.Map TypeName TypeDenotation }
+  deriving Typeable
+makeLenses ''VerifyEnv
+
+-- | A monad for generating and discharging verification conditions, which
+-- allows generating free variables and calling external solvers.
+newtype Verify a = Verify { unVerify :: RWST VerifyEnv () VerifyState IO a }
+  deriving ( Monad, MonadState VerifyState, MonadIO, Applicative, Functor
+           , MonadReader VerifyEnv )
+-- Right now, we only need the same environment as symbolic evaluation, so we reuse
+-- that type here.
+
+-- | Keeps track of fresh variables and, a z3 process, and which conditions
+-- we already verified successfully in the past.
+data VerifyState = VerifyState
+  { _z3Proc :: (Handle, Handle, ProcessHandle)
+    -- ^ For performance reasons, we spawn a Z3 process once and keep it around
+  , _nextVar :: M.Map String Integer
+  -- ^ Map of already used integers for fresh variable prefix
+  , _alreadyVerified :: S.Set (Expr, Expr)
+  -- ^ A cache of steps that we already verified before
+  -- FIXME: Currently, we cannot serialize invariants, since they include functions as arguments
+  -- in some cases
+  }
+makeLenses ''VerifyState
+
+-- | Generate a fresh variable starting with a given prefix
+freshVar :: String -> Verify String
+freshVar prefix = do
+  last <- use (nextVar . at prefix)
+  case last of
+    Just n -> do
+      nextVar . ix prefix %= (+1)
+      return $ "?" ++ prefix ++ show n
+    Nothing -> do
+      modify (nextVar . at prefix ?~ 0)
+      freshVar prefix
 
 type Config = (Expr, Context, PathCond)
 type Result = (Value, Context, PathCond)
@@ -381,14 +425,14 @@ defineMethod name formals body ctx
 -- | Symbolically evaluate a list of field initializations in a given context and path condition
 -- and return a list of possible executions of this list. Each element in the result is a list
 -- of the same length where each field is evaluated, together with a context
-symEvalFields :: [Field] -> Context -> PathCond -> SymEval [([(Var, (Value, Type, Bool))], Context, PathCond)]
+symEvalFields :: [Field] -> Context -> PathCond -> Verify [([(Var, (Value, Type, Bool))], Context, PathCond)]
 symEvalFields [] ctx pathCond = return [([], ctx, pathCond)]
 symEvalFields (field : fields) ctx pathCond =
   foreachM (symEval (field ^. fieldInit, ctx, pathCond)) $ \(fieldVal, ctx', pathCond') ->
     foreachM (symEvalFields fields ctx' pathCond') $ \(evaledFields, ctx'', pathCond'') ->
       return [((field ^. fieldName, (fieldVal, field ^. fieldType, field ^. immutable)) : evaledFields, ctx'', pathCond'')]
 
-symEvalList :: [Expr] -> Context -> PathCond -> SymEval [([Value], Context, PathCond)]
+symEvalList :: [Expr] -> Context -> PathCond -> Verify [([Value], Context, PathCond)]
 symEvalList [] ctx pathCond = return [([], ctx, pathCond)]
 symEvalList (e : es) ctx pathCond =
   foreachM (symEval (e, ctx, pathCond)) $ \(val, ctx', pathCond') ->
@@ -407,7 +451,7 @@ uncurry3 f (a, b, c) = f a b c
 findMethod :: Addr -> Var -> Context -> Maybe Method
 findMethod addr name ctx = ctx ^? ctxObjs . ix addr . objMethods . ix name
 
-callMethod :: Addr -> Method -> [Value] -> Context -> PathCond -> SymEval Results
+callMethod :: Addr -> Method -> [Value] -> Context -> PathCond -> Verify Results
 callMethod addr mtd args ctx pathCond =
   let scope = M.fromList (zip (map fst (mtd ^. methodFormals))
                               (zip args (map snd (mtd ^. methodFormals))))
@@ -417,7 +461,7 @@ callMethod addr mtd args ctx pathCond =
                 pathCond')]
 
 -- | `symEvalCall obj name args ...` symbolically evaluates a method call to method name on object obj
-symEvalCall :: Value -> Var -> [Value] -> Context -> PathCond -> SymEval [(Value, Context, PathCond)]
+symEvalCall :: Value -> Var -> [Value] -> Context -> PathCond -> Verify [(Value, Context, PathCond)]
 symEvalCall (VRef addr) name args ctx pathCond
   | Just obj <- ctx ^. ctxObjs . at addr, obj ^. objAdversary =
       let newCalls = args : (ctx ^. ctxAdvCalls)
@@ -461,7 +505,7 @@ isSymbolic :: Value -> Bool
 isSymbolic (Sym _) = True
 isSymbolic _ = False
 
-symEval :: Config -> SymEval Results
+symEval :: Config -> Verify Results
 symEval (ENop, ctx, pathCond) = return [(VNil, ctx, pathCond)]
 symEval (EConst v, ctx, pathCond) = return [(v, ctx, pathCond)]
 symEval (EVar x, ctx, pathCond) = return [(lookupVar x ctx, ctx, pathCond)]
@@ -544,16 +588,6 @@ symEval (ENew fields body, ctx, pathCond) =
       return [(VRef (nextAddr ctx'), set ctxThis (ctx' ^. ctxThis) ctx'''', pathCond'')]
 symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
-evalSymEval :: MonadIO m => SymEvalEnv -> SymEval a -> m a
-evalSymEval env action = liftIO (fst <$> evalRWST (unSymEval action) env SymEvalState)
-
-symEval' :: MonadIO m => SymEvalEnv -> Config -> m Results
-symEval' env cfg = do
-  results <- evalSymEval env (symEval cfg)
-  when (all ((== VError) . (\(a, _, _) -> a)) results) $
-    liftIO $ putStrLn $ "WARN: Only VError as possible result of evaluation. Probably a bug?"
-  return results
-
 emptyCtx :: Context
 emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                                                        , _objMethods = M.empty
@@ -562,5 +596,5 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                    , _ctxAdvCalls = []
                    , _ctxScope = M.empty }
 
-emptySymEvalEnv :: SymEvalEnv
-emptySymEvalEnv = SymEvalEnv { _typeDenotations = M.empty }
+emptyVerifyEnv :: VerifyEnv
+emptyVerifyEnv = VerifyEnv { _typeDenotations = M.empty }

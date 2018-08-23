@@ -32,20 +32,20 @@ prog' = QuasiQuoter quivelaParse' undefined undefined undefined
 -- | Run the given quivela proof at compile time. We allow running this
 -- at compile time to avoid having to manually invoke the verification
 -- after loading the file into ghci.
-prove :: SymEvalEnv -> Expr -> [ProofPart] -> Q [Dec]
+prove :: VerifyEnv -> Expr -> [ProofPart] -> Q [Dec]
 prove env prefix steps = do
   unverified <- runIO $ prove' env prefix steps
   when (unverified > 0) $ reportError (show unverified ++ " unverified VCs")
   return []
 
 -- | A non-compile-time version of 'prove'.
-prove' :: SymEvalEnv -> Expr -> [ProofPart] -> IO Int
+prove' :: VerifyEnv -> Expr -> [ProofPart] -> IO Int
 prove' env prefix steps = do
   (t, results) <- time $ mapStepsM doCheck (toSteps steps)
   debug $ "Total verification time: " ++ formatSeconds t
   return $ sum results
   where doCheck invs lhs rhs = do
-          remaining <- runVerify (checkEqv True prefix invs lhs rhs) env
+          remaining <- runVerify env (checkEqv True prefix invs lhs rhs)
           return . sum . map (length . snd) $ remaining
 
 

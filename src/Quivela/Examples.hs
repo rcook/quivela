@@ -75,6 +75,6 @@ new(x: map int ObjT=0) {
 }
 |] :[]
 
-objectMapEnv :: SymEvalEnv
-objectMapEnv = typeDenotations . at "ObjT" ?~ ObjectType methodMap $ emptySymEvalEnv
+objectMapEnv :: VerifyEnv
+objectMapEnv = typeDenotations . at "ObjT" ?~ ObjectType methodMap $ emptyVerifyEnv
   where methodMap = M.fromList [("foo", \_ ctx -> [(VInt 42, ctx, [])])]
