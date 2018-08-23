@@ -38,6 +38,8 @@ tests = TestList
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign'
   , TestCase $ assertEvalError "ill-typed assignment to method parameter" illTypedParamAssign
   , TestCase $ assertVerified "addition is commutative and 0 is identity" nop addExample
+  , TestCase $ assertVerified "multiplication example" nop mulExample
+  , TestCase $ assertVerified "arithmetic example" nop arithExample
   ]
 
 main :: IO ()

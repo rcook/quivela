@@ -418,6 +418,12 @@ symValToDafny (AdversaryCall advCalls) =
   dafnyFunCall "Adversary" . (:[]) <$> toDafny advCalls
 symValToDafny (Add e1 e2) =
   dafnyFunCall "Add" <$> mapM toDafny [e1, e2]
+symValToDafny (Mul e1 e2) =
+  dafnyFunCall "Mul" <$> mapM toDafny [e1, e2]
+symValToDafny (Sub e1 e2) =
+  dafnyFunCall "Sub" <$> mapM toDafny [e1, e2]
+symValToDafny (Div e1 e2) =
+  dafnyFunCall "Div" <$> mapM toDafny [e1, e2]
 
 valueToDafny :: Value -> Emitter String
 valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
@@ -553,6 +559,9 @@ symValueToZ3 (Lookup k m) = z3CallM "lookup" [k, m]
 symValueToZ3 (AdversaryCall vss) = z3Call "adversary" <$> sequence [valuessToZ3 vss]
 symValueToZ3 (Proj tup idx) = z3CallM "proj" [tup, idx]
 symValueToZ3 (Add v1 v2) = z3CallM "add" [v1, v2]
+symValueToZ3 (Sub v1 v2) = z3CallM "sub" [v1, v2]
+symValueToZ3 (Mul v1 v2) = z3CallM "mul" [v1, v2]
+symValueToZ3 (Div v1 v2) = z3CallM "divi" [v1, v2]
 
 vcToZ3 :: VC -> Emitter ()
 vcToZ3 vc = do

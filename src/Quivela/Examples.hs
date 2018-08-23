@@ -86,3 +86,19 @@ addExample =
   ≈
   [prog| new () { method f(x, y) { y + x + 1 } } |]
   : []
+
+mulExample :: [ProofPart]
+mulExample =
+  [prog| new () { method f(x, y) { x * 3 * y } } |]
+  ≈
+  [prog| new () { method f(x, y) { (x + x + x) * y } } |]
+  ≈
+  [prog| new () { method f(x, y) { x * (y + y + y) } } |]
+  : []
+
+arithExample :: [ProofPart]
+arithExample =
+  [prog| new () { method f(x:int, y, z) { x / 2 + y * z - x / 2 } } |]
+  ≈
+  [prog| new () { method f(x:int, y, z) { y * z } } |]
+  : []

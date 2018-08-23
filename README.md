@@ -110,5 +110,3 @@ There are number of side conditions that are currently not checked:
 - Rewriting with an assumption currently doesn't take bound variables into
   account. Also, assumptions are now implicit in the rewrite steps that
   are performed instead of stated upfront.
-  
-- Arithmetic operations are not implemented yet.

@@ -52,6 +52,9 @@ data SymValue = SymVar String Type
   | Lookup Value Value
   | AdversaryCall [[Value]]
   | Add Value Value
+  | Sub Value Value
+  | Mul Value Value
+  | Div Value Value
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- | Quivela values
@@ -523,12 +526,31 @@ symEvalCall VNil "+" [arg1, arg2] ctx pathCond
   | VInt n <- arg1, VInt m <- arg2 =
       return [(VInt (n + m), ctx, pathCond)]
   | otherwise  = return [(VError, ctx, pathCond)]
+symEvalCall VNil "-" [arg1, arg2] ctx pathCond
+  | isSymbolic arg1 || isSymbolic arg2 =
+      return [(Sym (Sub arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1, VInt m <- arg2 =
+      return [(VInt (n - m), ctx, pathCond)]
+  | otherwise = return [(VError, ctx, pathCond)]
+symEvalCall VNil "*" [arg1, arg2] ctx pathCond
+  | isSymbolic arg1 || isSymbolic arg2 =
+      return [(Sym (Mul arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1, VInt m <- arg2 =
+      return [(VInt (n * m), ctx, pathCond)]
+  | otherwise = return [(VError, ctx, pathCond)]
+symEvalCall VNil "/" [arg1, arg2] ctx pathCond
+  | isSymbolic arg1 || isSymbolic arg2 =
+      return [(Sym (Div arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1, VInt m <- arg2 =
+      if m == 0 then return [(VError, ctx, pathCond)]
+      else return [(VInt (n `div` m), ctx, pathCond)]
+  | otherwise = return [(VError, ctx, pathCond)]
 symEvalCall VNil name args ctx pathCond
   | Just mtd <- findMethod (ctx ^. ctxThis) name ctx =
       callMethod (ctx ^. ctxThis) mtd args ctx pathCond
   | Just mtd <- findMethod 0 name ctx =
       callMethod 0 mtd args ctx pathCond
-  | otherwise = error "Call to non-existent method"
+  | otherwise = error $ "Call to non-existent method: " ++ name
 symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
   | TMap tk tv <- typeOfValue m,
     typeOfValue k <: tk = do
