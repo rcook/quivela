@@ -46,6 +46,16 @@ z3Prelude = [heredoc|
                 (= (insert k v (insert k v2 m))
                    (insert k v m))))
 
+;; Arithmetic:
+(declare-fun add (Value Value) Value)
+
+(assert (forall ((n Int) (m Int))
+                (= (add (VInt n) (VInt m)) (VInt (+ n m)))))
+
+(assert (forall ((v Value) (w Value))
+                (=> (not (and (is-VInt v) (is-VInt w)))
+                    (= (add v w) VError))))
+
 ;; Adversary values:
 (declare-fun adversary (Valuess) Value)
 

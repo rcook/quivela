@@ -78,3 +78,11 @@ new(x: map int ObjT=0) {
 objectMapEnv :: VerifyEnv
 objectMapEnv = typeDenotations . at "ObjT" ?~ ObjectType methodMap $ emptyVerifyEnv
   where methodMap = M.fromList [("foo", \_ ctx -> [(VInt 42, ctx, [])])]
+
+
+addExample :: [ProofPart]
+addExample =
+  [prog| new () { method f(x, y) { 0 + x + 1 + y } } |]
+  ≈
+  [prog| new () { method f(x, y) { y + x + 1 } } |]
+  : []

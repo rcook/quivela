@@ -51,6 +51,7 @@ data SymValue = SymVar String Type
   | Proj Value Value
   | Lookup Value Value
   | AdversaryCall [[Value]]
+  | Add Value Value
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- | Quivela values
@@ -516,6 +517,12 @@ symEvalCall (VRef addr) name args ctx pathCond
                  , pathCond )]
   | Just mtd <- findMethod addr name ctx = callMethod addr mtd args ctx pathCond
   | otherwise = evalError ("Called non-existent method: " ++ name ++ "[" ++ show addr ++ "]") ctx
+symEvalCall VNil "+" [arg1, arg2] ctx pathCond
+  | isSymbolic arg1 || isSymbolic arg2 =
+      return [(Sym (Add arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1, VInt m <- arg2 =
+      return [(VInt (n + m), ctx, pathCond)]
+  | otherwise  = return [(VError, ctx, pathCond)]
 symEvalCall VNil name args ctx pathCond
   | Just mtd <- findMethod (ctx ^. ctxThis) name ctx =
       callMethod (ctx ^. ctxThis) mtd args ctx pathCond
