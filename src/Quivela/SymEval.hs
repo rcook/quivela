@@ -608,6 +608,15 @@ symEval (ESeq e1 e2, ctx, pathCond) = do
     symEval (e2, ctx', pathCond')
 symEval (EMethod name formals body, ctx, pathCond) = do
   return [(VNil, defineMethod name formals body ctx, pathCond)]
+symEval (ECall (EConst VNil) "++" [EVar x], ctx, pathCond)
+  | Just (lens, isConst, t) <- findVar x ctx
+  , Just oldVal <- ctx ^? lens = do
+      updPaths <- symEval ( EAssign (EVar x) (ECall (EConst VNil) "+" [EVar x, EConst (VInt 1)])
+                          , ctx, pathCond)
+      return . map (\(newVal, ctx', pathCond') ->
+                       if newVal == VError
+                       then (VError, ctx', pathCond')
+                       else (oldVal, ctx', pathCond')) $ updPaths
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') ->

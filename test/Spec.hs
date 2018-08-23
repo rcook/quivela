@@ -40,6 +40,9 @@ tests = TestList
   , TestCase $ assertVerified "addition is commutative and 0 is identity" nop addExample
   , TestCase $ assertVerified "multiplication example" nop mulExample
   , TestCase $ assertVerified "arithmetic example" nop arithExample
+  , TestCase $ assertVerified "post-increment example 1" nop postIncrExample3
+  , TestCase $ assertVerified "post-increment example 2" nop postIncrExample2
+  , TestCase $ assertVerified "post-increment example 3" nop postIncrExample1
   ]
 
 main :: IO ()

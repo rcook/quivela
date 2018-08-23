@@ -102,3 +102,24 @@ arithExample =
   ≈
   [prog| new () { method f(x:int, y, z) { y * z } } |]
   : []
+
+postIncrExample1 :: [ProofPart]
+postIncrExample1 =
+  [prog| new () { method f() { x = 0 ; x++ } } |]
+  ≈
+  [prog| new () { method f() { 0 } } |]
+  : []
+
+postIncrExample2 :: [ProofPart]
+postIncrExample2 =
+  [prog| new () { method f(x) { x++ } } |]
+  ≈
+  [prog| new () { method f(x) { y = x ; x = x + 1 ; y } } |]
+  : []
+
+postIncrExample3 :: [ProofPart]
+postIncrExample3 =
+  [prog| new () { method f() { x = 0 ; x++ ; x } } |]
+  ≈
+  [prog| new () { method f() { 1 } } |]
+  : []
