@@ -74,6 +74,7 @@ normalizeType P.TInt = TInt
 normalizeType P.TAny = TAny
 normalizeType (P.TTuple ts) = TTuple (map normalizeType ts)
 normalizeType (P.TMap tk tv) = TMap (normalizeType tk) (normalizeType tv)
+normalizeType (P.TNamed (P.Id name)) = TNamed name
 
 normalizeField :: P.Init -> Field
 normalizeField (P.UInit mod (P.Id name) e) =

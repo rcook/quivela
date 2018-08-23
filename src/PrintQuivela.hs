@@ -134,6 +134,7 @@ instance Print Type where
     TTuple types -> prPrec i 0 (concatD [doc (showString "<"), prt 0 types, doc (showString ">")])
     TAny -> prPrec i 0 (concatD [doc (showString "*")])
     TMap type_1 type_2 -> prPrec i 0 (concatD [doc (showString "map"), prt 0 type_1, prt 0 type_2])
+    TNamed id -> prPrec i 0 (concatD [prt 0 id])
   prtList _ [] = (concatD [])
   prtList _ [x] = (concatD [prt 0 x])
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])

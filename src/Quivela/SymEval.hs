@@ -141,30 +141,10 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
 
 makeLenses ''Context
 
--- | The denotation of a named type specifies what can be assumed about objects of more complex types
--- and what must be shown when assigning to a field of that type.
-data TypeDenotation = ObjectType { _methodEffects :: M.Map Var ([Value] -> Context -> [(Value, Context)]) }
-  deriving (Typeable)
-makeLenses ''TypeDenotation
-
-
 -- | We don't need any state (other than contexts and path conditions with are passed explicitly)
 -- but we might need in the future, so we leave this stub here.
 data SymEvalState = SymEvalState { }
 makeLenses ''SymEvalState
-
-
--- | The fixed environment for symbolic evaluation. Currently this
--- only contains information about named types which are defined outside of quivela.
-data SymEvalEnv = SymEvalEnv { _typeDenotations :: M.Map TypeName TypeDenotation }
-  deriving Typeable
-makeLenses ''SymEvalEnv
-
--- | A monad for symbolic evaluation. Right now this is unnecessary, but at least
--- the IO part is probably going to become necessary in the future for solver calls
--- to rule out some paths that we don't need to explore.
-newtype SymEval a = SymEval { unSymEval :: RWST SymEvalEnv () SymEvalState IO a }
-  deriving (Monad, Applicative, Functor)
 
 -- | Propositions. These are used both to keep track of the path condition
 -- as well as for the verification conditions we generate later on.
@@ -452,6 +432,21 @@ symEvalCall VNil name args ctx pathCond
   | Just mtd <- findMethod 0 name ctx =
       callMethod 0 mtd args ctx pathCond
   | otherwise = error "Call to non-existent method"
+symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
+  | TMap tk tv <- typeOfValue m,
+    typeOfValue k <: tk = do
+  -- TODO: merge Verify and SymEval monads, so we can generate fresh variables here as well
+  res <- symEvalCall (Sym (SymVar "foo" tv)) name args ctx (Not (e :=: VError) : pathCond)
+  return $ (VError, ctx, (e :=: VError) : pathCond) : res
+symEvalCall (Sym sv) name args ctx pathCond
+  | TNamed typeName <- typeOfSymValue sv = do
+      maybeTypeDen <- view (typeDenotations . at typeName)
+      case maybeTypeDen of
+        Just (ObjectType methodMap) |
+          Just mtdEffects <- methodMap ^. at name -> do
+            return . map (\(v, ctx', pathCond') -> (v, ctx', pathCond' ++ pathCond)) $ mtdEffects args ctx
+        _ ->
+          error $ "Can't handle method call on symbolic object without a method effect specification"
 symEvalCall obj name args ctx pathCond =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name
 

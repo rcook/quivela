@@ -1,6 +1,10 @@
 {-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
 module Quivela.Examples where
 
+import Control.Lens
+import Control.Lens.At
+import qualified Data.Map as M
+
 import Quivela
 
 andExample :: [ProofPart]
@@ -47,3 +51,30 @@ illTypedParamAssign :: Expr
 illTypedParamAssign = [prog'|
 (new () { method f(x: int) { x = <1, 2> } }).f(7)
 |]
+
+objectMap :: [ProofPart]
+objectMap =
+  [prog|
+new(x: map int ObjT=0) {
+  method add(idx: int) {
+    x[idx] = (new () { method foo() { 42 } })
+  };
+  method call(idx: int) {
+    (x[idx]).foo()
+  }
+}|]
+    ≈ Hint [ fieldEqual ["x"] ]:
+    [prog|
+new(x: map int ObjT=0) {
+  method add(idx: int) {
+    x[idx] = (new () { method foo() { 42 } })
+  };
+  method call(idx: int) {
+    x[idx]  & 42
+  }
+}
+|] :[]
+
+objectMapEnv :: SymEvalEnv
+objectMapEnv = typeDenotations . at "ObjT" ?~ ObjectType methodMap $ emptySymEvalEnv
+  where methodMap = M.fromList [("foo", \_ ctx -> [(VInt 42, ctx, [])])]

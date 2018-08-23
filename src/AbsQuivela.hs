@@ -38,6 +38,7 @@ data Init = UInit InitMod Id Expr | TInit InitMod Id Type Expr
 data InitMod = ConstMod | NoMod
   deriving (Eq, Ord, Show, Read)
 
-data Type = TInt | TTuple [Type] | TAny | TMap Type Type
+data Type
+    = TInt | TTuple [Type] | TAny | TMap Type Type | TNamed Id
   deriving (Eq, Ord, Show, Read)
 
