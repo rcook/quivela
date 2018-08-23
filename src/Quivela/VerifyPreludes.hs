@@ -49,9 +49,6 @@ z3Prelude = [heredoc|
 ;; Adversary values:
 (declare-fun adversary (Valuess) Value)
 
-(assert (forall ((vss Valuess) (vss2 Valuess))
-                (= (adversary vss) (adversary vss2))))
-
 ;; Tuple projection:
 (declare-fun proj (Value Value) Value)
 
