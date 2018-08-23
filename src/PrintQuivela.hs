@@ -105,6 +105,7 @@ instance Print Expr where
     EDiv expr1 expr2 -> prPrec i 5 (concatD [prt 6 expr1, doc (showString "/"), prt 5 expr2])
     EAdd expr1 expr2 -> prPrec i 4 (concatD [prt 5 expr1, doc (showString "+"), prt 4 expr2])
     ESub expr1 expr2 -> prPrec i 4 (concatD [prt 5 expr1, doc (showString "-"), prt 4 expr2])
+    EPostIncr expr -> prPrec i 4 (concatD [prt 5 expr, doc (showString "++")])
     EOr expr1 expr2 -> prPrec i 3 (concatD [prt 4 expr1, doc (showString "|"), prt 3 expr2])
     EAmp expr1 expr2 -> prPrec i 3 (concatD [prt 4 expr1, doc (showString "&"), prt 3 expr2])
     EMethod id args expr -> prPrec i 3 (concatD [doc (showString "method"), prt 0 id, doc (showString "("), prt 0 args, doc (showString ")"), doc (showString "{"), prt 0 expr, doc (showString "}")])

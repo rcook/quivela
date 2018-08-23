@@ -26,6 +26,7 @@ data Expr
     | EDiv Expr Expr
     | EAdd Expr Expr
     | ESub Expr Expr
+    | EPostIncr Expr
     | EOr Expr Expr
     | EAmp Expr Expr
     | EMethod Id [Arg] Expr
