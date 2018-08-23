@@ -35,6 +35,7 @@ import System.Process
 
 import Quivela.SymEval
 import Quivela.Parse
+import Quivela.VerifyPreludes
 
 -- | Invariants; only the equality invariants are relational right now.
 data Invariant = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
@@ -110,10 +111,9 @@ havocContext = everywhereM (mkM havocObj)
 newVerifyState :: IO VerifyState
 newVerifyState = do
   (Just hin, Just hout, _, procHandle) <- createProcess $ (proc "z3" ["-in"]){ std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe }
-  prelude <- liftIO $ readFile "quivela.smt2"
   hSetBuffering hin NoBuffering
   hSetBuffering hout NoBuffering
-  hPutStrLn hin prelude
+  hPutStrLn hin z3Prelude
   verificationCache <- do
     exists <- doesFileExist "cache.bin"
     if exists
@@ -474,11 +474,6 @@ propToDafny (Forall formals p) =
           , pure " :: "
           , toDafny p ]
 
-dafnyPrelude :: Emitter ()
-dafnyPrelude =
-  -- TODO: better path detection
-  emit . unlines $ ["include \"Lang.dfy\"", ""]
-
 asmToDafny :: Prop -> Emitter ()
 asmToDafny p =
   emit . ("  requires "++) =<< propToDafny p
@@ -505,7 +500,7 @@ checkWithDafny [] = return True
 checkWithDafny vcs = do
   debug $ "Checking " ++ show (length vcs) ++ " VCs with Dafny"
   (_, lines) <- runEmitter $ do
-    dafnyPrelude
+    emit dafnyPrelude
     mapM_ vcToDafny vcs
   tempFile <- liftIO $ writeTempFile "." "dafny-vc.dfy" (unlines lines)
   debug $ "Dafny code written to " ++ tempFile
@@ -617,8 +612,7 @@ instance ToZ3 SymValue where
 writeToZ3File :: VC -> Verify FilePath
 writeToZ3File vc = do
   (_, vcLines) <- runEmitter $ vcToZ3 vc
-  prelude <- liftIO $ readFile "quivela.smt2"
-  tempFile <- liftIO $ writeTempFile "." "z3-vc.smt2" $ unlines $ prelude : vcLines ++ ["(check-sat)"]
+  tempFile <- liftIO $ writeTempFile "." "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++ ["(check-sat)"]
   return tempFile
 
 -- | Verify conditions with external solvers and return unverified conditions

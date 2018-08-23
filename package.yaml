@@ -37,6 +37,8 @@ library:
   - ParQuivela
   - AbsQuivela
   - ErrM
+  - Quivela.Util
+  - Quivela.VerifyPreludes
   dependencies:
   - lens
   - containers
