@@ -474,7 +474,7 @@ lookupVar x ctx
 -- | Take a list of monadic actions producing lists and map another monadic function over
 -- the list and concatenate all results. This is basically a monadic version of the
 -- bind operator in the list monad.
-foreachM :: (Ord b, Monad m) => m [a] -> (a -> m [b]) -> m [b]
+foreachM :: (Monad m) => m [a] -> (a -> m [b]) -> m [b]
 foreachM s act = do
   xs <- s
   ys <- mapM act xs
