@@ -67,6 +67,8 @@ normalizeAST e =
       ECall (EConst VNil) "/" (map normalizeAST [e1, e2])
     P.EPostIncr e ->
       ECall (EConst VNil) "++" [normalizeAST e]
+    P.ELt e1 e2 ->
+      ECall (EConst VNil) "<" [normalizeAST e1, normalizeAST e2]
     P.ESeq e1 e2 ->
       ESeq (normalizeAST e1) (normalizeAST e2)
     _ -> error $ "[normalizeAST] Unhandled case: " ++ show e

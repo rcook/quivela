@@ -20,13 +20,14 @@ data Expr
     | EIdx Expr Expr
     | ECall Expr [Expr]
     | ENot Expr
-    | EEq Expr Expr
-    | EAssign Expr Expr
     | EMul Expr Expr
     | EDiv Expr Expr
     | EAdd Expr Expr
     | ESub Expr Expr
     | EPostIncr Expr
+    | ELt Expr Expr
+    | EEq Expr Expr
+    | EAssign Expr Expr
     | EOr Expr Expr
     | EAmp Expr Expr
     | EMethod Id [Arg] Expr
