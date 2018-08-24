@@ -314,6 +314,10 @@ symValueHasType ctx (Insert k v m) (TMap tk tv) = do
                    , valueHasType ctx m (TMap tk tv)]
 symValueHasType ctx _ _ = return False
 
+-- | Value to use to initialize new variables:
+defaultValue :: Value
+defaultValue = VInt 0
+
 -- | Find the location of a variable in the context. Since this may have to add
 -- a location for the variable in the scope or as a local, we also return an
 -- updated context to use with the returned 'Place'. The 'Bool' component of the
@@ -337,14 +341,14 @@ findVar x ctx
                     , _placeConst = False
                     , _placeType = TAny }
              , set (ctxScope . at x)
-                   (Just (error "uninitialized variable location", TAny)) ctx
+                   (Just (defaultValue, TAny)) ctx
              , True)
   | otherwise =
     Just $ ( Place { _placeLens = ctxObjs . ix 0 . objLocals . ix x . localValue
                    , _placeConst = False
                    , _placeType = TAny }
            , set (ctxObjs . ix 0 . objLocals . at x)
-                 (Just (Local (error "uninitialized local") TAny False)) ctx
+                 (Just (Local defaultValue TAny False)) ctx
            , True)
 
 -- Define how to insert into a symbolic value via a lens:
@@ -388,7 +392,7 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
                                         , _placeType = TAny -- FIXME
                                         , _placeConst = False }
                                 , set ((place ^. placeLens) . valMap . at idxVal)
-                                      (Just $ error "BUG: uninitialized position in map")
+                                      (Just defaultValue)
                                       ctx''
                                 , pathCond''
                                 , True)]
@@ -403,7 +407,7 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
                                     , _placeType = TAny -- FIXME
                                     , _placeConst = False }
                             , set (place ^. placeLens)
-                                  (VMap $ M.fromList [(idxVal, error "BUG: uninitialized position in map")])
+                                  (VMap $ M.fromList [(idxVal, defaultValue)])
                                   ctx''
                             , pathCond''
                             , True)]
