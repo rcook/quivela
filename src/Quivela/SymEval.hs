@@ -7,7 +7,9 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 module Quivela.SymEval where
 
 import Control.Applicative ((<$>))
@@ -66,7 +68,7 @@ data Value = VInt Integer
   | VError
   | VNil
   | VRef Addr
-  | Sym SymValue
+  | Sym { _symVal :: SymValue }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 makeLenses ''Value
 
@@ -83,6 +85,8 @@ data Expr = ENop
                     , _rhs :: Expr }
           | EVar Var
           | EConst Value
+          | EProj Expr Var
+          | EIdx Expr Expr
           | ENew { _newFields :: [Field]
                  , _newBody :: Expr }
           | EMethod { _emethodName :: String
@@ -91,7 +95,6 @@ data Expr = ENop
           | ECall { _callObj :: Expr
                   , _callName :: String
                   , _callArgs :: [Expr] }
-          | ECVar Expr Var Expr
           | ETuple [Expr]
           | ETupleProj Expr Expr
           | ESeq Expr Expr
@@ -148,6 +151,12 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
 makeLenses ''Context
+
+data Place =
+  Place { _placeLens :: (forall f. Applicative f => ((Value -> f Value) -> Context -> f Context))
+        , _placeConst :: Bool
+        , _placeType :: Type }
+makeLenses ''Place
 
 -- | Propositions. These are used both to keep track of the path condition
 -- as well as for the verification conditions we generate later on.
@@ -305,37 +314,101 @@ symValueHasType ctx (Insert k v m) (TMap tk tv) = do
                    , valueHasType ctx m (TMap tk tv)]
 symValueHasType ctx _ _ = return False
 
--- | Return a lens to a given variable in the context:
--- If the variable is in the current scope, return that;
--- If the variable is a local of the current object, return that
--- Otherwise try looking up the variable in the global object.
--- If findVar x ctx = Just (lens, isConst, t), then the variable
--- can be accessed via lens, isConst is True iff the variable is
--- mutable and t is the variable's type.
-findVar :: Var -> Context -> Maybe Place
+-- | Find the location of a variable in the context. Since this may have to add
+-- a location for the variable in the scope or as a local, we also return an
+-- updated context to use with the returned 'Place'. The 'Bool' component of the
+-- result indicates if the context had to be modified.
+findVar :: Var -> Context -> Maybe (Place, Context, Bool)
 findVar x ctx
   | Just (v, t) <- M.lookup x (ctx ^. ctxScope) =
-      Just $ Place { _placeLens = ctxScope . ix x . _1
-                   , _placeConst = False
-                   , _placeType = t }
+      Just $ (Place { _placeLens = ctxScope . ix x . _1
+                    , _placeConst = False
+                    , _placeType = t }, ctx, False)
+  | Just loc <- ctx ^? ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x =
+      Just $ (Place { _placeLens = ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue
+                    , _placeConst = loc ^. localImmutable
+                    , _placeType = loc ^. localType }, ctx, False)
+  -- the variable doesn't exist yet, so we need to create it:
+  -- if we're not in a global context, we use a local variable
+  -- FIXME: this should probably check if we are inside a method instead, but currently
+  -- we don't store whether this is the case in the context.
+  | ctx ^. ctxThis > 0 =
+      Just $ (Place { _placeLens = ctxScope . ix x . _1
+                    , _placeConst = False
+                    , _placeType = TAny }
+             , set (ctxScope . at x)
+                   (Just (error "uninitialized variable location", TAny)) ctx
+             , True)
   | otherwise =
-    case ctx ^? lens of
-      Just loc -> Just $ Place { _placeLens = ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue
-                               , _placeConst = loc ^. localImmutable
-                               , _placeType = loc ^. localType }
-      _ -> Nothing
-  where lens = ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x
+    Just $ ( Place { _placeLens = ctxObjs . ix 0 . objLocals . ix x . localValue
+                   , _placeConst = False
+                   , _placeType = TAny }
+           , set (ctxObjs . ix 0 . objLocals . at x)
+                 (Just (Local (error "uninitialized local") TAny False)) ctx
+           , True)
 
+-- Define how to insert into a symbolic value via a lens:
+type instance Index SymValue = Value
+type instance IxValue SymValue = Value
 
-data Place =
-  Place { _placeLens :: (forall f. Applicative f => ((Value -> f Value) -> Context -> f Context))
-        , _placeConst :: Bool
-        , _placeType :: Type }
-makeLenses ''Place
+instance Ixed SymValue where
+  ix k f m = f (Sym $ Lookup k (Sym m)) <&> \v' -> Insert k v' (Sym m)
 
--- findLValue :: Expr -> Context -> Maybe Place
--- findLValue (EVar x) ctx = findVar x ctx
--- findLValue (
+-- | Find or create the place of a valid l-value expression (i.e. a variable,
+-- a projection, or an indexing expression with an l-value to the left of the [.
+-- The result value has the same structure as the result of 'findVar', except
+-- for an added path condition component.
+findLValue :: Expr -> Context -> PathCond -> Verify [Maybe (Place, Context, PathCond, Bool)]
+findLValue (EVar x) ctx pathCond =
+  return [ fmap (\(place, ctx', created) -> (place, ctx', pathCond, created)) $ findVar x ctx]
+findLValue (EProj obj name) ctx pathCond = do
+  foreachM (symEval (obj, ctx, pathCond)) $ \case
+    (VRef addr, ctx', pathCond')
+      | Just loc <- ctx' ^? ctxObjs . ix addr . objLocals . ix name ->
+          return [Just $ (Place { _placeLens = ctxObjs . ix addr . objLocals . ix name . localValue
+                                , _placeConst = loc ^. localImmutable
+                                , _placeType = loc ^. localType }, ctx', pathCond', False)]
+    _ -> return [Nothing]
+findLValue expr@(EIdx obj idx) ctx pathCond =
+  foreachM (findLValue obj ctx pathCond) $ \case
+    Nothing -> error $ "Invalid l-value: " ++ show expr
+    Just (place, ctx', pathCond', created) ->
+      foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
+        case ctx'' ^? (place ^. placeLens) of
+          Just (VMap m) ->
+            case M.lookup idxVal m of
+              Just _ -> return [Just ( Place { _placeLens = (place ^. placeLens) . valMap . ix idxVal
+                                             , _placeType = TAny -- FIXME
+                                             , _placeConst = False }
+                                     , ctx'', pathCond'', False )]
+              -- need to add the element to the map first to create a well-typed lens into it:
+              -- this is because we use 'ix' instead of 'at' to access map elements, so the
+              -- interface is the same as for lenses to an ordinary variable
+              _ -> return [Just ( Place { _placeLens = (place ^. placeLens) . valMap . ix idxVal
+                                        , _placeType = TAny -- FIXME
+                                        , _placeConst = False }
+                                , set ((place ^. placeLens) . valMap . at idxVal)
+                                      (Just $ error "BUG: uninitialized position in map")
+                                      ctx''
+                                , pathCond''
+                                , True)]
+          Just (Sym sv) -> return [Just ( Place { _placeLens = (place ^. placeLens) . symVal . ix idxVal
+                                                , _placeType = TAny
+                                                , _placeConst = False }
+                                        , ctx''
+                                        , pathCond''
+                                        , False)]
+          -- Not a map yet, create one:
+          _ -> return [Just ( Place { _placeLens = (place ^. placeLens) . valMap . ix idxVal
+                                    , _placeType = TAny -- FIXME
+                                    , _placeConst = False }
+                            , set (place ^. placeLens)
+                                  (VMap $ M.fromList [(idxVal, error "BUG: uninitialized position in map")])
+                                  ctx''
+                            , pathCond''
+                            , True)]
+findLValue expr ctx pathCond = error $ "invalid l-value: " ++ show expr
+
 
 constAssignError :: a
 constAssignError =  error "Assignment to constant variable"
@@ -344,93 +417,6 @@ illTypedAssignError :: Var -> Type -> Type -> a
 illTypedAssignError x varType exprType =
   error $ "Ill-typed assignment to variable " ++ x ++ " of type " ++
           show varType ++ " of expression of type " ++ show exprType
-
--- | Update the value of a variable. If the variable already exists,
--- just use the lens from `findVar` to set it. Otherwise add it
--- to the current scope if we are in a non-global method call, and
--- add it as a global otherwise
-updateVar :: Var -> Value -> Context -> Context
-updateVar x val ctx
-  | Just place <- findVar x ctx =
-    if place ^. placeConst then constAssignError
-    else if typeOfValue val <: (place ^. placeType) then set (place ^. placeLens) val ctx
-         else illTypedAssignError x (place ^. placeType) (typeOfValue val)
-  | ctx ^. ctxThis > 0 = (ctxScope . at x) ?~ (val, TAny) $ ctx
-  | otherwise =
-      ctxObjs . ix 0 . objLocals . at x ?~ (Local val TAny False) $ ctx
-
-
--- | Return a lens to the given object field.
--- findIdxVar :: Addr -> Var -> Value -> Context -> Maybe (Lens' Context Value, Context)
-findObjVar :: Addr -> Var -> Context -> Maybe Place
-findObjVar addr name ctx
-  | Just loc <- ctx ^? ctxObjs . ix addr . objLocals . ix name =
-      -- construction of the lens is duplicated here due to GHC getting confused
-      -- about the polymorphic types involved.
-      Just $ Place { _placeLens = ctxObjs . ix addr . objLocals . ix name . localValue
-                   , _placeConst = loc ^. localImmutable
-                   , _placeType = loc ^. localType }
-  | otherwise = Nothing
-
-
-updateECVar :: Value -> Var -> Value -> Value -> Context -> Context
-updateECVar (VRef a) name idx newValue ctx
-  | Just place <- findObjVar a name ctx,
-    valueType <- typeOfValue newValue =
-      if place ^. placeConst then constAssignError else
-      if not (valueType <: (place ^. placeType))
-      then illTypedAssignError name (place ^. placeType) valueType
-      else
-      case idx of
-        VNil -> set (place ^. placeLens) newValue ctx
-        _ -> -- let Just (lens', _, _) = findObjVar a name ctx in
-             case ctx ^? (place ^. placeLens)  of
-                  Just (VMap vs) -> (place ^. placeLens) . valMap . at idx ?~ newValue $ ctx
-                  Just (Sym sv) -> set (place ^. placeLens) (Sym (Insert idx newValue (Sym sv))) ctx
-                  Just _ -> set (place ^. placeLens) (VMap (M.singleton idx newValue)) ctx
-updateECVar VNil name VNil newValue ctx = updateVar name newValue ctx
-updateECVar VNil name idx newValue ctx
-  | Just place <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just place' <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just v <- ctx ^? (place ^. placeLens), valueType <- typeOfValue newValue =
-      if place ^. placeConst then constAssignError else
-      if not (valueType <: (place ^. placeType))
-      then illTypedAssignError name (place ^. placeType) valueType
-      else case v of
-             VMap vs -> (place ^. placeLens) . valMap . at idx ?~ newValue $ ctx
-             Sym sv -> set (place ^. placeLens) (Sym (Insert idx newValue (Sym sv))) ctx
-             _ -> set (place' ^. placeLens) (VMap (M.singleton idx newValue)) ctx
-updateECVar VNil name idx newValue ctx =
-  error $ "Unhandled case VNil." ++ name ++ "." ++ show idx ++ " |-> " ++ show newValue
-
--- | Look up a possibly nil index in a field. If the index is nil, this
--- simply retrieves the given value (e.g. in expressions like obj.f)
--- If idx is non-nil, the value must either be a concrete map, or
--- a symbolic value, in which case we either retrieve the value directly
--- or return a symbolic expression representing the lookup
-lookupIndex :: Value -> Value -> [(Value, PathCond)]
-lookupIndex baseMap VNil = [(baseMap, [])]
-lookupIndex (VMap vals) idx
-  | Just v <- M.lookup idx vals = [(v, [])]
-  | otherwise = [(VError, [])]
-lookupIndex (Sym sv) idx = [(Sym (Lookup idx (Sym sv)), [])]
-lookupIndex _ idx = [(VError, [])]
-
--- | Look up a variable access of the for obj.name[idx], where both
--- obj or idx can be nil.
-lookupECVar (VRef a) name idx ctx
-  | Just place <- findObjVar a name ctx,
-    Just v <- ctx ^? (place ^. placeLens) = fst . head $ lookupIndex v idx
-  | otherwise = error "Lookup on non-existent object"
-lookupECVar (VTuple vs) name (VInt i) ctx
-  | fromInteger i < length vs = vs !! fromInteger i
-  | otherwise = error "Invalid tuple lookup"
-lookupECVar VNil name idx ctx
-  | Just place <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just v <- ctx ^? (place ^. placeLens) = fst . head $ lookupIndex v idx
-  | Just place <- findObjVar 0 name ctx,
-    Just v <- ctx ^? (place ^. placeLens) = fst . head $ lookupIndex v idx
-
 
 -- Debugging functions for printing out a context in a nicer way.
 -- | Turn a local into a human-readable string
@@ -468,7 +454,7 @@ evalError s ctx =
 
 lookupVar :: Var -> Context -> Value
 lookupVar x ctx
-  | Just place <- findVar x ctx, Just v <- ctx ^? (place ^. placeLens) = v
+  | Just (place, ctx', _) <- findVar x ctx, Just v <- ctx' ^? (place ^. placeLens) = v
   | otherwise = evalError ("No such variable: " ++ x) ctx
 
 -- | Take a list of monadic actions producing lists and map another monadic function over
@@ -613,32 +599,39 @@ symEval (ETupleProj etup eidx, ctx, pathCond) =
   foreachM (symEval (etup, ctx, pathCond)) $ \(vtup, ctx', pathCond') ->
     foreachM (symEval (eidx, ctx', pathCond')) $ \(vidx, ctx'', pathCond'') ->
       return [(lookupInTuple vtup vidx, ctx'', pathCond'')]
-symEval (ECVar eobj name eidx, ctx, pathCond) =
-    foreachM (symEval (eobj, ctx, pathCond)) $ \(vobj, ctx', pathCond') ->
-      foreachM (symEval (eidx, ctx', pathCond')) $ \(vidx, ctx'', pathCond'') ->
-         return [(lookupECVar vobj name vidx ctx'', ctx'', pathCond'')]
-symEval (EAssign (EVar x) rhs, ctx, pathCond) = do
-  foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') ->
-    return $ [(vrhs, updateVar x vrhs ctx', pathCond')]
-symEval (EAssign (ECVar eobj name eidx) rhs, ctx, pathCond) =
-  foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') ->
-    foreachM (symEval (eobj, ctx', pathCond')) $ \(vobj, ctx'', pathCond'') ->
-      foreachM (symEval (eidx, ctx'', pathCond'')) $ \(vidx, ctx''', pathCond''') ->
-         return [(vrhs, updateECVar vobj name vidx vrhs ctx''', pathCond''')]
+symEval (expr@(EProj obj name), ctx, pathCond) =
+  foreachM (findLValue expr ctx pathCond) $ \case
+    Just (place, ctx', pathCond', False) | Just v <- ctx' ^? (place ^. placeLens) ->
+      return [(v, ctx', pathCond')]
+symEval (EIdx base idx, ctx, pathCond) =
+  foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
+    foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
+      case baseVal of
+        VMap vals -> case M.lookup idxVal vals of
+                       Just val -> return [(val, ctx'', pathCond'')]
+                       Nothing -> return [(VError, ctx'', pathCond'')]
+        Sym sv -> return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
+        _ -> return [(VError, ctx'', pathCond'')]
+symEval (EAssign lhs rhs, ctx, pathCond) =
+  foreachM (symEval (rhs, ctx, pathCond)) $ \(rhsVal, ctx', pathCond') ->
+    foreachM (findLValue lhs ctx' pathCond') $ \case
+      Just (place, ctx'', pathCond'', created) ->
+        return [(rhsVal, set (place ^. placeLens) rhsVal ctx'', pathCond'')]
+      _ -> error $ "Invalid l-value: " ++ show lhs
 symEval (ESeq e1 e2, ctx, pathCond) = do
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     symEval (e2, ctx', pathCond')
 symEval (EMethod name formals body, ctx, pathCond) = do
   return [(VNil, defineMethod name formals body ctx, pathCond)]
 symEval (ECall (EConst VNil) "++" [EVar x], ctx, pathCond)
-  | Just place <- findVar x ctx
-  , Just oldVal <- ctx ^? (place ^. placeLens) = do
+  | Just (place, ctx', False) <- findVar x ctx
+  , Just oldVal <- ctx' ^? (place ^. placeLens) = do
       updPaths <- symEval ( EAssign (EVar x) (ECall (EConst VNil) "+" [EVar x, EConst (VInt 1)])
-                          , ctx, pathCond)
-      return . map (\(newVal, ctx', pathCond') ->
+                          , ctx', pathCond)
+      return . map (\(newVal, ctx'', pathCond') ->
                        if newVal == VError
-                       then (VError, ctx', pathCond')
-                       else (oldVal, ctx', pathCond')) $ updPaths
+                       then (VError, ctx'', pathCond')
+                       else (oldVal, ctx'', pathCond')) $ updPaths
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') ->
@@ -692,7 +685,7 @@ symEval (ENew fields body, ctx, pathCond) =
         ctx''' = set ctxThis (nextAddr ctx') ctx''
     in foreachM (symEval (body, ctx''', pathCond')) $ \(bodyVal, ctx'''', pathCond'') ->
       return [(VRef (nextAddr ctx'), set ctxThis (ctx' ^. ctxThis) ctx'''', pathCond'')]
-symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
+-- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
 emptyCtx :: Context
 emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
