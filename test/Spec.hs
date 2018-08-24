@@ -27,6 +27,11 @@ assertError msg x = do
 assertEvalError :: String -> Expr -> Assertion
 assertEvalError msg e = assertError msg . runVerify emptyVerifyEnv $ symEval (e, emptyCtx, [])
 
+assertEvalResult :: String -> Expr -> Value -> Assertion
+assertEvalResult msg e v = do
+  (res, _, _) <- singleResult <$> (runVerify emptyVerifyEnv $ (symEval (e, emptyCtx, [])))
+  assertEqual msg res v
+
 tests :: Test
 tests = TestList
   [ TestCase $ assertVerified "& well-behaved" nop andExample
@@ -45,6 +50,8 @@ tests = TestList
   , TestCase $ assertVerified "post-increment example 3" nop postIncrExample1
   , TestCase $ assertVerified "post-increment in a map index" nop postIncrementInMap
   , TestCase $ assertVerified "less-than operator example" nop leExample
+  , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
+  , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
   ]
 
 main :: IO ()

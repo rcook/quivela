@@ -137,3 +137,11 @@ leExample =
   ≈
   [prog| new () { method f(x:int, y:int) { 1 } } |]
   : []
+
+doubleIdx :: Expr
+doubleIdx = [prog'| a = 0 ; a[0][1] = 5 ; a[0][1] |]
+
+doubleFieldDeref :: Expr
+doubleFieldDeref = [prog'|
+a = (new (const x=(new(const y = 5) {1})) {1} );
+a.x.y |]
