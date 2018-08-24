@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module Quivela.SymEval where
 
@@ -311,17 +312,30 @@ symValueHasType ctx _ _ = return False
 -- If findVar x ctx = Just (lens, isConst, t), then the variable
 -- can be accessed via lens, isConst is True iff the variable is
 -- mutable and t is the variable's type.
--- @findVar :: Var -> Context -> (Lens' Context Value, Bool, Type)@
+findVar :: Var -> Context -> Maybe Place
 findVar x ctx
   | Just (v, t) <- M.lookup x (ctx ^. ctxScope) =
-      Just (ctxScope . ix x . _1, False, t) -- Local variables don't have types at the moment
+      Just $ Place { _placeLens = ctxScope . ix x . _1
+                   , _placeConst = False
+                   , _placeType = t }
   | otherwise =
     case ctx ^? lens of
-      Just loc -> Just ( ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue
-                       , loc ^. localImmutable
-                       , loc ^. localType)
+      Just loc -> Just $ Place { _placeLens = ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue
+                               , _placeConst = loc ^. localImmutable
+                               , _placeType = loc ^. localType }
       _ -> Nothing
   where lens = ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x
+
+
+data Place =
+  Place { _placeLens :: (forall f. Applicative f => ((Value -> f Value) -> Context -> f Context))
+        , _placeConst :: Bool
+        , _placeType :: Type }
+makeLenses ''Place
+
+-- findLValue :: Expr -> Context -> Maybe Place
+-- findLValue (EVar x) ctx = findVar x ctx
+-- findLValue (
 
 constAssignError :: a
 constAssignError =  error "Assignment to constant variable"
@@ -337,10 +351,10 @@ illTypedAssignError x varType exprType =
 -- add it as a global otherwise
 updateVar :: Var -> Value -> Context -> Context
 updateVar x val ctx
-  | Just (lens, isConst, t) <- findVar x ctx =
-    if isConst then constAssignError
-    else if typeOfValue val <: t then set lens val ctx
-         else illTypedAssignError x t (typeOfValue val)
+  | Just place <- findVar x ctx =
+    if place ^. placeConst then constAssignError
+    else if typeOfValue val <: (place ^. placeType) then set (place ^. placeLens) val ctx
+         else illTypedAssignError x (place ^. placeType) (typeOfValue val)
   | ctx ^. ctxThis > 0 = (ctxScope . at x) ?~ (val, TAny) $ ctx
   | otherwise =
       ctxObjs . ix 0 . objLocals . at x ?~ (Local val TAny False) $ ctx
@@ -348,43 +362,44 @@ updateVar x val ctx
 
 -- | Return a lens to the given object field.
 -- findIdxVar :: Addr -> Var -> Value -> Context -> Maybe (Lens' Context Value, Context)
+findObjVar :: Addr -> Var -> Context -> Maybe Place
 findObjVar addr name ctx
   | Just loc <- ctx ^? ctxObjs . ix addr . objLocals . ix name =
       -- construction of the lens is duplicated here due to GHC getting confused
       -- about the polymorphic types involved.
-      Just ( ctxObjs . ix addr . objLocals . ix name . localValue
-           , loc ^. localImmutable
-           , loc ^. localType)
+      Just $ Place { _placeLens = ctxObjs . ix addr . objLocals . ix name . localValue
+                   , _placeConst = loc ^. localImmutable
+                   , _placeType = loc ^. localType }
   | otherwise = Nothing
 
 
 updateECVar :: Value -> Var -> Value -> Value -> Context -> Context
 updateECVar (VRef a) name idx newValue ctx
-  | Just (lens, isConst, varType) <- findObjVar a name ctx,
+  | Just place <- findObjVar a name ctx,
     valueType <- typeOfValue newValue =
-      if isConst then constAssignError else
-      if not (valueType <: varType)
-      then illTypedAssignError name varType valueType
+      if place ^. placeConst then constAssignError else
+      if not (valueType <: (place ^. placeType))
+      then illTypedAssignError name (place ^. placeType) valueType
       else
       case idx of
-        VNil -> set lens newValue ctx
-        _ -> let Just (lens', _, _) = findObjVar a name ctx
-             in case ctx ^? lens' of
-                  Just (VMap vs) -> lens . valMap . at idx ?~ newValue $ ctx
-                  Just (Sym sv) -> set lens (Sym (Insert idx newValue (Sym sv))) ctx
-                  Just _ -> set lens (VMap (M.singleton idx newValue)) ctx
+        VNil -> set (place ^. placeLens) newValue ctx
+        _ -> -- let Just (lens', _, _) = findObjVar a name ctx in
+             case ctx ^? (place ^. placeLens)  of
+                  Just (VMap vs) -> (place ^. placeLens) . valMap . at idx ?~ newValue $ ctx
+                  Just (Sym sv) -> set (place ^. placeLens) (Sym (Insert idx newValue (Sym sv))) ctx
+                  Just _ -> set (place ^. placeLens) (VMap (M.singleton idx newValue)) ctx
 updateECVar VNil name VNil newValue ctx = updateVar name newValue ctx
 updateECVar VNil name idx newValue ctx
-  | Just (lens, isConst, varType) <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just (lens', _, _) <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just v <- ctx ^? lens', valueType <- typeOfValue newValue =
-      if isConst then constAssignError else
-      if not (valueType <: varType)
-      then illTypedAssignError name varType valueType
+  | Just place <- findObjVar (ctx ^. ctxThis) name ctx,
+    Just place' <- findObjVar (ctx ^. ctxThis) name ctx,
+    Just v <- ctx ^? (place ^. placeLens), valueType <- typeOfValue newValue =
+      if place ^. placeConst then constAssignError else
+      if not (valueType <: (place ^. placeType))
+      then illTypedAssignError name (place ^. placeType) valueType
       else case v of
-             VMap vs -> lens . valMap . at idx ?~ newValue $ ctx
-             Sym sv -> set lens (Sym (Insert idx newValue (Sym sv))) ctx
-             _ -> set lens (VMap (M.singleton idx newValue)) ctx
+             VMap vs -> (place ^. placeLens) . valMap . at idx ?~ newValue $ ctx
+             Sym sv -> set (place ^. placeLens) (Sym (Insert idx newValue (Sym sv))) ctx
+             _ -> set (place' ^. placeLens) (VMap (M.singleton idx newValue)) ctx
 updateECVar VNil name idx newValue ctx =
   error $ "Unhandled case VNil." ++ name ++ "." ++ show idx ++ " |-> " ++ show newValue
 
@@ -404,17 +419,17 @@ lookupIndex _ idx = [(VError, [])]
 -- | Look up a variable access of the for obj.name[idx], where both
 -- obj or idx can be nil.
 lookupECVar (VRef a) name idx ctx
-  | Just (lens, isConst, varType) <- findObjVar a name ctx,
-    Just v <- ctx ^? lens = fst . head $ lookupIndex v idx
+  | Just place <- findObjVar a name ctx,
+    Just v <- ctx ^? (place ^. placeLens) = fst . head $ lookupIndex v idx
   | otherwise = error "Lookup on non-existent object"
 lookupECVar (VTuple vs) name (VInt i) ctx
   | fromInteger i < length vs = vs !! fromInteger i
   | otherwise = error "Invalid tuple lookup"
 lookupECVar VNil name idx ctx
-  | Just (lens, isConst, varType) <- findObjVar (ctx ^. ctxThis) name ctx,
-    Just v <- ctx ^? lens = fst . head $ lookupIndex v idx
-  | Just (lens, isConst, varType) <- findObjVar 0 name ctx,
-    Just v <- ctx ^? lens = fst . head $ lookupIndex v idx
+  | Just place <- findObjVar (ctx ^. ctxThis) name ctx,
+    Just v <- ctx ^? (place ^. placeLens) = fst . head $ lookupIndex v idx
+  | Just place <- findObjVar 0 name ctx,
+    Just v <- ctx ^? (place ^. placeLens) = fst . head $ lookupIndex v idx
 
 
 -- Debugging functions for printing out a context in a nicer way.
@@ -453,7 +468,7 @@ evalError s ctx =
 
 lookupVar :: Var -> Context -> Value
 lookupVar x ctx
-  | Just (lens, _, _) <- findVar x ctx, Just v <- ctx ^? lens = v
+  | Just place <- findVar x ctx, Just v <- ctx ^? (place ^. placeLens) = v
   | otherwise = evalError ("No such variable: " ++ x) ctx
 
 -- | Take a list of monadic actions producing lists and map another monadic function over
@@ -616,8 +631,8 @@ symEval (ESeq e1 e2, ctx, pathCond) = do
 symEval (EMethod name formals body, ctx, pathCond) = do
   return [(VNil, defineMethod name formals body ctx, pathCond)]
 symEval (ECall (EConst VNil) "++" [EVar x], ctx, pathCond)
-  | Just (lens, isConst, t) <- findVar x ctx
-  , Just oldVal <- ctx ^? lens = do
+  | Just place <- findVar x ctx
+  , Just oldVal <- ctx ^? (place ^. placeLens) = do
       updPaths <- symEval ( EAssign (EVar x) (ECall (EConst VNil) "+" [EVar x, EConst (VInt 1)])
                           , ctx, pathCond)
       return . map (\(newVal, ctx', pathCond') ->
