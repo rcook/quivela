@@ -130,3 +130,10 @@ postIncrementInMap =
   ≈
   [prog| new (m=0) { method f() { 42 } } |]
   : []
+
+leExample :: [ProofPart]
+leExample =
+  [prog| new () { method f(x:int, y:int) { !(x < y) | !(x == y) } } |]
+  ≈
+  [prog| new () { method f(x:int, y:int) { 1 } } |]
+  : []

@@ -424,6 +424,8 @@ symValToDafny (Sub e1 e2) =
   dafnyFunCall "Sub" <$> mapM toDafny [e1, e2]
 symValToDafny (Div e1 e2) =
   dafnyFunCall "Div" <$> mapM toDafny [e1, e2]
+symValToDafny (Le e1 e2) =
+  dafnyFunCall "Le" <$> mapM toDafny [e1, e2]
 
 valueToDafny :: Value -> Emitter String
 valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
@@ -562,6 +564,7 @@ symValueToZ3 (Add v1 v2) = z3CallM "add" [v1, v2]
 symValueToZ3 (Sub v1 v2) = z3CallM "sub" [v1, v2]
 symValueToZ3 (Mul v1 v2) = z3CallM "mul" [v1, v2]
 symValueToZ3 (Div v1 v2) = z3CallM "divi" [v1, v2]
+symValueToZ3 (Le v1 v2) = z3CallM "le" [v1, v2]
 
 vcToZ3 :: VC -> Emitter ()
 vcToZ3 vc = do

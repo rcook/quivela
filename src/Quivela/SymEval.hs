@@ -55,6 +55,7 @@ data SymValue = SymVar String Type
   | Sub Value Value
   | Mul Value Value
   | Div Value Value
+  | Le Value Value
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- | Quivela values
@@ -544,6 +545,12 @@ symEvalCall VNil "/" [arg1, arg2] ctx pathCond
   | VInt n <- arg1, VInt m <- arg2 =
       if m == 0 then return [(VError, ctx, pathCond)]
       else return [(VInt (n `div` m), ctx, pathCond)]
+  | otherwise = return [(VError, ctx, pathCond)]
+symEvalCall VNil "<" [arg1, arg2] ctx pathCond
+  | isSymbolic arg1 || isSymbolic arg2 =
+      return [(Sym (Le arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1, VInt m <- arg2 =
+      return [(if n < m then VInt 1 else VError, ctx, pathCond)]
   | otherwise = return [(VError, ctx, pathCond)]
 symEvalCall VNil name args ctx pathCond
   | Just mtd <- findMethod (ctx ^. ctxThis) name ctx =

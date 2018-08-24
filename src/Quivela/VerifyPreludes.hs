@@ -83,6 +83,25 @@ z3Prelude = [heredoc|
                 (=> (not (and (is-VInt v) (is-VInt w)))
                     (= (divi v w) VError))))
 
+(declare-fun le (Value Value) Value)
+
+(assert (forall ((n Int) (m Int))
+                (and (=> (= (le (VInt n) (VInt m)) (VInt 1))
+                         (< n m))
+                     (=> (< n m)
+                         (= (le (VInt n) (VInt m))
+                            (VInt 1))))))
+
+(assert (forall ((n Int) (m Int))
+                (and (=> (= (le (VInt n) (VInt m)) VError)
+                         (not (< n m)))
+                     (=> (not (< n m))
+                         (= (le (VInt n) (VInt m))
+                            VError)))))
+
+(assert (forall ((v Value) (w Value))
+                (=> (not (and (is-VInt v) (is-VInt w)))
+                    (= (le v w) VError))))
 
 ;; Adversary values:
 (declare-fun adversary (Valuess) Value)
