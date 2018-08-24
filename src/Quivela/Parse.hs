@@ -30,12 +30,12 @@ normalizeAST :: P.Expr -> Expr
 normalizeAST e =
   case e of
     P.EAssign lhs rhs -> EAssign (normalizeAST lhs) (normalizeAST rhs)
-    P.EProj obj (P.EVar (P.Id name)) ->
+    P.EProj obj (P.Id name) ->
       EProj (normalizeAST obj) name
     P.EIdx base idx -> EIdx (normalizeAST base) (normalizeAST idx)
     P.ECall (P.EVar (P.Id name)) args ->
       ECall (EConst VNil) name (map normalizeAST args)
-    P.ECall (P.EProj obj (P.EVar (P.Id name))) args ->
+    P.ECall (P.EProj obj (P.Id name)) args ->
       ECall (normalizeAST obj) name (map normalizeAST args)
     P.EVar (P.Id name) -> EVar name
     P.EConst val -> EConst (normalizeVal val)

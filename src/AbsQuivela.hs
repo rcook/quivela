@@ -16,9 +16,9 @@ data Expr
     | EConst Val
     | ETuple [Expr]
     | ETupleProj Expr Expr
-    | EProj Expr Expr
-    | EIdx Expr Expr
+    | EProj Expr Id
     | ECall Expr [Expr]
+    | EIdx Expr Expr
     | ENot Expr
     | EMul Expr Expr
     | EDiv Expr Expr
