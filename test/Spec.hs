@@ -52,6 +52,7 @@ tests = TestList
   , TestCase $ assertVerified "less-than operator example" nop leExample
   , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
   , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
+  , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
   ]
 
 main :: IO ()

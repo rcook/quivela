@@ -607,6 +607,7 @@ symEval (expr@(EProj obj name), ctx, pathCond) =
   foreachM (findLValue expr ctx pathCond) $ \case
     Just (place, ctx', pathCond', False) | Just v <- ctx' ^? (place ^. placeLens) ->
       return [(v, ctx', pathCond')]
+    _ -> error $ "Invalid projection expression: " ++ show expr
 symEval (EIdx base idx, ctx, pathCond) =
   foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
     foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
@@ -627,10 +628,11 @@ symEval (ESeq e1 e2, ctx, pathCond) = do
     symEval (e2, ctx', pathCond')
 symEval (EMethod name formals body, ctx, pathCond) = do
   return [(VNil, defineMethod name formals body ctx, pathCond)]
-symEval (ECall (EConst VNil) "++" [EVar x], ctx, pathCond)
-  | Just (place, ctx', False) <- findVar x ctx
-  , Just oldVal <- ctx' ^? (place ^. placeLens) = do
-      updPaths <- symEval ( EAssign (EVar x) (ECall (EConst VNil) "+" [EVar x, EConst (VInt 1)])
+symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
+  foreachM (findLValue lval ctx pathCond) $ \case
+    Just (place, ctx', pathCond', False)
+      | Just oldVal <- ctx' ^? (place ^. placeLens) -> do
+      updPaths <- symEval ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
                           , ctx', pathCond)
       return . map (\(newVal, ctx'', pathCond') ->
                        if newVal == VError

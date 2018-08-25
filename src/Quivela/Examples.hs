@@ -145,3 +145,6 @@ doubleFieldDeref :: Expr
 doubleFieldDeref = [prog'|
 a = (new (const x=(new(const y = 5) {1})) {1} );
 a.x.y |]
+
+incrementFieldDeref :: Expr
+incrementFieldDeref = [prog'| x = (new(a=1) { 2 }) ; x.a++ |]
