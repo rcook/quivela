@@ -224,6 +224,21 @@ function method Proj(tup: Value, idx: Value): Value
   else Error
 }
 
+function method Add(e1: Value, e2: Value): Value
+{
+  if e1.Int? && e2.Int? then Int(e1.val + e2.val) else Error
+}
+
+function method Sub(e1: Value, e2: Value): Value
+{
+  if e1.Int? && e2.Int? then Int(e1.val - e2.val) else Error
+}
+
+function method Le(e1: Value, e2: Value): Value
+{
+  if e1.Int? && e2.Int? && e1.val < e2.val then Int(1) else Error
+}
+
 lemma LookupSame()
   ensures forall k: Value, v: Value, m : Value :: Lookup(k, Insert(k, v, m)) == v
 {
