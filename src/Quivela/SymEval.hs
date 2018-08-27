@@ -633,11 +633,11 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
     Just (place, ctx', pathCond', False)
       | Just oldVal <- ctx' ^? (place ^. placeLens) -> do
       updPaths <- symEval ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
-                          , ctx', pathCond)
-      return . map (\(newVal, ctx'', pathCond') ->
+                          , ctx', pathCond')
+      return . map (\(newVal, ctx'', pathCond'') ->
                        if newVal == VError
-                       then (VError, ctx'', pathCond')
-                       else (oldVal, ctx'', pathCond')) $ updPaths
+                       then (VError, ctx'', pathCond'')
+                       else (oldVal, ctx'', pathCond'')) $ updPaths
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') ->
