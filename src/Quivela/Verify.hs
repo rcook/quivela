@@ -458,6 +458,7 @@ propToDafny (p1 :=>: p2) = concatM [ pure "(", toDafny p1
                                    , pure ") ==> ("
                                    , toDafny p2
                                    , pure ")" ]
+propToDafny (Forall [] p) = toDafny p
 propToDafny (Forall formals p) =
   concatM [ pure "forall "
           , intercalate ", " . map ((++ ": Value")) <$> mapM (\(x, t) -> translateVar x "Value") formals
@@ -525,6 +526,7 @@ propToZ3 (Not p) = z3CallM "not" [p]
 propToZ3 (x :=: y) = z3CallM "="  [x, y]
 propToZ3 (x :=>: y) = z3CallM "=>" [x, y]
 propToZ3 (x :&: y) = z3CallM "and" [x, y]
+propToZ3 (Forall [] p) = toZ3 p
 propToZ3 (Forall formals p) = do
   argNames <- mapM (\(x, t) -> translateVar x "Value") formals
   concatM [ pure "(forall ("
