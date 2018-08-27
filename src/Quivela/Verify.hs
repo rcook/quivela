@@ -246,16 +246,21 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
     foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
       foreachM (return ress1') $ \res1'@(v1', ctx1', pc1') -> do
         let simp = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
-        let vcRes = simp $
-                    VC { _assumptions = nub $ pc1 ++ pc1' ++ assms
+            simp' = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
+        let vcRes = VC { _assumptions = nub $ assms ++ map simp' (nub $ pc1 ++ pc1' ++ assms)
                        , _conditionName = "resultsEq"
-                       , _goal = v1 :=: v1' }
+                       , _goal = simp' (v1 :=: v1') }
         invVCs <-
           if ctx1 == ctxH && ctx1' == ctxH'
           then return []
           else concat <$> mapM (fmap (map simp) .
                                 invToVC assms addr1 res1 addr1' res1') invs
-        return $ vcRes : invVCs
+        -- Require that adversary was called with same values:
+        let vcAdv = VC { _assumptions = nub $ assms ++ map simp' (nub $ pc1 ++ pc1' ++ assms)
+                       , _conditionName = "advCallsEq"
+                       , _goal = simp' $ Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
+                                         Sym (AdversaryCall (ctx1' ^. ctxAdvCalls)) }
+        return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
 
 
