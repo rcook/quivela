@@ -173,7 +173,10 @@ data TypeDenotation =
 
 -- | The fixed environment for symbolic evaluation. Currently this
 -- only contains information about named types which are defined outside of quivela.
-data VerifyEnv = VerifyEnv { _typeDenotations :: M.Map TypeName TypeDenotation }
+data VerifyEnv = VerifyEnv { _typeDenotations :: M.Map TypeName TypeDenotation
+                           , _splitEq :: Bool
+                           -- ^ Split == operator into two paths during symbolic evaluation?
+                           }
   deriving Typeable
 
 -- | A monad for generating and discharging verification conditions, which
@@ -633,10 +636,13 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
                        else (oldVal, ctx'', pathCond'')) $ updPaths
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
-    foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') ->
+    foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
+      doSplit <- view splitEq
       if (isSymbolic v1 || isSymbolic v2) && (v1 /= v2)
-      then return [ (VError, ctx'', Not (v1 :=: v2) : pathCond'')
-                  , (VInt 1, ctx'', v1 :=: v2 : pathCond'')]
+      then if doSplit
+           then return [ (VError, ctx'', Not (v1 :=: v2) : pathCond'')
+                       , (VInt 1, ctx'', v1 :=: v2 : pathCond'')]
+           else return [(Sym (ITE (v1 :=: v2) (VInt 1) VError), ctx'', pathCond'')]
       else if v1 == v2
            then return [ (VInt 1, ctx'', pathCond'') ]
            else return [ (VError, ctx'', pathCond'') ]
@@ -695,4 +701,5 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                    , _ctxScope = M.empty }
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv { _typeDenotations = M.empty }
+emptyVerifyEnv = VerifyEnv { _typeDenotations = M.empty
+                           , _splitEq = False }
