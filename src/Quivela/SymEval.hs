@@ -70,7 +70,6 @@ data Value = VInt Integer
   | VRef Addr
   | Sym { _symVal :: SymValue }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
-makeLenses ''Value
 
 -- | Data type for field initializers
 data Field = Field { _fieldName :: String
@@ -105,6 +104,7 @@ instance Serialize Value
 instance Serialize Type
 instance Serialize Field
 instance Serialize Expr
+instance Serialize Prop
 
 -- instance Hashable SymValue
 -- instance Hashable Value
@@ -112,30 +112,23 @@ instance Serialize Expr
 -- instance Hashable Field
 -- instance Hashable Expr
 
-makeLenses ''Field
-makeLenses ''Expr
-
 -- | The value of a field of an object in the heap
 data Local = Local { _localValue :: Value
                    , _localType :: Type
                    , _localImmutable :: Bool }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
-makeLenses ''Local
-
 data Method = Method { _methodName :: String
                      , _methodFormals :: [(String, Type)]
                      , _methodBody :: Expr
                      }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
-makeLenses ''Method
 
 data Object = Object { _objLocals :: M.Map Var Local
                      , _objMethods :: M.Map Var Method
                      , _objAdversary :: Bool -- ^ Is the object an adversary?
                      }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
-makeLenses ''Object
 
 -- | Named types are identifiers of more complex types whose semantics are given
 -- as Haskell expressions.
@@ -150,13 +143,11 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
                        }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
-makeLenses ''Context
 
 data Place =
   Place { _placeLens :: (forall f. Applicative f => ((Value -> f Value) -> Context -> f Context))
         , _placeConst :: Bool
         , _placeType :: Type }
-makeLenses ''Place
 
 -- | Propositions. These are used both to keep track of the path condition
 -- as well as for the verification conditions we generate later on.
@@ -166,7 +157,7 @@ data Prop = Value :=: Value
   | Prop :=>: Prop
   | Prop :&: Prop
   | PTrue | PFalse
-  deriving (Eq, Read, Show, Ord, Data, Typeable)
+  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- | A path condition is a list of propositions that all hold on a given path
 -- These could be stored as just one big conjunction instead, but representing
@@ -178,13 +169,11 @@ type PathCond = [Prop]
 data TypeDenotation =
   ObjectType { _methodEffects :: M.Map Var ([Value] -> Context -> [(Value, Context, PathCond)])  }
   deriving (Typeable)
-makeLenses ''TypeDenotation
 
 -- | The fixed environment for symbolic evaluation. Currently this
 -- only contains information about named types which are defined outside of quivela.
 data VerifyEnv = VerifyEnv { _typeDenotations :: M.Map TypeName TypeDenotation }
   deriving Typeable
-makeLenses ''VerifyEnv
 
 -- | A monad for generating and discharging verification conditions, which
 -- allows generating free variables and calling external solvers.
@@ -206,7 +195,10 @@ data VerifyState = VerifyState
   -- FIXME: Currently, we cannot serialize invariants, since they include functions as arguments
   -- in some cases
   }
-makeLenses ''VerifyState
+
+-- Generate lenses for all types defined above:
+concat <$> mapM makeLenses [ ''Method, ''Object, ''Context, ''Place, ''TypeDenotation
+                           , ''VerifyEnv, ''Local, ''Field, ''Expr, ''Value, ''VerifyState ]
 
 -- | Generate a fresh variable starting with a given prefix
 freshVar :: String -> Verify String
