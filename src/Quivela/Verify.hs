@@ -41,7 +41,6 @@ import Quivela.VerifyPreludes
 -- | Invariants; only the equality invariants are relational right now.
 data Invariant = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
   -- ^ Equality of a value from the LHS and RHS contexts
-  | ValidInv (Addr -> Context -> Addr -> Context -> Value)
   | Rewrite Expr Expr
   -- ^ Rewriting with an assumption. Currently we only support a single
   -- rewrite hint in each proof step
@@ -177,11 +176,6 @@ invToVC assms addrL (_, ctxL, pathCondL) addrR (_, ctxR, pathCondR) inv =
                     [emptyVC { _assumptions = nub $ pathCondL ++ pathCondR ++ assms
                              , _conditionName = "equalInvPreserved"
                              , _goal = f addrL ctxL :=: g addrR ctxR }]
-    ValidInv f -> return $
-      [VC { _assumptions = nub $ pathCondL ++ pathCondR ++ assms
-          , _conditionName = "validInvPreserved"
-          , _goal = Not (f addrL ctxL addrL ctxR :=: VError)
-          }]
 
 -- | Convert an invariant into assumptions. Note that for universal
 -- invariants, this produces several assumptions.
@@ -189,9 +183,6 @@ invToAsm :: Result -> Result -> Invariant -> Verify [Prop]
 invToAsm (VRef addrL, ctxL, pathCondL) (VRef addrR, ctxR, pathCondR) inv =
   case inv of
     EqualInv f g -> return [f addrL ctxL :=: g addrR ctxR]
-    ValidInv f -> do
-      let asm = Not (f addrL ctxL addrR ctxR :=: VError)
-      return [asm]
 
 conjunction :: [Prop] -> Prop
 conjunction [] = PTrue
@@ -268,13 +259,6 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
 
-
--- | Convenience function for validity invariants on the LHS
-validLHS :: (Addr -> Context -> Value) -> Invariant
-validLHS f = ValidInv (\a1 ctx1 _ _ -> f a1 ctx1)
-
-validRHS :: (Addr -> Context -> Value) -> Invariant
-validRHS f = ValidInv (\_ _ a2 ctx2 -> f a2 ctx2)
 
 -- | Collect non-trivial verification conditions for a given method, invariants and arguments
 methodEquivalenceVCs :: Method -> [Invariant] -> [Value] -> Result -> Result -> Verify [VC]
