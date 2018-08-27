@@ -110,6 +110,7 @@ instance Print Expr where
     EOr expr1 expr2 -> prPrec i 3 (concatD [prt 4 expr1, doc (showString "|"), prt 3 expr2])
     EAmp expr1 expr2 -> prPrec i 3 (concatD [prt 4 expr1, doc (showString "&"), prt 3 expr2])
     EMethod id args expr -> prPrec i 3 (concatD [doc (showString "method"), prt 0 id, doc (showString "("), prt 0 args, doc (showString ")"), doc (showString "{"), prt 0 expr, doc (showString "}")])
+    EInvariant id args expr -> prPrec i 3 (concatD [doc (showString "invariant"), prt 0 id, doc (showString "("), prt 0 args, doc (showString ")"), doc (showString "{"), prt 0 expr, doc (showString "}")])
     ESeq expr1 expr2 -> prPrec i 2 (concatD [prt 3 expr1, doc (showString ";"), prt 2 expr2])
     ENew inits expr -> prPrec i 1 (concatD [doc (showString "new"), doc (showString "("), prt 0 inits, doc (showString ")"), doc (showString "{"), prt 0 expr, doc (showString "}")])
   prtList _ [] = (concatD [])

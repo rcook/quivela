@@ -43,7 +43,9 @@ normalizeAST e =
     P.ETupleProj e1 e2 ->
       ETupleProj (normalizeAST e1) (normalizeAST e2)
     P.EMethod (P.Id name) args body ->
-      EMethod name (map normalizeArg args) (normalizeAST body)
+      EMethod name (map normalizeArg args) (normalizeAST body) False
+    P.EInvariant (P.Id name) args body ->
+      EMethod name (map normalizeArg args) (normalizeAST body) True
     P.ENew fields body ->
       ENew (map normalizeField fields) (normalizeAST body)
     P.EAmp e1 e2 ->

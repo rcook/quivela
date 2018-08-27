@@ -31,6 +31,7 @@ data Expr
     | EOr Expr Expr
     | EAmp Expr Expr
     | EMethod Id [Arg] Expr
+    | EInvariant Id [Arg] Expr
     | ESeq Expr Expr
     | ENew [Init] Expr
   deriving (Eq, Ord, Show, Read)

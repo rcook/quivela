@@ -174,11 +174,10 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
-    }
+    };
+    invariant inv1(a, em) { !mac.tg[<a, em>] | cpa.h[em] }
 }|]
-   ≈ Hint [ mac_tg, cpa_h, validLHS (getField ["mac", "tg"]), validLHS (getField ["cpa", "h"])
-           , univInvariant [("a", TAny), ("em", TAny)] "!mac.tg[<a, em>] | cpa.h[em]"
-           ]:
+   ≈ Hint [ mac_tg, cpa_h ]:
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         method enc(m) { c = e.enc(m) & h[c] = 1 & c };
@@ -197,9 +196,10 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         mac.verify(<a,em>,t) &
         cpa.h[em] &
         cpa.dec(em)
-    }
+    };
+    invariant inv1(a, em) { !mac.tg[<a, em>] | cpa.h[em] }
 }|]
-   ≈ Hint [ mac_tg, cpa_h, validLHS (getField ["cpa", "h"]) ]:
+   ≈ Hint [ mac_tg, cpa_h ]:
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         method enc(m) { c = e.enc(m) & h[c] = 1 & c };
@@ -343,106 +343,113 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
         cpa.d[em]
     }
 }|]
-   ≈ Hint [ mac_tg, e_d, cpa_d
-      , validLHS (getField ["cpa", "d"])
-      , validLHS (getField ["mac", "tg"])
-      , univInvariant [ ("a", TAny), ("em", TAny), ("t", TAny) ]
-        "d[<a, <em, t>>] == (t & (mac.tg[<a, em>] == t) & cpa.d[em])"
-      , univInvariant [ ("a", TAny), ("em", TAny), ("t", TAny) ]
-        "(!mac.tg[<a, em>]) | (cpa.d[em] & e.d[em])" ]:
+    ≈ Hint [ mac_tg, e_d, cpa_d ]:
+      [prog|
+ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
+     method enc(a:*,m:*) {
+         m &
+         em = e.enc(zero(m)) &
+         cpa.d[em] = m &
+         t = mac.tag(<a,em>) &
+         d[<a,<em,t>>] = m &
+         <em,t>
+     };
+     method dec(a:*,c:<*,*>) {
+         em = c^0;
+         t = c^1;
+         c &
+         mac.verify(<a,em>,t) &  // t & mac.tg[<a,em>] == t
+         cpa.d[em] &
+         d[<a,<em,t>>]  // !d[<a,<em,t>>] | (t == mac.tg[<a,em>] & cpa.d[em] == d[<a,<em,t>>])
+     };
+     invariant inv1(a, em, t) { d[<a, <em, t>>] == (t & (mac.tg[<a, em>] == t) & cpa.d[em]) };
+     invariant inv2(a, em, t) { (!mac.tg[<a, em>]) | (cpa.d[em] & e.d[em]) }
+ }|]
+    ≈ Hint [ mac_tg, e_d, d, cpa_d ]:
      [prog|
-new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
-    method enc(a:*,m:*) {
-        m &
-        em = e.enc(zero(m)) &
-        cpa.d[em] = m &
-        t = mac.tag(<a,em>) &
-        d[<a,<em,t>>] = m &
-        <em,t>
-    };
-    method dec(a:*,c:<*,*>) {
-        em = c^0;
-        t = c^1;
-        c &
-        mac.verify(<a,em>,t) &  // t & mac.tg[<a,em>] == t
-        cpa.d[em] &
-        d[<a,<em,t>>]  // !d[<a,<em,t>>] | (t == mac.tg[<a,em>] & cpa.d[em] == d[<a,<em,t>>])
-    }
-}|]
-   ≈ Hint [ mac_tg, e_d, d, cpa_d
-           , validLHS (getField ["cpa", "d"])
-           , validLHS (getField ["mac", "tg"])
-           , univInvariant [ ("a", TAny), ("em", TAny), ("t", TAny) ] $
-             "(!d[<a, <em, t>>]) | " ++
-             "(t & ((t == mac.tg[<a, em>]) & (cpa.d[em] == d[<a, <em, t>>])) & e.d[em])" ]:
-   [prog|
-new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
-    method enc(a, m) {
-        m &
-        em = e.enc(zero(m)) &
-        cpa.d[em] = m &
-        t = mac.tag(<a,em>) &
-        d[<a,<em,t>>] = m &
-        <em,t>
-    };
-    method dec(a, c) {
-        d[<a,c>]
-    }
-}|]
-   ≈ Hint [rewrite "Enc(_e)" "_e"]:
-   [prog|
-new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e),d=0) {
-    method enc(a, m) {
-        m &
-        em = e.enc(zero(m)) &
-        cpa.d[em] = m &
-        t = mac.tag(<a,em>) &
-        d[<a,<em,t>>] = m &
-        <em,t>
-    };
-    method dec(a, c) {
-        d[<a,c>]
-    }
-}|]
-  ≈ Hint [mac_tg, validLHS (getField ["cpa", "d"]), d]:
-  [prog|
-new (const e=_e,const mac=MacI(_mac),d=0) {
-    method enc(a, m) {
-        m &
-        em = e.enc(zero(m)) &
-        em &
-        t = mac.tag(<a,em>) &
-        d[<a,<em,t>>] = m &
-        <em,t>
-    };
-    method dec(a, c) {
-        d[<a,c>]
-    }
-}|]
-  ≈ Hint [rewrite "MacI(_mac)" "_mac"]:
-  [prog|
-new (const e=_e,const mac=_mac,d=0) {
-    method enc(a, m) {
-        m &
-        em = e.enc(zero(m)) &
-        em &
-        t = mac.tag(<a,em>) &
-        d[<a,<em,t>>] = m &
-        <em,t>
-    };
-    method dec(a, c) {
-        d[<a,c>]
-    }
-}|]
-  ≈ Hint [d]:
-  [prog|
-new (const e=new(const e=_e,const mac=_mac) {
-        method enc(a, m) { m & em = e.enc(m) & em & t = mac.tag(<a,em>) & <em,t> };
-        method dec(a, c) { em = c^0;  t = c^1;  mac.verify(<a, em>, t) & e.dec(em) }
-    },d=0) {
-    method enc(a, m) { c=e.enc(a, zero(m)) & d[<a,c>] = m & c };
-    method dec(a, c) { d[<a,c>] }
-}|]
-   ≈ Hint [d]:
-   [prog| AeadI(EtM(_e,_mac)) |]
-   : []
+  new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
+      method enc(a, m) {
+          m &
+          em = e.enc(zero(m)) &
+          cpa.d[em] = m &
+          t = mac.tag(<a,em>) &
+          d[<a,<em,t>>] = m &
+          <em,t>
+      };
+      method dec(a, c) {
+          d[<a,c>]
+      };
+      invariant inv3(a, em, t) { (!d[<a, <em, t>>]) | (t & ((t == mac.tg[<a, em>]) & (cpa.d[em] == d[<a, <em, t>>])) & e.d[em]) }
+  }|]
+    ≈ Hint [ mac_tg, e_d, d, cpa_d ]:
+     [prog|
+  new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
+      method enc(a, m) {
+          m &
+          em = e.enc(zero(m)) &
+          cpa.d[em] = m &
+          t = mac.tag(<a,em>) &
+          d[<a,<em,t>>] = m &
+          <em,t>
+      };
+      method dec(a, c) {
+          d[<a,c>]
+      }
+  }|]
+     ≈ Hint [rewrite "Enc(_e)" "_e"]:
+     [prog|
+  new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e),d=0) {
+      method enc(a, m) {
+          m &
+          em = e.enc(zero(m)) &
+          cpa.d[em] = m &
+          t = mac.tag(<a,em>) &
+          d[<a,<em,t>>] = m &
+          <em,t>
+      };
+      method dec(a, c) {
+          d[<a,c>]
+      }
+  }|]
+    ≈ Hint [mac_tg, d]:
+    [prog|
+  new (const e=_e,const mac=MacI(_mac),d=0) {
+      method enc(a, m) {
+          m &
+          em = e.enc(zero(m)) &
+          em &
+          t = mac.tag(<a,em>) &
+          d[<a,<em,t>>] = m &
+          <em,t>
+      };
+      method dec(a, c) {
+          d[<a,c>]
+     }
+  }|]
+    ≈ Hint [rewrite "MacI(_mac)" "_mac"]:
+    [prog|
+  new (const e=_e,const mac=_mac,d=0) {
+      method enc(a, m) {
+          m &
+          em = e.enc(zero(m)) &
+          em &
+          t = mac.tag(<a,em>) &
+          d[<a,<em,t>>] = m &
+          <em,t>
+      };
+      method dec(a, c) {
+          d[<a,c>]
+      }
+  }|]
+    ≈ Hint [d]:
+    [prog|
+  new (const e=new(const e=_e,const mac=_mac) {
+          method enc(a, m) { m & em = e.enc(m) & em & t = mac.tag(<a,em>) & <em,t> };
+          method dec(a, c) { em = c^0;  t = c^1;  mac.verify(<a, em>, t) & e.dec(em) }
+      },d=0) {
+      method enc(a, m) { c=e.enc(a, zero(m)) & d[<a,c>] = m & c };
+      method dec(a, c) { d[<a,c>] }
+  }|]
+     ≈ Hint [d]:
+     [prog| AeadI(EtM(_e,_mac)) |]
+     : []

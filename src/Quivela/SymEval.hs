@@ -91,7 +91,8 @@ data Expr = ENop
                  , _newBody :: Expr }
           | EMethod { _emethodName :: String
                     , _emethodArgs :: [(String, Type)]
-                    , _emethodBody :: Expr }
+                    , _emethodBody :: Expr
+                    , _eisInvariant :: Bool }
           | ECall { _callObj :: Expr
                   , _callName :: String
                   , _callArgs :: [Expr] }
@@ -122,11 +123,13 @@ data Local = Local { _localValue :: Value
 data Method = Method { _methodName :: String
                      , _methodFormals :: [(String, Type)]
                      , _methodBody :: Expr
+                     , _isInvariant :: Bool
                      }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
 data Object = Object { _objLocals :: M.Map Var Local
                      , _objMethods :: M.Map Var Method
+                     -- , _objInvariants :: M.Map Var
                      , _objAdversary :: Bool -- ^ Is the object an adversary?
                      }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
@@ -467,11 +470,14 @@ foreachM s act = do
   return $ concat ys
 
 -- | Add a method definition to the context
-defineMethod :: Var -> [(Var, Type)] -> Expr -> Context -> Context
-defineMethod name formals body ctx
+defineMethod :: Var -> [(Var, Type)] -> Expr -> Bool -> Context -> Context
+defineMethod name formals body isInv ctx
   | Just obj <- ctx ^? ctxObjs . at (ctx ^. ctxThis) =
       ctxObjs . ix (ctx ^. ctxThis) . objMethods . at name ?~
-        (Method name formals body) $ ctx
+        (Method { _methodName = name
+                , _methodFormals = formals
+                , _methodBody = body
+                , _isInvariant = isInv }) $ ctx
   | otherwise = error "failed to define method"
 
 -- | Symbolically evaluate a list of field initializations in a given context and path condition
@@ -622,8 +628,8 @@ symEval (EAssign lhs rhs, ctx, pathCond) =
 symEval (ESeq e1 e2, ctx, pathCond) = do
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     symEval (e2, ctx', pathCond')
-symEval (EMethod name formals body, ctx, pathCond) = do
-  return [(VNil, defineMethod name formals body ctx, pathCond)]
+symEval (EMethod name formals body isInv, ctx, pathCond) = do
+  return [(VNil, defineMethod name formals body isInv ctx, pathCond)]
 symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
   foreachM (findLValue lval ctx pathCond) $ \case
     Just (place, ctx', pathCond', False)

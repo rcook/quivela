@@ -53,7 +53,3 @@ prove' env prefix steps = do
 rewrite :: String -> String -> Invariant
 rewrite e1 e2 = Rewrite (parseExpr e1) (parseExpr e2)
 
--- | Convenience function for constructing a universal invariant from a quivela
--- term in concrete syntax.
-univInvariant :: [(Var, Type)] -> String -> Invariant
-univInvariant formals e = UnivInvariant formals (parseExpr e)
