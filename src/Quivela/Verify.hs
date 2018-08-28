@@ -688,22 +688,11 @@ checkEqvFile verify prefixFile invs lhsFile rhsFile = do
 
 -- | Quivela proofs are a series of equivalent expressions and a list of
 -- invariants that are needed to verify this step.
-type Steps = [(Expr, [Invariant])]
-
-foldStepsM :: Monad m => ([Invariant] -> Expr -> Expr -> a -> m a) -> a -> Steps -> m a
-foldStepsM f init [] = return init
-foldStepsM f init ((lhs, invs) : steps) = foldStepsM' steps lhs invs init
-  where foldStepsM' [] lhs invs acc = return acc
-        foldStepsM' ((rhs, invsR) : steps) lhs invs acc = do
-          res <- f invs lhs rhs acc
-          foldStepsM' steps rhs invsR res
-
-mapStepsM :: Monad m => ([Invariant] -> Expr -> Expr -> m a) -> Steps -> m [a]
-mapStepsM f = foldStepsM (\invs lhs rhs prev -> (prev ++) . (:[]) <$> f invs lhs rhs) []
+type Step = (Expr, [Invariant], Expr)
 
 -- | Check given list of steps and return a list of unverified VCs for each step
-checkSteps :: Expr -> Steps -> Verify [[(Var, [VC])]]
-checkSteps prefix = mapStepsM (checkEqv True prefix)
+checkSteps :: Expr -> [Step] -> Verify [[(Var, [VC])]]
+checkSteps prefix = mapM (\(lhs, invs, rhs) -> checkEqv True prefix invs lhs rhs)
 
 -- | @'rewriteExpr' from to e@ rewrites all occurrences of @from@ in @e@ by @to@
 -- TODO: take bound variables into account
@@ -739,11 +728,11 @@ instance Show ProofPart where
   show _ = "<invariant>"
 
 -- | Convert a series of proof parts into a sequence of steps
-toSteps :: [ProofPart] -> Steps
+toSteps :: [ProofPart] -> [Step]
 toSteps [] = []
-toSteps [Prog exp] = [(exp, [])]
-toSteps (Prog exp : Prog exp' : steps') = (exp, []) : toSteps (Prog exp' : steps')
-toSteps (Prog exp : Hint invs : steps') = (exp, invs) : toSteps steps'
+toSteps [Prog exp] = []
+toSteps (Prog lhs : Prog rhs : steps') = (lhs, [], rhs) : toSteps (Prog rhs : steps')
+toSteps (Prog lhs : Hint invs : Prog rhs : steps') = (lhs, invs, rhs) : toSteps (Prog rhs : steps')
 toSteps _ = error "Invalid sequence of steps"
 
 -- | A handy alias for cons; this makes a sequence of proof steps look more like
