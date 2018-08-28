@@ -4,7 +4,9 @@ module Quivela.Parse (parseExpr, parseFile) where
 import Control.Lens
 import Control.Monad
 import Control.Monad.IO.Class
+import Data.Function
 import Data.Maybe
+import Data.List
 import qualified Data.Set as S
 import System.IO
 import Text.Parsec
@@ -149,6 +151,7 @@ typ :: Parser Type
 typ = (reserved "int" *> pure TInt)
   <|> (symbol "*" *> pure TAny)
   <|> (TTuple <$> (symbol "<" *> typ `sepBy` symbol "," <* symbol ">"))
+  <|> (TNamed <$> identifier)
   <?> "type"
 
 field :: Parser Field
@@ -162,10 +165,25 @@ field = do
                  , _fieldType = typ
                  , _immutable = isConst }
 
+-- | Fails if list elements are not unique under given function; returns its argument unchanged otherwise
+uniqueBy :: (Show a, Eq b) => (a -> b) -> [a] -> Parser [a]
+uniqueBy f lst | length (nubBy ((==) `on` f) lst) == length lst = return lst
+               | otherwise = fail $ "List elements not unique: " ++ show lst
+
+
+uniqueFields :: [Field] -> Parser [Field]
+uniqueFields = uniqueBy (^. fieldName)
+
 newExpr :: Parser Expr
 newExpr = ENew <$> (reserved "new" *> symbol "(" *>
-                    withState (set inFieldInit True) (field `sepBy` symbol ",") <* symbol ")")
+                    withState (set inFieldInit True) (uniqueFields =<< field `sepBy` symbol ",") <* symbol ")")
                <*> (symbol "{" *> (foldr ESeq ENop <$> many expr) <* symbol "}")
+
+newConstrExpr :: Parser Expr
+newConstrExpr = ENewConstr <$> (reserved "new" *> identifier)
+                           <*> withState (set inFieldInit True)
+                                         (uniqueBy fst =<< constrArg `sepBy` symbol ",")
+  where constrArg = (,) <$> identifier <*> (symbol "=" *> expr)
 
 methodArg :: Parser (String, Type)
 methodArg = (do

@@ -90,6 +90,8 @@ data Expr = ENop
           | EIdx Expr Expr
           | ENew { _newFields :: [Field]
                  , _newBody :: Expr }
+          | ENewConstr { _newConstrName :: String
+                       , _newConstrArgs :: [(Var, Expr)] }
           | EMethod { _emethodName :: String
                     , _emethodArgs :: [(String, Type)]
                     , _emethodBody :: Expr
@@ -225,6 +227,7 @@ varBindings (ETypeDecl name formals values body) =
                                                   , _fieldInit = EConst value
                                                   , _immutable = False}) values)
                      body)
+varBindings (ENewConstr name values) = varBindingsList (S.empty, S.empty) (map snd values)
 
 -- | Combine two pieces of binding information assuming that the second set of bindings
 -- is produced by an expression that will be evaluated after the first
