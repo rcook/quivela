@@ -32,6 +32,8 @@ library:
   - Quivela.Examples
   - Quivela.Examples.ETM
   - Quivela
+  ghc-options:
+  - -fwarn-incomplete-patterns
   other-modules:
   - Quivela.Util
   - Quivela.VerifyPreludes
