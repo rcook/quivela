@@ -713,3 +713,61 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv = VerifyEnv { _typeDenotations = M.empty
                            , _splitEq = False }
+
+data Binding = Binding { _bindingName :: Var
+                       , _bindingConst :: Bool }
+  deriving (Eq, Ord, Show, Read)
+
+makeLenses ''Binding
+
+-- | Returns a set of free variables in the expression and a set of bound identifiers
+-- that may be bound by execution of the expression. Note that some executions may not
+-- actually bind all variables in the second set.
+--
+-- Note that computing free variables is complicated by the fact that assignments
+-- to non-existent variables bind the variables in the "rest" of the expression,
+-- where the rest can be siblings of the assignment to the right in the AST
+varBindings :: Expr -> (S.Set Var, S.Set Binding)
+varBindings ENop = (S.empty, S.empty)
+varBindings (EVar x) = (S.singleton x, S.empty)
+varBindings (EConst _) = (S.empty, S.empty)
+varBindings (EAssign (EVar x) rhs)
+  | (freeRhs, boundRhs) <- varBindings rhs  =
+      (freeRhs, S.insert (Binding { _bindingName = x, _bindingConst = False }) boundRhs)
+varBindings (EAssign lhs rhs) = varBindings lhs `bindingSeq` varBindings rhs
+varBindings (ESeq e1 e2) = varBindings e1 `bindingSeq` varBindings e2
+varBindings (ECall obj name args) =
+  let (freeObj, boundObj) = varBindings obj
+  in varBindingsList (freeObj, boundObj) args
+-- Note that anything assigned to in the body will end in a local scope of the object,
+-- so the body cannot introduce new bound variables
+varBindings (ENew fields body) =
+  let (fieldsFree, fieldsBound) = varBindingsList (S.empty, S.empty) $ map (^. fieldInit) fields
+      (bodyFree, bodyBound) = varBindings body
+  in ( bodyFree `S.difference` (S.fromList (map (^. fieldName) fields) `S.union`
+                                S.map (^. bindingName) fieldsBound)
+     , fieldsBound )
+varBindings (EProj eobj name) = varBindings eobj
+varBindings (EIdx base idx) = varBindings base `bindingSeq` varBindings idx
+  -- Variables bound inside a method body are not visible outside:
+varBindings (EMethod name args body isInv) =
+  let (bodyFree, bodyBound) = varBindings body
+  in (bodyFree, S.empty)
+varBindings (ETuple elts) = varBindingsList (S.empty, S.empty) elts
+varBindings (ETupleProj base idx) = varBindings base `bindingSeq` varBindings idx
+varBindings (ETypeDecl _ _ _ _) = error "varBindings for type decl not implemented yet"
+
+-- | Combine two pieces of binding information assuming that the second set of bindings
+-- is produced by an expression that will be evaluated after the first
+bindingSeq :: (S.Set Var, S.Set Binding) -> (S.Set Var, S.Set Binding) -> (S.Set Var, S.Set Binding)
+bindingSeq (free1, bound1) (free2, bound2) =
+  ( free1 `S.union` (free2 `S.difference` S.map (^. bindingName) bound1)
+  , bound1 `S.union` bound2 )
+
+-- | Folds 'varBindings' over a list of expressions with a given set of initial bindings
+varBindingsList :: (S.Set Var, S.Set Binding) -> [Expr] -> (S.Set Var, S.Set Binding)
+varBindingsList init exprs =
+  foldl (\(freeAcc, boundAcc) expr ->
+            let (freeExpr, boundExpr) = varBindings expr
+            in ( (freeAcc `S.union` freeExpr) `S.difference` S.map (^. bindingName) boundAcc
+               , boundAcc `S.union` boundExpr )) init exprs
