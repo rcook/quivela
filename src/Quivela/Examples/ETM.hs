@@ -116,7 +116,7 @@ new (const e=_e,const mac=MacI(_mac)) {
         e.dec(em)
     }
 }|]
-   ≈ Hint [mac_tg]:
+   ≈
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=new(e=_e) {
         method enc(m) { e.enc(m) }
@@ -136,7 +136,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(e=_e) {
         e.dec(em)
     }
 } |]
-   ≈ Hint [fieldEqual ["mac", "tg"]]:
+   ≈
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e) {
         method enc(m) { e.enc(m) }
@@ -156,7 +156,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e) {
         cpa.dec(em)
     }
 }|]
-   ≈ Hint [fieldEqual ["mac", "tg"]]:
+   ≈
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         method enc(m) { c = e.enc(m) & h[c] = 1 & c }
@@ -177,7 +177,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
     }
     invariant inv1(a, em) { !mac.tg[<a, em>] | cpa.h[em] }
 }|]
-   ≈ Hint [ mac_tg, cpa_h ]:
+   ≈ -- Hint [mac_tg, cpa_h ]:
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         method enc(m) { c = e.enc(m) & h[c] = 1 & c }
@@ -199,7 +199,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
     }
     invariant inv1(a, em) { !mac.tg[<a, em>] | cpa.h[em] }
 }|]
-   ≈ Hint [ mac_tg, cpa_h ]:
+   ≈
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         method enc(m) { c = e.enc(m) & h[c] = 1 & c }
@@ -219,7 +219,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         cpa.dec(em)
     }
 }|]
-   ≈ Hint [mac_tg, cpa_h]:
+   ≈ -- [mac_tg, cpa_h]:
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=CpaC(_e)) {
     method enc(a, m) {
@@ -236,7 +236,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaC(_e)) {
         cpa.dec(em)
     }
 }|]
-   ≈ Hint [mac_tg, cpa_h]:
+   ≈
    [prog|
 new (const mac=MacI(_mac),const cpa=CpaC(_e)) {
     method enc(a, m) {
@@ -270,7 +270,7 @@ new (const mac=MacI(_mac),const cpa=CpaI(_e)) {
         cpa.dec(em)
     }
 }|]
-  ≈ Hint [mac_tg, cpa_d]:
+  ≈
   [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
     method enc(a, m) {
@@ -287,7 +287,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
         cpa.dec(em)
     }
 }|]
-  ≈ Hint [mac_tg, cpa_d]:
+  ≈
   [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
     method enc(a, m) {
@@ -305,7 +305,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
         cpa.d[em]
     }
 }|]
-   ≈ Hint [mac_tg, cpa_d]: -- step 12:
+   ≈
    [prog|
 new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e),d=0) {
     method enc(a:*, m:*) {
@@ -343,7 +343,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
         cpa.d[em]
     }
 }|]
-    ≈ Hint [ mac_tg, e_d, cpa_d ]:
+    ≈
       [prog|
  new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
      method enc(a:*,m:*) {
@@ -365,7 +365,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
      invariant inv1(a, em, t) { d[<a, <em, t>>] == (t & (mac.tg[<a, em>] == t) & cpa.d[em]) }
      invariant inv2(a, em, t) { (!mac.tg[<a, em>]) | (cpa.d[em] & e.d[em]) }
  }|]
-    ≈ Hint [ mac_tg, e_d, d, cpa_d ]:
+    ≈ Hint [ NoInfer, mac_tg, e_d, d, cpa_d ]:
      [prog|
   new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
       method enc(a, m) {
@@ -381,7 +381,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
       }
       invariant inv3(a, em, t) { (!d[<a, <em, t>>]) | (t & ((t == mac.tg[<a, em>]) & (cpa.d[em] == d[<a, <em, t>>])) & e.d[em]) }
   }|]
-    ≈ Hint [ mac_tg, e_d, d, cpa_d ]:
+    ≈ Hint [NoInfer, mac_tg, e_d, d, cpa_d]:
      [prog|
   new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
       method enc(a, m) {
@@ -411,7 +411,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
           d[<a,c>]
       }
   }|]
-    ≈ Hint [mac_tg, d]:
+    ≈ -- [mac_tg, d]:
     [prog|
   new (const e=_e,const mac=MacI(_mac),d=0) {
       method enc(a, m) {
@@ -441,7 +441,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
           d[<a,c>]
       }
   }|]
-    ≈ Hint [d]:
+    ≈ -- Hint [d]:
     [prog|
   new (const e=(new(const e=_e,const mac=_mac) {
           method enc(a, m) { m & em = e.enc(m) & em & t = mac.tag(<a,em>) & <em,t> }
@@ -450,6 +450,6 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
       method enc(a, m) { c=e.enc(a, zero(m)) & d[<a,c>] = m & c }
       method dec(a, c) { d[<a,c>] }
   }|]
-     ≈ Hint [d]:
+     ≈ -- Hint [d]:
      [prog| AeadI(EtM(_e,_mac)) |]
      : []

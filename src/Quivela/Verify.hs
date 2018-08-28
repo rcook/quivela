@@ -42,14 +42,32 @@ import Quivela.VerifyPreludes
 data Invariant = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
   -- ^ Equality of a value from the LHS and RHS contexts
   | Rewrite Expr Expr
+  | NoInfer -- ^ turn off proof hint inference for this step
+  | Infer -- ^ Try to automatically infer proof hints
   -- ^ Rewriting with an assumption. Currently we only support a single
   -- rewrite hint in each proof step
   | Admit
   -- ^ Don't check this step
   deriving Generic
--- FIXME: currently validity invariants look like relational invariants even though
--- they're not.
 
+-- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
+-- then the boolean x indicates that a and b are equal/unequal. Otherwise, it cannot be determined
+-- if the two values are equal
+class PartialEq a where
+  (===) :: a -> a -> Maybe Bool
+
+instance PartialEq Invariant where
+  NoInfer === NoInfer = Just True
+  NoInfer === _ = Just False
+  _ === NoInfer = Just False
+  Rewrite e1 e2 === Rewrite e1' e2' = Just (e1 == e1' && e2 == e2')
+  Rewrite _ _ === _ = Just False
+  Admit === Admit = Just True
+  Admit === _ = Just False
+  EqualInv _ _ === EqualInv _ _ = Nothing
+  EqualInv _ _ === _ = Just False
+  Infer === Infer = Just True
+  Infer === _ = Just False
 
 -- | Havoc a local variable if it's not an immutable variable
 havocLocal :: Var -> Local -> Verify Local
@@ -716,6 +734,40 @@ clearCache = do
   exists <- doesFileExist "cache.bin"
   when exists $ removeFile "cache.bin"
 
+commonVars :: [Var] -> Addr -> Context -> Addr -> Context -> [[Var]]
+commonVars prefixFields addrL ctxL addrR ctxR
+  | Just objL <- ctxL ^. ctxObjs . at addrL
+  , Just objR <- ctxR ^. ctxObjs . at addrR =
+      let common = M.filterWithKey (\field locL -> case objR ^. objLocals . at field of
+                                                      Just locR ->
+                                                        locL ^. localType == locR ^. localType &&
+                                                        not (locL ^. localImmutable) &&
+                                                        not (locR ^. localImmutable) &&
+                                                        locL ^. localValue == locR ^. localValue
+                                                      _ -> False)
+                                   (objL ^. objLocals)
+          commonObjs = M.mapWithKey (\field locL ->
+                                       case ( locL ^. localValue
+                                            , objR ^? objLocals . ix field . localValue) of
+                                         (VRef aL, Just (VRef aR)) -> Just (field, aL, aR)
+                                         _ -> Nothing) (objL ^. objLocals)
+      in map (\field -> prefixFields ++ [field]) (M.keys common) ++
+         (concatMap (\(field, aL, aR) -> commonVars (prefixFields ++ [field]) aL ctxL aR ctxR)
+                    . catMaybes . M.elems $ commonObjs)
+
+
+inferInvariants :: Expr -> Step -> Verify Step
+inferInvariants prefix step@(lhs, invs, rhs)
+  | (not $ any (\x -> (x === Infer) == Just True) invs) && not (null invs) = return step
+  | any (\x -> (x === NoInfer) == Just True) invs = return step
+  | otherwise = do
+  (_, prefixCtx, _) <- singleResult <$> symEval (prefix, emptyCtx, [])
+  (VRef addrL, ctxL, _) <- singleResult <$> symEval (lhs, prefixCtx, [])
+  (VRef addrR, ctxR, _) <- singleResult <$> symEval (rhs, prefixCtx, [])
+  let comVars = commonVars [] addrL ctxL addrR ctxR
+  debug $ "Inferred equality invariants on fields: " ++ show comVars
+  return (lhs, invs ++ map fieldEqual comVars, rhs)
+
 -- | One part of a quivela proof, which is either an expression, or a proof hint.
 -- An followed by a hint and another expression is verified using that hint,
 -- while two expressions in a row are verified without additional proof hints.
@@ -734,6 +786,12 @@ toSteps [Prog exp] = []
 toSteps (Prog lhs : Prog rhs : steps') = (lhs, [], rhs) : toSteps (Prog rhs : steps')
 toSteps (Prog lhs : Hint invs : Prog rhs : steps') = (lhs, invs, rhs) : toSteps (Prog rhs : steps')
 toSteps _ = error "Invalid sequence of steps"
+
+proveStep :: Expr -> Step -> Verify Int
+proveStep prefix step = handleStep =<< inferInvariants prefix step
+  where handleStep (lhs, invs, rhs) = do
+          remaining <- checkEqv True prefix invs lhs rhs
+          return . sum . map (length . snd) $ remaining
 
 -- | A handy alias for cons; this makes a sequence of proof steps look more like
 -- an actual equivalence relation.

@@ -41,12 +41,10 @@ prove env prefix steps = do
 -- | A non-compile-time version of 'prove'.
 prove' :: VerifyEnv -> Expr -> [ProofPart] -> IO Int
 prove' env prefix steps = do
-  (t, results) <- time $ mapM (uncurry3 doCheck) (toSteps steps)
+  (t, results) <- time $ mapM doCheck (toSteps steps)
   debug $ "Total verification time: " ++ formatSeconds t
   return $ sum results
-  where doCheck lhs invs rhs = do
-          remaining <- runVerify env (checkEqv True prefix invs lhs rhs)
-          return . sum . map (length . snd) $ remaining
+  where doCheck = runVerify emptyVerifyEnv . proveStep prefix
 
 
 -- | A shorthand for rewriting using quivela terms written in concrete syntax.
