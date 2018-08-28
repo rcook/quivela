@@ -2,8 +2,10 @@
 module Quivela.Parse (parseExpr, parseFile) where
 
 import Control.Lens
+import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe
+import qualified Data.Set as S
 import System.IO
 import Text.Parsec
 import Text.Parsec.Expr
@@ -24,6 +26,7 @@ languageDef =
                                      , "new"
                                      , "invariant"
                                      , "method"
+                                     , "type"
                                      ]
            , Token.reservedOpNames = ["+", "-", "*", "/", "="
                                      , "&", "|", "!", ".", "[", "]", "^"
@@ -96,7 +99,7 @@ expr = do
   where
     term = parens (withState (set inArgs False . set inFieldInit False . set inTuple False) expr)
        <|> try combExpr <|> baseExpr
-       <|> newExpr <|> methodExpr <|> invariantExpr
+       <|> newExpr <|> methodExpr <|> invariantExpr <|> typedecl
        <?> "basic expression"
     binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
     prefix  name fun       = Prefix (do{ reservedOp name; return fun })
@@ -205,10 +208,14 @@ typedecl = do
   fields <- symbol "(" *> withState (set inFieldInit True) (field `sepBy` symbol ",") <* symbol ")"
   body <- symbol "{" *> expr <* symbol "}"
   (formals, values) <- splitTypeDeclFields fields
-  return $ ETypeDecl { _typedeclName = typeName
-                     , _typedeclFormals = formals
-                     , _typedeclValues = values
-                     , _typedeclBody = body }
+  let result = ETypeDecl { _typedeclName = typeName
+                         , _typedeclFormals = formals
+                         , _typedeclValues = values
+                         , _typedeclBody = body }
+  -- Maybe move this check out of the parser to somewhere else:
+  if (S.null . fst . varBindings $ result)
+    then return result
+    else fail "Free variables in type declaration"
 
 program :: Parser Expr
 program = foldr1 ESeq <$> many1 expr

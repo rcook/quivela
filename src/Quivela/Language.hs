@@ -215,7 +215,16 @@ varBindings (EMethod name args body isInv) =
   in (bodyFree, S.empty)
 varBindings (ETuple elts) = varBindingsList (S.empty, S.empty) elts
 varBindings (ETupleProj base idx) = varBindings base `bindingSeq` varBindings idx
-varBindings (ETypeDecl _ _ _ _) = error "varBindings for type decl not implemented yet"
+varBindings (ETypeDecl name formals values body) =
+  varBindings (ENew (map (\(name, typ) -> Field { _fieldName = name
+                                                , _fieldType = typ
+                                                , _fieldInit = ENop
+                                                , _immutable = False }) formals ++
+                     map (\(name, value) -> Field { _fieldName = name
+                                                  , _fieldType = TAny
+                                                  , _fieldInit = EConst value
+                                                  , _immutable = False}) values)
+                     body)
 
 -- | Combine two pieces of binding information assuming that the second set of bindings
 -- is produced by an expression that will be evaluated after the first
