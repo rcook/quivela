@@ -99,6 +99,10 @@ data Expr = ENop
           | ETuple [Expr]
           | ETupleProj Expr Expr
           | ESeq Expr Expr
+          | ETypeDecl { _typedeclName :: String
+                      , _typedeclFormals :: [(Var, Type)]
+                      , _typedeclValues :: [(Var, Value)]
+                      , _typedeclBody :: Expr }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 instance Serialize SymValue
