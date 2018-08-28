@@ -33,10 +33,6 @@ library:
   - Quivela.Examples.ETM
   - Quivela
   other-modules:
-  - LexQuivela
-  - ParQuivela
-  - AbsQuivela
-  - ErrM
   - Quivela.Util
   - Quivela.VerifyPreludes
   dependencies:
