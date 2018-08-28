@@ -34,6 +34,7 @@ import System.IO
 import System.IO.Temp
 import System.Process
 
+import Quivela.Language
 import Quivela.SymEval
 import Quivela.Parse
 import Quivela.VerifyPreludes

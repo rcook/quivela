@@ -9,6 +9,7 @@ import Language.Haskell.TH.Quote
 import System.Microtimer
 
 import Quivela.Parse
+import Quivela.Language
 import Quivela.SymEval
 import Quivela.Verify
 

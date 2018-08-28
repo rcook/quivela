@@ -10,7 +10,7 @@ import Text.Parsec.Expr
 import qualified Text.Parsec.Token as Token
 import Text.Parsec.Language
 
-import Quivela.SymEval
+import Quivela.Language
 
 languageDef =
   emptyDef { Token.commentStart    = "/*"

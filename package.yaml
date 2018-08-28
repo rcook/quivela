@@ -31,6 +31,7 @@ library:
   - Quivela.QuasiQuote
   - Quivela.Examples
   - Quivela.Examples.ETM
+  - Quivela.Language
   - Quivela
   ghc-options:
   - -fwarn-incomplete-patterns
