@@ -58,7 +58,7 @@ objectMap =
 new(x: map int ObjT=0) {
   method add(idx: int) {
     x[idx] = (new () { method foo() { 42 } })
-  };
+  },
   method call(idx: int) {
     (x[idx]).foo()
   }
@@ -68,7 +68,7 @@ new(x: map int ObjT=0) {
 new(x: map int ObjT=0) {
   method add(idx: int) {
     x[idx] = (new () { method foo() { 42 } })
-  };
+  },
   method call(idx: int) {
     x[idx]  & 42
   }
@@ -105,7 +105,7 @@ arithExample =
 
 postIncrExample1 :: [ProofPart]
 postIncrExample1 =
-  [prog| new () { method f() { x = 0 ; x++ } } |]
+  [prog| new () { method f() { x = 0 , x++ } } |]
   ≈
   [prog| new () { method f() { 0 } } |]
   : []
@@ -114,19 +114,19 @@ postIncrExample2 :: [ProofPart]
 postIncrExample2 =
   [prog| new () { method f(x) { x++ } } |]
   ≈
-  [prog| new () { method f(x) { y = x ; x = x + 1 ; y } } |]
+  [prog| new () { method f(x) { y = x , x = x + 1 , y } } |]
   : []
 
 postIncrExample3 :: [ProofPart]
 postIncrExample3 =
-  [prog| new () { method f() { x = 0 ; x++ ; x } } |]
+  [prog| new () { method f() { x = 0 , x++ , x } } |]
   ≈
   [prog| new () { method f() { 1 } } |]
   : []
 
 postIncrementInMap :: [ProofPart]
 postIncrementInMap =
-  [prog| new (m=0) { method f() { x = 0; m = 0; m[x++] = 42; m[0] } } |]
+  [prog| new (m=0) { method f() { x = 0, m = 0, m[x++] = 42, m[0] } } |]
   ≈
   [prog| new (m=0) { method f() { 42 } } |]
   : []
@@ -138,13 +138,14 @@ leExample =
   [prog| new () { method f(x:int, y:int) { 1 } } |]
   : []
 
+
 doubleIdx :: Expr
-doubleIdx = [prog'| a = 0 ; a[0][1] = 5 ; a[0][1] |]
+doubleIdx = [prog'| a = 0 , a[0][1] = 5 , a[0][1] |]
 
 doubleFieldDeref :: Expr
 doubleFieldDeref = [prog'|
-a = (new (const x=(new(const y = 5) {1})) {1} );
+a = (new (const x=(new(const y = 5) {1})) {1} ),
 a.x.y |]
 
 incrementFieldDeref :: Expr
-incrementFieldDeref = [prog'| x = (new(a=1) { 2 }) ; x.a++ |]
+incrementFieldDeref = [prog'| x = (new(a=1) { 2 }) , x.a++ |]

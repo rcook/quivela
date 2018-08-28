@@ -55,6 +55,7 @@ library:
   - microtimer
   - HUnit
   - deepseq
+  - parsec
 
 executables:
   quivela:

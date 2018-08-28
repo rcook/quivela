@@ -1,105 +1,197 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Quivela.Parse (parseExpr, parseFile) where
 
-import Control.Applicative ((<$>))
-import Control.Arrow (second)
-import Control.Monad
-import Control.Lens hiding (Context(..))
-import Control.Lens.At
-import Control.Monad.List
+import Control.Lens
 import Control.Monad.IO.Class
-import Control.Monad.RWS.Strict
-import Data.List
-import Data.Data
-import Data.Generics
 import Data.Maybe
-import Data.Typeable
-import qualified Data.Map as M
-import qualified Data.Set as S
-import qualified ErrM as P
-import qualified AbsQuivela as P
-import qualified LexQuivela as P
-import qualified ParQuivela as P
+import System.IO
+import Text.Parsec
+import Text.Parsec.Expr
+import qualified Text.Parsec.Token as Token
+import Text.Parsec.Language
 
 import Quivela.SymEval
 
--- The normalize* functions that an expression as returned by the BNFC grammar
--- and return a more compact AST as used by the symbolic evaluator. In the long
--- run we should write a parser that produces this directly instead.
+languageDef =
+  emptyDef { Token.commentStart    = "/*"
+           , Token.commentEnd      = "*/"
+           , Token.commentLine     = "//"
+           , Token.identStart      = letter <|> char '_'
+           , Token.identLetter     = alphaNum <|> char '_'
+           , Token.reservedNames   = [ "if"
+                                     , "then"
+                                     , "else"
+                                     , "new"
+                                     , "invariant"
+                                     , "method"
+                                     ]
+           , Token.reservedOpNames = ["+", "-", "*", "/", "="
+                                     , "&", "|", "!", ".", "[", "]", "^"
+                                     ]
+           }
 
-normalizeAST :: P.Expr -> Expr
-normalizeAST e =
-  case e of
-    P.EAssign lhs rhs -> EAssign (normalizeAST lhs) (normalizeAST rhs)
-    P.EProj obj (P.Id name) ->
-      EProj (normalizeAST obj) name
-    P.EIdx base idx -> EIdx (normalizeAST base) (normalizeAST idx)
-    P.ECall (P.EVar (P.Id name)) args ->
-      ECall (EConst VNil) name (map normalizeAST args)
-    P.ECall (P.EProj obj (P.Id name)) args ->
-      ECall (normalizeAST obj) name (map normalizeAST args)
-    P.EVar (P.Id name) -> EVar name
-    P.EConst val -> EConst (normalizeVal val)
-    P.ETuple exprs -> ETuple (map normalizeAST exprs)
-    P.ETupleProj e1 e2 ->
-      ETupleProj (normalizeAST e1) (normalizeAST e2)
-    P.EMethod (P.Id name) args body ->
-      EMethod name (map normalizeArg args) (normalizeAST body) False
-    P.EInvariant (P.Id name) args body ->
-      EMethod name (map normalizeArg args) (normalizeAST body) True
-    P.ENew fields body ->
-      ENew (map normalizeField fields) (normalizeAST body)
-    P.EAmp e1 e2 ->
-      ECall (EConst VNil) "&" [normalizeAST e1, normalizeAST e2]
-    P.EOr e1 e2 ->
-      ECall (EConst VNil) "|" [normalizeAST e1, normalizeAST e2]
-    P.EEq e1 e2 ->
-      ECall (EConst VNil) "==" [normalizeAST e1, normalizeAST e2]
-    P.ENot e ->
-      ECall (EConst VNil) "!" [normalizeAST e]
-    P.EAdd e1 e2 ->
-      ECall (EConst VNil) "+" (map normalizeAST [e1, e2])
-    P.ESub e1 e2 ->
-      ECall (EConst VNil) "-" (map normalizeAST [e1, e2])
-    P.EMul e1 e2 ->
-      ECall (EConst VNil) "*" (map normalizeAST [e1, e2])
-    P.EDiv e1 e2 ->
-      ECall (EConst VNil) "/" (map normalizeAST [e1, e2])
-    P.EPostIncr e ->
-      ECall (EConst VNil) "++" [normalizeAST e]
-    P.ELt e1 e2 ->
-      ECall (EConst VNil) "<" [normalizeAST e1, normalizeAST e2]
-    P.ESeq e1 e2 ->
-      ESeq (normalizeAST e1) (normalizeAST e2)
-    _ -> error $ "[normalizeAST] Unhandled case: " ++ show e
+lexer = Token.makeTokenParser languageDef
+identifier = Token.identifier lexer -- parses an identifier
+reserved   = Token.reserved   lexer -- parses a reserved name
+reservedOp = Token.reservedOp lexer -- parses an operator
+parens     = Token.parens     lexer -- parses surrounding parenthesis:
+                                    --   parens p
+                                    -- takes care of the parenthesis and
+                                    -- uses p to parse what's inside them
+integer    = Token.integer    lexer -- parses an integer
+semi       = Token.semi       lexer -- parses a semicolon
+whiteSpace = Token.whiteSpace lexer -- parses whitespace
+symbol = Token.symbol lexer
 
-normalizeVal :: P.Val -> Value
-normalizeVal (P.VInt i) = VInt i
-normalizeVal (P.VMap) = VMap M.empty
+data ParserState =
+  ParserState { _inTuple :: Bool
+              -- ^ keeps track if we are currently parsing a tuple, in which case
+              -- we resolve the ambiguity of > as a closing bracket for the tuple.
+              -- Comparisons inside tuples can be written with explicit parentheses
+              -- as in <1, (2 > 3)>
+              , _inFieldInit :: Bool
+              , _inArgs :: Bool
+              }
+  deriving (Eq, Read, Show, Ord)
 
-normalizeArg :: P.Arg -> (Var, Type)
-normalizeArg (P.UArg (P.Id name)) = (name, TAny)
-normalizeArg (P.TArg (P.Id name) typ) = (name, normalizeType typ)
+makeLenses ''ParserState
 
-normalizeType :: P.Type -> Type
-normalizeType P.TInt = TInt
-normalizeType P.TAny = TAny
-normalizeType (P.TTuple ts) = TTuple (map normalizeType ts)
-normalizeType (P.TMap tk tv) = TMap (normalizeType tk) (normalizeType tv)
-normalizeType (P.TNamed (P.Id name)) = TNamed name
+type Parser = Parsec String ParserState
 
-normalizeField :: P.Init -> Field
-normalizeField (P.UInit mod (P.Id name) e) =
-  Field { _fieldName = name, _fieldInit = normalizeAST e
-        , _fieldType = TAny, _immutable = mod == P.ConstMod }
-normalizeField (P.TInit mod (P.Id name) t e) =
-  Field { _fieldName = name, _fieldInit = normalizeAST e
-        , _fieldType = normalizeType t, _immutable = mod == P.ConstMod }
+value :: Parser Value
+value = VInt <$> integer
+
+binCall :: String -> Expr -> Expr -> Expr
+binCall fun e1 e2 = ECall (EConst VNil) fun [e1, e2]
+
+withState :: (u -> u) -> Parsec s u a -> Parsec s u a
+withState f action = do
+  oldState <- getState
+  modifyState f
+  res <- action
+  putState oldState
+  return res
+
+expr :: Parser Expr
+expr = do
+  inTup <- (^. inTuple) <$> getState
+  inField <- (^. inFieldInit) <$> getState
+  inArg <- (^. inArgs) <$> getState
+  let table =
+        [ [ prefix "!" (ECall (EConst VNil) "!" . (:[])) ]
+        , [ postfix "++" (ECall (EConst VNil) "++" . (:[])) ]
+        , [ binary "^" ETupleProj AssocLeft ]
+        , [ binary "*" (binCall "*") AssocLeft, binary "/" (binCall "/") AssocLeft ]
+        , [ binary "+" (binCall "+") AssocLeft, binary "-" (binCall "-") AssocLeft ]
+        , [ binary "<" (binCall "<") AssocNone
+          , binary "==" (binCall "==") AssocNone ]
+          ++ (if inTup then [] else [binary ">" (binCall ">") AssocNone])
+        , [ binary "=" EAssign AssocNone ]
+        , [ binary "&" (binCall "&") AssocRight
+          , binary "|" (binCall "|") AssocRight ]
+          ++
+          (if inField || inTup || inArg then [] else [binary "," ESeq AssocRight])
+        ]
+  buildExpressionParser table term
+  where
+    term = parens (withState (set inArgs False . set inFieldInit False . set inTuple False) expr)
+       <|> try combExpr <|> baseExpr
+       <|> newExpr <|> methodExpr <|> invariantExpr
+       <?> "basic expression"
+    binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
+    prefix  name fun       = Prefix (do{ reservedOp name; return fun })
+    postfix name fun       = Postfix (do{ reservedOp name; return fun })
+
+tuple :: Parser Expr
+tuple = do
+  symbol "<"
+  elts <- withState (set inTuple True) $ expr `sepBy` symbol ","
+  symbol ">"
+  return $ ETuple elts
+
+
+baseExpr :: Parser Expr
+baseExpr = EVar <$> identifier <|> EConst <$> value
+       <|> tuple
+       <?> "number, variable, or tuple"
+
+projExpr :: Parser Expr
+projExpr = EProj <$> baseExpr <*> (symbol "." *> identifier)
+
+projExpr' :: Expr -> Parser Expr
+projExpr' expr = EProj expr <$> (symbol "." *> identifier)
+
+unqualifiedFunCall :: Parser Expr
+unqualifiedFunCall = ECall (EConst VNil) <$> identifier <*> callParams
+
+combExpr' :: Expr -> Parser Expr
+combExpr' prefix =
+  try (EIdx prefix <$> (symbol "[" *> expr <* symbol "]"))
+  <|> try (case prefix of
+              EProj obj name ->
+                ECall obj name <$> callParams
+              _ -> fail "not a function call")
+  <|> return prefix
+
+combExpr :: Parser Expr
+combExpr = do
+  prefix <- try (try unqualifiedFunCall <|> try projExpr <|> baseExpr)
+  res <- combExpr' prefix
+  try (projExpr' res <|> combExpr' res) <|> return res
+
+callParams :: Parser [Expr]
+callParams = (symbol "(" *> withState (set inArgs True) (expr `sepBy` symbol ",") <* symbol ")")
+
+typ :: Parser Type
+typ = (reserved "int" *> pure TInt)
+  <|> (symbol "*" *> pure TAny)
+  <|> (TTuple <$> (symbol "<" *> typ `sepBy` symbol "," <* symbol ">"))
+  <?> "type"
+
+field :: Parser Field
+field = do
+  isConst <- try (reserved "const" *> pure True) <|> pure False
+  id <- identifier
+  typ <- try (symbol ":" *> typ) <|> pure TAny
+  init <- try (symbol "=" *> expr) <|> pure (EVar id)
+  return $ Field { _fieldName = id
+                 , _fieldInit = init
+                 , _fieldType = typ
+                 , _immutable = isConst }
+
+newExpr :: Parser Expr
+newExpr = ENew <$> (reserved "new" *> symbol "(" *>
+                    withState (set inFieldInit True) (field `sepBy` symbol ",") <* symbol ")")
+               <*> (symbol "{" *> (foldr ESeq ENop <$> many expr) <* symbol "}")
+
+methodArg :: Parser (String, Type)
+methodArg = (do
+  id <- identifier
+  typ <- try (symbol ":" *> typ) <|> pure TAny
+  return (id, typ)) <?> "method argument"
+
+methodExpr :: Parser Expr
+methodExpr = EMethod <$> (reserved "method" *> identifier)
+                     <*> (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")")
+                     <*> (symbol "{" *> expr <* symbol "}")
+                     <*> pure False
+
+invariantExpr :: Parser Expr
+invariantExpr = EMethod <$> (reserved "invariant" *> identifier)
+                        <*> (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")")
+                        <*> (symbol "{" *> expr <* symbol "}")
+                        <*> pure True
+program :: Parser Expr
+program = foldr1 ESeq <$> many1 expr
+
+initialParserState :: ParserState
+initialParserState = ParserState { _inTuple = False, _inFieldInit = False, _inArgs = False }
 
 parseExpr :: String -> Expr
 parseExpr s =
-  case P.pExpr (P.myLexer s) of
-    P.Ok pexpr -> normalizeAST pexpr
-    P.Bad err -> error $ "Parse error: " ++ err
+  case runParser (whiteSpace *> program <* whiteSpace <* eof) initialParserState "" s of
+    Left err -> error $ "Parse error: " ++ show err
+    Right expr -> expr
 
 parseFile :: MonadIO m => FilePath -> m Expr
-parseFile f = parseExpr <$> liftIO (readFile f)
+parseFile file = parseExpr <$> liftIO (readFile file)

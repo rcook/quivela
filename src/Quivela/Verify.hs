@@ -734,6 +734,10 @@ clearCache = do
 -- @e1 ~[h1] e2 ~ e3@
 data ProofPart = Prog Expr | Hint [Invariant]
 
+instance Show ProofPart where
+  show (Prog e) = "Program:\n" ++ show e
+  show _ = "<invariant>"
+
 -- | Convert a series of proof parts into a sequence of steps
 toSteps :: [ProofPart] -> Steps
 toSteps [] = []
