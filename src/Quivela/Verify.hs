@@ -141,7 +141,7 @@ instance Show VC where
 -- | Throws an error if there is more than one result in the list. Used for
 -- evaluating programs that are not supposed to have more than one result.
 singleResult :: [Result] -> Result
-singleResult [res] = res
+singleResult [res@(_, _, [])] = res
 singleResult ress = error $ "Multiple results: " ++ show ress
 
 -- | Check if the assumptions are trivially contradictory
@@ -194,6 +194,7 @@ invToVC assms addrL (_, ctxL, pathCondL) addrR (_, ctxR, pathCondR) inv =
                     [emptyVC { _assumptions = nub $ pathCondL ++ pathCondR ++ assms
                              , _conditionName = "equalInvPreserved"
                              , _goal = f addrL ctxL :=: g addrR ctxR }]
+    _ -> return []
 
 -- | Convert an invariant into assumptions. Note that for universal
 -- invariants, this produces several assumptions.
@@ -201,6 +202,7 @@ invToAsm :: Result -> Result -> Invariant -> Verify [Prop]
 invToAsm (VRef addrL, ctxL, pathCondL) (VRef addrR, ctxR, pathCondR) inv =
   case inv of
     EqualInv f g -> return [f addrL ctxL :=: g addrR ctxR]
+    _ -> return []
 
 conjunction :: [Prop] -> Prop
 conjunction [] = PTrue
@@ -677,7 +679,7 @@ checkEqv useSolvers prefix invs lhs rhs = do
       return (mtd ^. methodName, verificationResult)
     if (not . all (null . snd) $ remainingVCs)
     then do
-      liftIO $ putStrLn "Verification failed"
+      liftIO . putStrLn $ "Verification failed for step: " ++ show lhs ++ " ≈ " ++ show rhs
       liftIO $ print remainingVCs
     else do
       cacheVerified lhs rhs
@@ -729,6 +731,7 @@ fieldsEqual fieldsL fieldsR = EqualInv (getField fieldsL) (getField fieldsR)
 fieldEqual :: [Var] -> Invariant
 fieldEqual fields = fieldsEqual fields fields
 
+-- | Clears the proof cache
 clearCache :: IO ()
 clearCache = do
   exists <- doesFileExist "cache.bin"
