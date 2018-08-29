@@ -32,8 +32,18 @@ assertEvalResult msg e v = do
   (res, _, _) <- singleResult <$> (runVerify emptyVerifyEnv $ (symEval (e, emptyCtx, [])))
   assertEqual msg res v
 
+assertParses :: String -> String -> Expr -> Assertion
+assertParses msg progText e = do
+  assertEqual msg (parseExpr progText) e
+
+parserTests = map (TestCase . uncurry3 assertParses) $
+  [ ("projections, indexing, and method calls in one expression"
+    ,"x[1].field.mtd(1, 2)"
+    ,ECall {_callObj = EProj (EIdx (EVar "x") (EConst (VInt 1))) "field", _callName = "mtd", _callArgs = [EConst (VInt 1),EConst (VInt 2)]})
+  ]
+
 tests :: Test
-tests = TestList
+tests = TestList $ parserTests ++
   [ TestCase $ assertVerified "& well-behaved" nop andExample
   , TestCase $ assertVerified "simple equality invariant" nop eqInvExample
   , TestCase $ assertVerified "simple const annotation" nop constExample

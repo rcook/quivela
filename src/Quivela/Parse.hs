@@ -102,13 +102,24 @@ expr = do
         ]
   buildExpressionParser table term
   where
-    term = parens (withState (set inArgs False . set inFieldInit False . set inTuple False) expr)
-       <|> try combExpr <|> baseExpr
-       <|> try newExpr <|> newConstrExpr <|> methodExpr <|> invariantExpr <|> typedecl
-       <?> "basic expression"
+    term = do
+      base <- parens (withState (set inArgs False . set inFieldInit False . set inTuple False) expr)
+         <|> try unqualifiedFunCall <|> baseExpr
+         <|> try newExpr <|> newConstrExpr <|> methodExpr <|> invariantExpr <|> typedecl
+         <?> "basic expression"
+      try (combExpr base) <|> return base
     binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
     prefix  name fun       = Prefix (do{ reservedOp name; return fun })
     postfix name fun       = Postfix (do{ reservedOp name; return fun })
+
+combExpr :: Expr -> Parser Expr
+combExpr prefix = do
+  next <- try (ECall prefix <$> (symbol "." *> identifier)
+                            <*> callParams)
+      <|> try (EIdx prefix <$> (symbol "[" *> expr <* symbol "]"))
+      <|> try (EProj prefix <$> (symbol "." *> identifier))
+      <|> pure ENop
+  if next == ENop then return prefix else combExpr next
 
 tuple :: Parser Expr
 tuple = do
@@ -131,21 +142,6 @@ projExpr' expr = EProj expr <$> (symbol "." *> identifier)
 
 unqualifiedFunCall :: Parser Expr
 unqualifiedFunCall = ECall (EConst VNil) <$> identifier <*> callParams
-
-combExpr' :: Expr -> Parser Expr
-combExpr' prefix =
-  try (EIdx prefix <$> (symbol "[" *> expr <* symbol "]"))
-  <|> try (case prefix of
-              EProj obj name ->
-                ECall obj name <$> callParams
-              _ -> fail "not a function call")
-  <|> return prefix
-
-combExpr :: Parser Expr
-combExpr = do
-  prefix <- try (try unqualifiedFunCall <|> try projExpr <|> baseExpr)
-  res <- combExpr' prefix
-  try (projExpr' res <|> combExpr' res) <|> return res
 
 callParams :: Parser [Expr]
 callParams = (symbol "(" *> withState (set inArgs True) (expr `sepBy` symbol ",") <* symbol ")")
@@ -183,13 +179,17 @@ newExpr = ENew <$> (reserved "new" *> symbol "(" *>
                     withState (set inFieldInit True) (uniqueFields =<< field `sepBy` symbol ",") <* symbol ")")
                <*> (symbol "{" *> (foldr ESeq ENop <$> many expr) <* symbol "}")
 
+constrArg :: Parser (Var, Expr)
+constrArg = (,) <$> (identifier <?> "constructor parameter name") <*> (symbol "=" *> expr)
+        <?> "constructor argument (x = e)"
+
 newConstrExpr :: Parser Expr
 newConstrExpr = ENewConstr <$> (reserved "new" *> identifier)
                            <*> (symbol "(" *>
                                 withState (set inFieldInit True)
-                                          (uniqueBy fst =<< constrArg `sepBy` symbol ",") <*
+                                          ((uniqueBy fst =<< constrArg `sepBy` symbol ",")
+                                           <?> "constructor keyword arguments") <*
                                 symbol ")")
-  where constrArg = (,) <$> identifier <*> (symbol "=" *> expr)
 
 methodArg :: Parser (String, Type)
 methodArg = (do
