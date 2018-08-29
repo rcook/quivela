@@ -198,10 +198,10 @@ new (x: map int T = map) {
     y = x[i] & y.f()
   }
   invariant par(i: int) {
-    !x[i] | (y = x[i] & y.f() == i)
+    !x[i] | (x[i].f() == i)
   }
 }|]
-  ≈
+  ≈ Hint [NoInfer, fieldEqual ["x"]]:
   [prog|
 type T = new(p: int) { method f() { p } }
 new (x: map int T = map) {
@@ -209,7 +209,7 @@ new (x: map int T = map) {
     x[i] = new T(x=i)
   }
   method call(i: int) {
-    y = x[i] & y.f()
+    x[i] & i
   }
 }|]
   : []
