@@ -31,6 +31,7 @@ import System.Process
 import System.IO
 
 import Quivela.Language
+import Quivela.Parse
 
 -- | The fixed environment for symbolic evaluation. Currently this
 -- only contains information about named types which are defined outside of quivela.
@@ -537,6 +538,7 @@ symEval (ECall (EConst VNil) "adversary" [], ctx, pathCond) = do
   return [(VRef (nextAddr ctx)
           , ctxObjs . at (nextAddr ctx) ?~
             (Object { _objLocals = M.empty, _objMethods = M.empty
+                    , _objType = TAny
                     , _objAdversary = True }) $ ctx
           , pathCond)]
 symEval (ECall obj name args, ctx, pathCond) =
@@ -547,12 +549,39 @@ symEval (ENew fields body, ctx, pathCond) =
   foreachM (symEvalFields fields ctx pathCond) $ \(evaledFields, ctx', pathCond') ->
     let locals = M.fromList (map (second (uncurry3 Local)) evaledFields)
         ctx'' = ctxObjs . at (nextAddr ctx') ?~ Object { _objLocals = locals
-                                                      , _objMethods = M.empty
-                                                      , _objAdversary = False
-                                                      } $ ctx'
+                                                       , _objMethods = M.empty
+                                                       , _objType = TAny
+                                                       , _objAdversary = False
+                                                       } $ ctx'
         ctx''' = set ctxThis (nextAddr ctx') ctx''
     in foreachM (symEval (body, ctx''', pathCond')) $ \(bodyVal, ctx'''', pathCond'') ->
       return [(VRef (nextAddr ctx'), set ctxThis (ctx' ^. ctxThis) ctx'''', pathCond'')]
+symEval (tdecl@(ETypeDecl name formals values body), ctx, pathCond)
+  | name `elem` M.keys (ctx ^. ctxTypeDecls) =
+    error $ "Duplicate type declaration: " ++ name
+  | otherwise = return [(VNil, ctxTypeDecls . at name ?~ tdecl $ ctx, pathCond)]
+symEval (expr@(ENewConstr typeName args), ctx, pathCond)
+  | Just tdecl <- ctx ^. ctxTypeDecls . at typeName = do
+      -- evaluate new expression stored for the type, then set the object's type
+      -- to keep track that this was constructed with a constructor
+      unless (map fst args == map fst (tdecl ^. typedeclFormals)) $
+        (error $ "Mismatch between actual and expected constructor arguments: " ++ show expr)
+      let fields = zipWith (\(name, expr) (_, typ) ->
+                              Field { _fieldName = name
+                                    , _fieldInit = expr
+                                    , _immutable = False -- FIXME: support this in type decls.
+                                    , _fieldType = typ }) args (tdecl ^. typedeclFormals) ++
+                   map (\(name, val) -> Field { _fieldName = name
+                                              , _fieldInit = expr
+                                              , _immutable = False
+                                              , _fieldType = TAny }) (tdecl ^. typedeclValues)
+
+      foreachM (symEval (ENew fields (fromJust $ tdecl ^? typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
+        case val of
+          VRef addr ->
+            return [(val, ctxObjs . ix addr . objType .~ TNamed typeName $ ctx', pathCond')]
+          _ -> return [(val, ctx', pathCond')] -- object creation may have returned an error
+  | otherwise = error $ "No such type: " ++ typeName
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
 emptyVerifyEnv :: VerifyEnv

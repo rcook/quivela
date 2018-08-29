@@ -130,7 +130,8 @@ data Method = Method { _methodName :: String
 
 data Object = Object { _objLocals :: M.Map Var Local
                      , _objMethods :: M.Map Var Method
-                     -- , _objInvariants :: M.Map Var
+                     , _objType :: Type
+                     -- ^ Type of the object if it was constructed with a named type constructor
                      , _objAdversary :: Bool -- ^ Is the object an adversary?
                      }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
@@ -145,6 +146,9 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
                        , _ctxScope :: Scope -- ^ Keeps track of local variables and arguments in a
                                             -- method call.
                        , _ctxAdvCalls :: [[Value]] -- ^ All adversary calls so far
+                       , _ctxTypeDecls :: M.Map Var Expr
+                       -- ^ Map from type names to typedecl expressions (all values in this
+                       -- map can be assumed to be of the form (ETypeDecl ...)
                        }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
@@ -247,7 +251,10 @@ varBindingsList init exprs =
 emptyCtx :: Context
 emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                                                        , _objMethods = M.empty
+                                                       , _objType = TAny
                                                        , _objAdversary = False })]
                    , _ctxThis = 0
                    , _ctxAdvCalls = []
-                   , _ctxScope = M.empty }
+                   , _ctxScope = M.empty
+                   , _ctxTypeDecls = M.empty
+                   }

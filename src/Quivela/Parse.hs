@@ -101,7 +101,7 @@ expr = do
   where
     term = parens (withState (set inArgs False . set inFieldInit False . set inTuple False) expr)
        <|> try combExpr <|> baseExpr
-       <|> newExpr <|> methodExpr <|> invariantExpr <|> typedecl
+       <|> try newExpr <|> newConstrExpr <|> methodExpr <|> invariantExpr <|> typedecl
        <?> "basic expression"
     binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
     prefix  name fun       = Prefix (do{ reservedOp name; return fun })
@@ -181,8 +181,10 @@ newExpr = ENew <$> (reserved "new" *> symbol "(" *>
 
 newConstrExpr :: Parser Expr
 newConstrExpr = ENewConstr <$> (reserved "new" *> identifier)
-                           <*> withState (set inFieldInit True)
-                                         (uniqueBy fst =<< constrArg `sepBy` symbol ",")
+                           <*> (symbol "(" *>
+                                withState (set inFieldInit True)
+                                          (uniqueBy fst =<< constrArg `sepBy` symbol ",") <*
+                                symbol ")")
   where constrArg = (,) <$> identifier <*> (symbol "=" *> expr)
 
 methodArg :: Parser (String, Type)
