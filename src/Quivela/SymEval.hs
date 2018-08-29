@@ -476,6 +476,7 @@ lookupInTuple (VTuple vs) (VInt i)
   | otherwise = error "Invalid tuple index"
 lookupInTuple tup (Sym sidx) = Sym (Proj tup (Sym sidx))
 lookupInTuple (Sym sv) vidx = Sym (Proj (Sym sv) vidx)
+lookupInTuple _ _ = error "invalid tuple lookup"
 
 isSymbolic :: Value -> Bool
 isSymbolic (Sym _) = True
@@ -527,6 +528,7 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
                        if newVal == VError
                        then (VError, ctx'', pathCond'')
                        else (oldVal, ctx'', pathCond'')) $ updPaths
+    _ -> error $ "Invalid l-value in post-increment: " ++ show lval
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
