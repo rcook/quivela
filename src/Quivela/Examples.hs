@@ -149,3 +149,6 @@ a.x.y |]
 
 incrementFieldDeref :: Expr
 incrementFieldDeref = [prog'| x = (new(a=1) { 2 }) , x.a++ |]
+
+typedeclTest :: Expr
+typedeclTest = [prog'| type T = new(x) { method f() { x } } , y = new T(x=5), y.f() |]

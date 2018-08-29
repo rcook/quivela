@@ -53,6 +53,7 @@ tests = TestList
   , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
   , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
   , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
+  , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
   ]
 
 main :: IO ()
