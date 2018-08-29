@@ -152,3 +152,36 @@ incrementFieldDeref = [prog'| x = (new(a=1) { 2 }) , x.a++ |]
 
 typedeclTest :: Expr
 typedeclTest = [prog'| type T = new(x) { method f() { x } } , y = new T(x=5), y.f() |]
+
+symcallTest :: [ProofPart]
+symcallTest =
+  [prog|
+type T = new() { method f() { 5 } }
+new (x: T = new T()) {
+  method g() { x.f() }
+}|]
+  ≈ Hint [NoInfer]:
+  [prog|
+new () {
+  method g() { 5 }
+}|]
+  : []
+
+symcallMap :: [ProofPart]
+symcallMap =
+  [prog|
+type T = new() { method f() { 5 } }
+new (x: map int T=map) {
+  method g(i: int) {
+    y = x[i] & y.f()
+  }
+} |]
+  ≈ Hint [fieldEqual ["x"]]:
+  [prog|
+type T = new() { method f() { 5 } }
+new (x: map int T = map) {
+  method g(i: int) {
+    x[i] & 5
+  }
+} |]
+  : []
