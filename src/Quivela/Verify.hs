@@ -373,11 +373,17 @@ translateVar v typ = do
       modify (\s -> varTranslations . at v ?~ tv $ s)
       return tv
 
--- | Collect all symbolic variables occurring in some data
+-- | Collect all free symbolic variables occurring in some data
+-- Only forall statements are considered as variable binders.
 collectSymVars :: Data p => p -> [(Var, Type)]
-collectSymVars vc = nubBy ((==) `on` fst) . map toTup $ listify isSymVar vc
-  where isSymVar (SymVar _ _) = True
-        isSymVar _ = False
+collectSymVars vc =
+  nubBy ((==) `on` fst) . map toTup $ everythingWithContext [] (++) (mkQ ((,) []) collect `extQ` propBind) vc
+  where collect (SymVar x t) bound
+          | x `notElem` bound = ([SymVar x t], bound)
+          | otherwise = ([], bound)
+        collect _ bound = ([], bound)
+        propBind (Forall formals x) bound = ([], bound ++ map fst formals)
+        propBind _ bound = ([], bound)
         toTup (SymVar x t) = (x, t)
 
 symVarName :: SymValue -> Var
