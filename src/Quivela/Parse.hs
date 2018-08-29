@@ -8,6 +8,7 @@ import Data.Function
 import Data.Maybe
 import Data.List
 import qualified Data.Set as S
+import qualified Data.Map as M
 import System.IO
 import Text.Parsec
 import Text.Parsec.Expr
@@ -29,6 +30,7 @@ languageDef =
                                      , "invariant"
                                      , "method"
                                      , "type"
+                                     , "map"
                                      ]
            , Token.reservedOpNames = ["+", "-", "*", "/", "="
                                      , "&", "|", "!", ".", "[", "]", "^"
@@ -65,6 +67,7 @@ type Parser = Parsec String ParserState
 
 value :: Parser Value
 value = VInt <$> integer
+    <|> (reserved "map" *> pure (VMap M.empty))
 
 binCall :: String -> Expr -> Expr -> Expr
 binCall fun e1 e2 = ECall (EConst VNil) fun [e1, e2]
@@ -151,6 +154,7 @@ typ :: Parser Type
 typ = (reserved "int" *> pure TInt)
   <|> (symbol "*" *> pure TAny)
   <|> (TTuple <$> (symbol "<" *> typ `sepBy` symbol "," <* symbol ">"))
+  <|> (TMap <$> (reserved "map" *> typ) <*> typ)
   <|> (TNamed <$> identifier)
   <?> "type"
 
