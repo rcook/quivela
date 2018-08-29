@@ -81,6 +81,12 @@ type Config = (Expr, Context, PathCond)
 type Result = (Value, Context, PathCond)
 type Results = [Result]
 
+-- | Throws an error if there is more than one result in the list. Used for
+-- evaluating programs that are not supposed to have more than one result.
+singleResult :: [Result] -> Result
+singleResult [res@(_, _, [])] = res
+singleResult ress = error $ "Multiple results: " ++ show ress
+
 -- | Subtyping relation. @t <: s@ holds iff t is a subtype of s.
 (<:) :: Type -> Type -> Bool
 x <: TAny = True
@@ -107,8 +113,8 @@ typeOfSymValue (Insert key val map)
 typeOfSymValue (Lookup idx map) = TAny
   -- we don't know if idx is going to be in the map, so
   -- we can't give more precise type information here.
-
 typeOfSymValue (AdversaryCall _) = TAny
+typeOfSymValue v = error $ "Not implemented: typeOfSymValue: " ++ show v
 
 -- | Infer the type of a value. 'TAny' is returned when the inference can't
 -- figure out anything more precise.
@@ -376,6 +382,29 @@ callMethod addr mtd args ctx pathCond =
        return [(val, set ctxThis (ctx ^. ctxThis) (set ctxScope (ctx ^. ctxScope) ctx''),
                 pathCond')]
 
+-- | Produce a list of symbolic values to use for method calls.
+symArgs :: Context -> [(Var, Type)] -> Verify ([Value], Context)
+symArgs ctx args = foldM (\(vals, ctx') (name, typ) -> do
+                             (val, ctx'') <- typedValue name typ ctx'
+                             return (vals ++ [val], ctx'')) ([], ctx) args
+-- symArgs args = mapM (uncurry typedValue) args
+
+typedValue :: Var -> Type -> Context -> Verify (Value, Context)
+typedValue name (TTuple ts) ctx = do
+  (vals, ctx') <- symArgs ctx (zip (repeat name) ts)
+  return $ (VTuple vals, ctx)
+typedValue name (TNamed t) ctx
+  | Just tdecl <- ctx ^? ctxTypeDecls . ix t = do
+      (args, ctx') <- symArgs ctx (tdecl ^. typedeclFormals)
+      (val, ctx'', []) <- singleResult <$>
+                          symEval (ENewConstr t (zip (map fst (tdecl ^. typedeclFormals))
+                                                     (map EConst args)), ctx', [])
+      return (val, ctx'')
+  | otherwise = error $ "No such type: " ++ t
+typedValue name t ctx = do
+  freshName <- freshVar name
+  return (Sym (SymVar freshName t), ctx)
+
 -- | `symEvalCall obj name args ...` symbolically evaluates a method call to method name on object obj
 symEvalCall :: Value -> Var -> [Value] -> Context -> PathCond -> Verify [(Value, Context, PathCond)]
 symEvalCall (VRef addr) name args ctx pathCond
@@ -426,18 +455,18 @@ symEvalCall VNil name args ctx pathCond
 symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
   | TMap tk tv <- typeOfValue m,
     typeOfValue k <: tk = do
-  fv <- freshVar "sym_lookup"
-  res <- symEvalCall (Sym (SymVar fv tv)) name args ctx (Not (e :=: VError) : pathCond)
+  -- If we are trying to call a method on a symbolic map lookup, we split the
+  -- path into a successful lookup and a failing one. If we have enough type
+  -- information on the map, hopefully the call will be resolved to a type for
+  -- which we know the method body.
+  (fv, ctx') <- typedValue "sym_lookup" tv ctx
+  res <- symEvalCall fv name args ctx' (Not (e :=: VError) : pathCond)
   return $ (VError, ctx, (e :=: VError) : pathCond) : res
-symEvalCall (Sym sv) name args ctx pathCond
-  | TNamed typeName <- typeOfSymValue sv = do
-      maybeTypeDen <- view (typeDenotations . at typeName)
-      case maybeTypeDen of
-        Just (ObjectType methodMap) |
-          Just mtdEffects <- methodMap ^. at name -> do
-            return . map (\(v, ctx', pathCond') -> (v, ctx', pathCond' ++ pathCond)) $ mtdEffects args ctx
-        _ ->
-          error $ "Can't handle method call on symbolic object without a method effect specification"
+symEvalCall (Sym (SymVar sv (TNamed t))) name args ctx pathCond = do
+  -- Allocate a new object of the required type
+  (sv', ctx') <- typedValue "sym_obj" (TNamed t) ctx
+  symEvalCall sv' name args ctx' pathCond
+symEvalCall (Sym sv) name args ctx pathCond = error "Not implemented: calls on untyped symbolic objects"
 symEvalCall obj name args ctx pathCond =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name
 
