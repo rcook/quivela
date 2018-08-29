@@ -2,6 +2,7 @@
 import Control.Applicative
 import Control.DeepSeq
 import Control.Exception
+import qualified Data.Map as M
 import Test.HUnit
 
 import Quivela
@@ -37,9 +38,26 @@ assertParses msg progText e = do
   assertEqual msg (parseExpr progText) e
 
 parserTests = map (TestCase . uncurry3 assertParses) $
-  [ ("projections, indexing, and method calls in one expression"
+  [ ("integer constants", "23", EConst (VInt 23))
+  , ("empty map literal", "map", EConst (VMap M.empty))
+  , ("unqualified function call", "f(1)"
+    ,ECall {_callObj = EConst VNil, _callName = "f", _callArgs = [EConst (VInt 1)]})
+  , ("tuple with comparisons", "<a, (b > c)>"
+    ,ETuple [EVar "a",ECall {_callObj = EConst VNil, _callName = ">", _callArgs = [EVar "b",EVar "c"]}])
+  , ("& is right-assoc", "a & b & c"
+    ,ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "a",ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "b",EVar "c"]}]})
+  , ("& and ,", "a & b , c & d"
+    ,ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "a",ESeq (EVar "b") (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "c",EVar "d"]})]})
+  , (", is right-assoc", "a , b , c", ESeq (EVar "a") (ESeq (EVar "b") (EVar "c")))
+  , ("& and , and | mix correctly",  "a | b , c & d",
+      ECall {_callObj = EConst VNil, _callName = "|", _callArgs = [EVar "a",ESeq (EVar "b") (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "c",EVar "d"]})]})
+  , ("projections, indexing, and method calls in one expression"
     ,"x[1].field.mtd(1, 2)"
     ,ECall {_callObj = EProj (EIdx (EVar "x") (EConst (VInt 1))) "field", _callName = "mtd", _callArgs = [EConst (VInt 1),EConst (VInt 2)]})
+  , ("call on new in parentheses"
+    ,"(new () { method f(x: int) { x = <1, 2> } }).f(7)"
+    ,ECall {_callObj = ENew {_newFields = [], _newBody = ESeq (EMethod {_emethodName = "f", _emethodArgs = [("x",TInt)], _emethodBody = EAssign {_lhs = EVar "x", _rhs = ETuple [EConst (VInt 1),EConst (VInt 2)]}, _eisInvariant = False}) ENop}, _callName = "f", _callArgs = [EConst (VInt 7)]})
+
   ]
 
 tests :: Test
