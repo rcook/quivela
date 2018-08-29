@@ -185,3 +185,31 @@ new (x: map int T = map) {
   }
 } |]
   : []
+
+symcallMapParam :: [ProofPart]
+symcallMapParam =
+  [prog|
+type T = new(p: int) { method f() { p } }
+new (x: map int T = map) {
+  method insert(i) {
+    x[i] = new T(x=i)
+  }
+  method call(i: int) {
+    y = x[i] & y.f()
+  }
+  invariant par(i: int) {
+    !x[i] | (y = x[i] & y.f() == i)
+  }
+}|]
+  ≈
+  [prog|
+type T = new(p: int) { method f() { p } }
+new (x: map int T = map) {
+  method ins(i: int) {
+    x[i] = new T(x=i)
+  }
+  method call(i: int) {
+    y = x[i] & y.f()
+  }
+}|]
+  : []
