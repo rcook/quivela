@@ -51,6 +51,8 @@ parserTests = map (TestCase . uncurry3 assertParses) $
   , (", is right-assoc", "a , b , c", ESeq (EVar "a") (ESeq (EVar "b") (EVar "c")))
   , ("& and , and | mix correctly",  "a | b , c & d",
       ECall {_callObj = EConst VNil, _callName = "|", _callArgs = [EVar "a",ESeq (EVar "b") (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "c",EVar "d"]})]})
+  , ("associativity of ! and |", "!a | b",
+     ECall {_callObj = EConst VNil, _callName = "|", _callArgs = [ECall {_callObj = EConst VNil, _callName = "!", _callArgs = [EVar "a"]},EVar "b"]})
   , ("projections, indexing, and method calls in one expression"
     ,"x[1].field.mtd(1, 2)"
     ,ECall {_callObj = EProj (EIdx (EVar "x") (EConst (VInt 1))) "field", _callName = "mtd", _callArgs = [EConst (VInt 1),EConst (VInt 2)]})
