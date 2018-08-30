@@ -335,10 +335,6 @@ methodEquivalenceVCs mtd invs args
                      else return True) vcs
 
 
--- | Print out debugging information.
-debug :: (MonadIO m) => String -> m ()
-debug = liftIO . putStrLn -- TODO: move this to a utility module or so
-
 -- | Helper function for writing equality invariants. Produces an exception
 -- if the chain of fields doesn't exist in the given context.
 getField :: [Var] -> Addr -> Context -> Value

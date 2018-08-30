@@ -260,3 +260,7 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                    , _ctxScope = M.empty
                    , _ctxTypeDecls = M.empty
                    }
+
+-- | Print out debugging information.
+debug :: (MonadIO m) => String -> m ()
+debug = liftIO . putStrLn -- TODO: move this to a utility module or so
