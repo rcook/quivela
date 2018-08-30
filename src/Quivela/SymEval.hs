@@ -86,13 +86,6 @@ singleResult :: [Result] -> Result
 singleResult [res@(_, _, _)] = res
 singleResult ress = error $ "Multiple results: " ++ show ress
 
--- | Subtyping relation. @t <: s@ holds iff t is a subtype of s.
-(<:) :: Type -> Type -> Bool
-x <: TAny = True
-TMap tk tv <: TMap tk' tv' = tk <: tk' && tv <: tv'
-TTuple ts <: TTuple ts' = length ts == length ts' && and (zipWith (<:) ts ts')
-TInt <: TInt = True
-x <: y = x == y
 
 -- | Infer type of a symbolic value. Will return 'TAny' for most operations
 -- except plain variables and inserting into a well-typed map.
@@ -340,7 +333,10 @@ defineMethod name formals body isInv ctx
 symEvalFields :: [Field] -> Context -> PathCond -> Verify [([(Var, (Value, Type, Bool))], Context, PathCond)]
 symEvalFields [] ctx pathCond = return [([], ctx, pathCond)]
 symEvalFields (field : fields) ctx pathCond =
-  foreachM (symEval (field ^. fieldInit, ctx, pathCond)) $ \(fieldVal, ctx', pathCond') ->
+  foreachM (symEval (field ^. fieldInit, ctx, pathCond)) $ \(fieldVal, ctx', pathCond') -> do
+    unless (valueHasType ctx' fieldVal (field ^. fieldType)) $ do
+      error $ "Ill-typed argument for field initialization: " ++ show fieldVal ++
+              " is not a subtype of " ++ show (field ^. fieldType)
     foreachM (symEvalFields fields ctx' pathCond') $ \(evaledFields, ctx'', pathCond'') ->
       return [((field ^. fieldName, (fieldVal, field ^. fieldType, field ^. immutable)) : evaledFields, ctx'', pathCond'')]
 
@@ -446,7 +442,7 @@ symEvalCall VNil name args ctx pathCond
   | otherwise = error $ "Call to non-existent method: " ++ name
 symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
   | TMap tk tv <- typeOfValue ctx m,
-    typeOfValue ctx k <: tk = do
+    valueHasType ctx k tk = do
   -- If we are trying to call a method on a symbolic map lookup, we split the
   -- path into a successful lookup and a failing one. If we have enough type
   -- information on the map, hopefully the call will be resolved to a type for
@@ -506,7 +502,7 @@ symEval (EAssign lhs rhs, ctx, pathCond) =
   foreachM (symEval (rhs, ctx, pathCond)) $ \(rhsVal, ctx', pathCond') ->
     foreachM (findLValue lhs ctx' pathCond') $ \case
       Just (place, ctx'', pathCond'', created) -> do
-        unless (typeOfValue ctx'' rhsVal <: (place ^. placeType)) $ do
+        unless (valueHasType ctx'' rhsVal (place ^. placeType)) $ do
           error $ "Ill-typed assignment from value of type: " ++ show (typeOfValue ctx'' rhsVal) ++
                    " to place with type: " ++ show (place ^. placeType)
         when (place ^. placeConst) $ do
