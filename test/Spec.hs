@@ -64,14 +64,18 @@ parserTests = map (TestCase . uncurry3 assertParses) $
 
 tests :: Test
 tests = TestList $ parserTests ++
-  [ TestCase $ assertVerified "& well-behaved" nop andExample
-  , TestCase $ assertVerified "simple equality invariant" nop eqInvExample
-  , TestCase $ assertVerified "simple const annotation" nop constExample
-  , TestCase $ assertEvalError "assigning to constant variable" assignConst
+  [ TestCase $ assertEvalError "assigning to constant variable" assignConst
   , TestCase $ assertEvalError "assigning to constant variable" assignConst'
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign'
   , TestCase $ assertEvalError "ill-typed assignment to method parameter" illTypedParamAssign
+  , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
+  , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
+  , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
+  , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
+  , TestCase $ assertVerified "& well-behaved" nop andExample
+  , TestCase $ assertVerified "simple equality invariant" nop eqInvExample
+  , TestCase $ assertVerified "simple const annotation" nop constExample
   , TestCase $ assertVerified "addition is commutative and 0 is identity" nop addExample
   , TestCase $ assertVerified "multiplication example" nop mulExample
   , TestCase $ assertVerified "arithmetic example" nop arithExample
@@ -80,10 +84,6 @@ tests = TestList $ parserTests ++
   , TestCase $ assertVerified "post-increment example 3" nop postIncrExample1
   , TestCase $ assertVerified "post-increment in a map index" nop postIncrementInMap
   , TestCase $ assertVerified "less-than operator example" nop leExample
-  , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
-  , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
-  , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
-  , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
   , TestCase $ assertVerified "call on symbolic object" nop symcallTest
   , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
   ]
