@@ -99,35 +99,40 @@ _ <: _ = False
 
 -- | Infer type of a symbolic value. Will return 'TAny' for most operations
 -- except plain variables and inserting into a well-typed map.
-typeOfSymValue :: SymValue -> Type
-typeOfSymValue (SymVar x t) = t
-typeOfSymValue (Proj tup idx) = TAny
+typeOfSymValue :: Context -> SymValue -> Type
+typeOfSymValue ctx (SymVar x t) = t
+typeOfSymValue ctx (Proj tup idx) = TAny
 -- we could have more precise type information here if the idx was constant
-typeOfSymValue (Insert key val map)
-  | TMap tk tv <- typeOfValue map =
-  let tk' = if typeOfValue key == tk then tk else TAny
-      tv' = if typeOfValue val == tv then tv else TAny
+typeOfSymValue ctx (Insert key val map)
+  | TMap tk tv <- typeOfValue ctx map =
+  let tk' = if typeOfValue ctx key == tk then tk else TAny
+      tv' = if typeOfValue ctx val == tv then tv else TAny
   in TMap tk' tv'
-  | otherwise = TMap (typeOfValue key) (typeOfValue val)
+  | otherwise = TMap (typeOfValue ctx key) (typeOfValue ctx val)
   -- Insert always calls turns 'map' into an actual TMap
-typeOfSymValue (Lookup idx map) = TAny
+typeOfSymValue ctx (Lookup idx map) = TAny
   -- we don't know if idx is going to be in the map, so
   -- we can't give more precise type information here.
-typeOfSymValue (AdversaryCall _) = TAny
-typeOfSymValue v = error $ "Not implemented: typeOfSymValue: " ++ show v
+typeOfSymValue ctx (AdversaryCall _) = TAny
+typeOfSymValue ctx v = error $ "Not implemented: typeOfSymValue: " ++ show v
 
 -- | Infer the type of a value. 'TAny' is returned when the inference can't
 -- figure out anything more precise.
-typeOfValue :: Value -> Type
-typeOfValue (VInt i) = TInt
-typeOfValue VError = TAny
-typeOfValue VNil = TAny
-typeOfValue (VRef a) = TAny
-typeOfValue (Sym sv) = typeOfSymValue sv
-typeOfValue (VTuple vs) = TTuple $ map typeOfValue vs
-typeOfValue (VMap vs) = TMap tk tv
-  where keyTypes = map typeOfValue . M.keys $ vs
-        valueTypes = map typeOfValue . M.elems $ vs
+typeOfValue :: Context -> Value -> Type
+typeOfValue ctx (VInt i) = TInt
+typeOfValue ctx VError = TAny
+typeOfValue ctx VNil = TAny
+typeOfValue ctx (VRef a)
+  -- If the reference points to an object, use that object's type of the reference
+  -- I'm not sure if we shouldn't instead distinguish between a reference to a typed
+  -- object and that typed object instead on the type level.
+  | Just obj <- ctx ^. ctxObjs . at a = obj ^. objType
+  | otherwise = TAny
+typeOfValue ctx (Sym sv) = typeOfSymValue ctx sv
+typeOfValue ctx (VTuple vs) = TTuple $ map (typeOfValue ctx) vs
+typeOfValue ctx (VMap vs) = TMap tk tv
+  where keyTypes = map (typeOfValue ctx) . M.keys $ vs
+        valueTypes = map (typeOfValue ctx) . M.elems $ vs
         tk | [t] <- nub keyTypes = t -- all keys have same type
            | otherwise = TAny
         tv | [t] <- nub valueTypes = t
@@ -455,12 +460,13 @@ symEvalCall VNil name args ctx pathCond
       callMethod 0 mtd args ctx pathCond
   | otherwise = error $ "Call to non-existent method: " ++ name
 symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
-  | TMap tk tv <- typeOfValue m,
-    typeOfValue k <: tk = do
+  | TMap tk tv <- typeOfValue ctx m,
+    typeOfValue ctx k <: tk = do
   -- If we are trying to call a method on a symbolic map lookup, we split the
   -- path into a successful lookup and a failing one. If we have enough type
   -- information on the map, hopefully the call will be resolved to a type for
   -- which we know the method body.
+  debug $ "Symbolic call on map lookup" ++ show (Lookup k m) ++ " of type: " ++ show (TMap tk tv)
   (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
   res <- symEvalCall fv name args ctx' ((e :=: fv) : pathCond')
   return $ (VError, ctx, (e :=: VError) : pathCond') : res
@@ -468,7 +474,9 @@ symEvalCall (symVal@(Sym (SymVar sv (TNamed t)))) name args ctx pathCond = do
   -- Allocate a new object of the required type
   (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
   symEvalCall (VRef a') name args ctx' (symVal :=: VRef a' : pathCond')
-symEvalCall (Sym sv) name args ctx pathCond = error "Not implemented: calls on untyped symbolic objects"
+symEvalCall (Sym sv) name args ctx pathCond =
+  error $ "Not implemented: calls on untyped symbolic objects: (" ++
+          show sv ++ ")." ++ name ++ "(" ++ show args ++ ")"
 symEvalCall obj name args ctx pathCond =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name
 
@@ -607,7 +615,7 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
                    map (\(name, val) -> Field { _fieldName = name
                                               , _fieldInit = expr
                                               , _immutable = False
-                                              , _fieldType = TAny }) (tdecl ^. typedeclValues)
+                                              , _fieldType = typeOfValue ctx val }) (tdecl ^. typedeclValues)
 
       foreachM (symEval (ENew fields (fromJust $ tdecl ^? typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
         case val of
