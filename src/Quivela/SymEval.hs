@@ -93,9 +93,7 @@ x <: TAny = True
 TMap tk tv <: TMap tk' tv' = tk <: tk' && tv <: tv'
 TTuple ts <: TTuple ts' = length ts == length ts' && and (zipWith (<:) ts ts')
 TInt <: TInt = True
-_ <: TNamed _ = True -- FIXME
-_ <: TMap _ _ = True -- FIXME: just for testing
-_ <: _ = False
+x <: y = x == y
 
 -- | Infer type of a symbolic value. Will return 'TAny' for most operations
 -- except plain variables and inserting into a well-typed map.
@@ -520,7 +518,12 @@ symEval (EIdx base idx, ctx, pathCond) =
 symEval (EAssign lhs rhs, ctx, pathCond) =
   foreachM (symEval (rhs, ctx, pathCond)) $ \(rhsVal, ctx', pathCond') ->
     foreachM (findLValue lhs ctx' pathCond') $ \case
-      Just (place, ctx'', pathCond'', created) ->
+      Just (place, ctx'', pathCond'', created) -> do
+        unless (typeOfValue ctx'' rhsVal <: (place ^. placeType)) $ do
+          error $ "Ill-typed assignment from value of type: " ++ show (typeOfValue ctx'' rhsVal) ++
+                   " to place with type: " ++ show (place ^. placeType)
+        when (place ^. placeConst) $ do
+          error $ "Assignment to constant location: " ++ show lhs
         return [(rhsVal, set (place ^. placeLens) rhsVal ctx'', pathCond'')]
       _ -> error $ "Invalid l-value: " ++ show lhs
 symEval (ESeq e1 e2, ctx, pathCond) = do
