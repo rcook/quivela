@@ -198,3 +198,13 @@ illTypedConstrAssign =
   [prog'|
 type T = new () { method f() { 5 } }
 (new(x: T) { method g() { x = 1 } }).g() |]
+
+illTypedObjectCreation :: Expr
+illTypedObjectCreation =
+  [prog'| new (x: <*, *> = 1) { 2 } |]
+
+illTypedObjectCreationNamed :: Expr
+illTypedObjectCreationNamed =
+  [prog'|
+type T = new (x: int) { 2 }
+new T(x=<1, 2>) |]

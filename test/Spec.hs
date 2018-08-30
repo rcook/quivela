@@ -72,6 +72,8 @@ tests = TestList $ parserTests ++
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign'
   , TestCase $ assertEvalError "ill-typed assignment to method parameter" illTypedParamAssign
   , TestCase $ assertEvalError "ill-typed assignment using object type" illTypedConstrAssign
+  , TestCase $ assertEvalError "ill-typed object creation" illTypedObjectCreation
+  , TestCase $ assertEvalError "ill-typed object creation using constructor" illTypedObjectCreationNamed
   , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
   , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
   , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
