@@ -86,6 +86,7 @@ tests = TestList $ parserTests ++
   , TestCase $ assertVerified "less-than operator example" nop leExample
   , TestCase $ assertVerified "call on symbolic object" nop symcallTest
   , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
+  , TestCase $ assertVerified "object maps with an invariant" nop symcallMapParam
   ]
 
 main :: IO ()
