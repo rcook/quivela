@@ -822,6 +822,8 @@ inferInvariants prefix step@(lhs, invs, rhs)
 -- @e1 ~[h1] e2 ~ e3@
 data ProofPart = Prog Expr | Hint [Invariant]
 
+type Proof = [ProofPart]
+
 instance Show ProofPart where
   show (Prog e) = "Program:\n" ++ show e
   show _ = "<invariant>"
