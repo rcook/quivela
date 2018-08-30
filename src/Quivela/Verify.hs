@@ -70,6 +70,31 @@ instance PartialEq Invariant where
   Infer === Infer = Just True
   Infer === _ = Just False
 
+
+-- | Verification conditions
+data VC = VC { _conditionName :: String
+             -- ^ Purely for readability purposes when generating code for other solvers
+             , _assumptions :: [Prop]
+             , _goal :: Prop }
+          deriving (Read, Ord, Eq, Data, Typeable)
+makeLenses ''VC
+
+-- | A monad for emitting code for external tools. In addition to state
+-- to keep track of fresh variables, this also includes a writer monad
+-- to collect all emitted lines.
+newtype Emitter a = Emitter { unEmitter :: RWST () [String] EmitterState IO a }
+  deriving (Functor, Applicative, Monad, MonadState EmitterState,
+            MonadWriter [String], MonadIO)
+
+data EmitterState = EmitterState { _nextEmitterVar :: M.Map String Integer
+                                 , _varTranslations :: M.Map String String
+                                 , _usedVars :: [(String, String)]
+                                 -- ^ Stores generated fresh variables and their type in the solver
+                                 }
+  deriving (Read, Show, Eq, Ord, Data, Typeable)
+
+makeLenses ''EmitterState
+
 -- | Havoc a local variable if it's not an immutable variable
 havocLocal :: Var -> Local -> Verify Local
 havocLocal name l
@@ -118,14 +143,6 @@ runVerify env action = do
   initState <- newVerifyState
   (res, state, _) <- runRWST (unVerify action) env initState
   return res
-
--- | Verification conditions
-data VC = VC { _conditionName :: String
-             -- ^ Purely for readability purposes when generating code for other solvers
-             , _assumptions :: [Prop]
-             , _goal :: Prop }
-          deriving (Read, Ord, Eq, Data, Typeable)
-makeLenses ''VC
 
 emptyVC = VC { _conditionName = "vc"
              , _assumptions = []
@@ -321,23 +338,6 @@ sharedMethods addrL ctxL addrR ctxR
   -- TODO: check that there are no extraneous methods and that they
   -- take the same number (and type) of arguments
   in filter (not . (^. isInvariant)) . map (fromJust . (`M.lookup` mtdsL)) $ sharedNames
-
-
--- | A monad for emitting code for external tools. In addition to state
--- to keep track of fresh variables, this also includes a writer monad
--- to collect all emitted lines.
-newtype Emitter a = Emitter { unEmitter :: RWST () [String] EmitterState IO a }
-  deriving (Functor, Applicative, Monad, MonadState EmitterState,
-            MonadWriter [String])
-
-data EmitterState = EmitterState { _nextEmitterVar :: M.Map String Integer
-                                 , _varTranslations :: M.Map String String
-                                 , _usedVars :: [(String, String)]
-                                 -- ^ Stores generated fresh variables and their type in the solver
-                                 }
-  deriving (Read, Show, Eq, Ord, Data, Typeable)
-
-makeLenses ''EmitterState
 
 -- TODO: merge with previous implementation
 freshEmitterVar :: String -> String -> Emitter String
