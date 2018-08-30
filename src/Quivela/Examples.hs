@@ -208,3 +208,26 @@ illTypedObjectCreationNamed =
   [prog'|
 type T = new (x: int) { 2 }
 new T(x=<1, 2>) |]
+
+incorrectVerify1 :: Proof
+incorrectVerify1 =
+  [prog| new() { method f() { 1 } } |]
+  ≈
+  [prog| new() { method f() { 2 } } |]
+  : []
+
+incorrectVerify2 :: Proof
+incorrectVerify2 =
+  [prog| new () { method f(x, y) { x + y } } |]
+  ≈
+  [prog| new () { method f(x, y) { x + x } } |]
+  : []
+
+incorrectMethodInlineCapture :: Proof
+incorrectMethodInlineCapture =
+  [prog| new () { method f(x) { y = 5 , y + x }
+                  method g(x) { y = 6, f(x) + y } } |]
+  ≈
+  [prog| new () { method f(x) { y = 5 , y + x }
+                  method g(x) { y = 6, (y = 5, y + x) + x } } |]
+  : []

@@ -8,7 +8,7 @@ import Test.HUnit
 import Quivela
 import Quivela.Examples
 
-assertVerified :: String -> Expr -> [ProofPart] -> Assertion
+assertVerified :: String -> Expr -> Proof -> Assertion
 assertVerified msg prefix proof = do
   clearCache
   res <- prove' emptyVerifyEnv prefix proof
@@ -34,11 +34,16 @@ assertEvalResult msg e v = do
   (res, _, _) <- singleResult <$> (runVerify emptyVerifyEnv $ (symEval (e, emptyCtx, [])))
   assertEqual msg res v
 
-assertVerifyError :: String -> Expr -> [ProofPart] -> Assertion
+assertVerifyError :: String -> Expr -> Proof -> Assertion
 assertVerifyError msg prefix proof = assertError msg $ prove' emptyVerifyEnv prefix proof
 
 assertParses :: String -> String -> Expr -> Assertion
 assertParses msg progText e = assertEqual msg (parseExpr progText) e
+
+doesntVerify :: String -> Expr -> Proof -> Assertion
+doesntVerify msg prefix proof = do
+  remaining <- prove' emptyVerifyEnv prefix proof
+  assertBool msg (remaining > 0)
 
 parserTests = map (TestCase . uncurry3 assertParses) $
   [ ("integer constants", "23", EConst (VInt 23))
@@ -93,6 +98,11 @@ tests = TestList $ parserTests ++
   , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
   , TestCase $ assertVerified "object maps with an invariant" nop symcallMapParam
   , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
+  ] ++
+  map (TestCase . uncurry (`doesntVerify` nop))
+  [ ("trivial contradiction", incorrectVerify1)
+  , ("incorrect arithmetic", incorrectVerify2)
+  , ("variable capure in method inlining", incorrectMethodInlineCapture)
   ]
 
 main :: IO ()
