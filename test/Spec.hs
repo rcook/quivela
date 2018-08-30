@@ -16,14 +16,15 @@ assertVerified msg prefix proof = do
 
 assertError :: String -> IO a -> Assertion
 assertError msg x = do
-  errored <- catch (x >> pure False) handler
-  if errored then
+  errored <- fmap force $ catch (x >> pure False) handler
+  if not errored then
       assertFailure $ "Should have failed: " ++ msg
   else
       assertBool "true" True
   where
      handler :: SomeException -> IO Bool
-     handler _ = pure True
+     handler _ = do
+       pure True
 
 assertEvalError :: String -> Expr -> Assertion
 assertEvalError msg e = assertError msg . runVerify emptyVerifyEnv $ symEval (e, emptyCtx, [])
