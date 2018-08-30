@@ -220,3 +220,9 @@ extraMethodsTest =
   ≈
   [prog| new() { } |]
   : []
+
+illTypedConstrAssign :: Expr
+illTypedConstrAssign =
+  [prog'|
+type T = new () { method f() { 5 } }
+(new(x: T) { method g() { x = 1 } }).g() |]

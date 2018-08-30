@@ -62,7 +62,6 @@ parserTests = map (TestCase . uncurry3 assertParses) $
   , ("call on new in parentheses"
     ,"(new () { method f(x: int) { x = <1, 2> } }).f(7)"
     ,ECall {_callObj = ENew {_newFields = [], _newBody = ESeq (EMethod {_emethodName = "f", _emethodArgs = [("x",TInt)], _emethodBody = EAssign {_lhs = EVar "x", _rhs = ETuple [EConst (VInt 1),EConst (VInt 2)]}, _eisInvariant = False}) ENop}, _callName = "f", _callArgs = [EConst (VInt 7)]})
-
   ]
 
 tests :: Test
@@ -72,6 +71,7 @@ tests = TestList $ parserTests ++
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign'
   , TestCase $ assertEvalError "ill-typed assignment to method parameter" illTypedParamAssign
+  , TestCase $ assertEvalError "ill-typed assignment using object type" illTypedConstrAssign
   , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
   , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
   , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
