@@ -52,34 +52,6 @@ illTypedParamAssign = [prog'|
 (new () { method f(x: int) { x = <1, 2> } }).f(7)
 |]
 
-objectMap :: [ProofPart]
-objectMap =
-  [prog|
-new(x: map int ObjT=0) {
-  method add(idx: int) {
-    x[idx] = (new () { method foo() { 42 } })
-  },
-  method call(idx: int) {
-    (x[idx]).foo()
-  }
-}|]
-    ≈ Hint [ fieldEqual ["x"] ]:
-    [prog|
-new(x: map int ObjT=0) {
-  method add(idx: int) {
-    x[idx] = (new () { method foo() { 42 } })
-  },
-  method call(idx: int) {
-    x[idx]  & 42
-  }
-}
-|] :[]
-
-objectMapEnv :: VerifyEnv
-objectMapEnv = typeDenotations . at "ObjT" ?~ ObjectType methodMap $ emptyVerifyEnv
-  where methodMap = M.fromList [("foo", \_ ctx -> [(VInt 42, ctx, [])])]
-
-
 addExample :: [ProofPart]
 addExample =
   [prog| new () { method f(x, y) { 0 + x + 1 + y } } |]

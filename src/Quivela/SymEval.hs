@@ -35,8 +35,7 @@ import Quivela.Parse
 
 -- | The fixed environment for symbolic evaluation. Currently this
 -- only contains information about named types which are defined outside of quivela.
-data VerifyEnv = VerifyEnv { _typeDenotations :: M.Map TypeName TypeDenotation
-                           , _splitEq :: Bool
+data VerifyEnv = VerifyEnv { _splitEq :: Bool
                            -- ^ Split == operator into two paths during symbolic evaluation?
                            }
   deriving Typeable
@@ -140,45 +139,33 @@ typeOfValue ctx (VMap vs) = TMap tk tv
 allM :: Monad m => (a -> m Bool) -> [a] -> m Bool
 allM pred list = and <$> mapM pred list
 
--- | Check whether value has given type (or a subtype of it). In the case of
--- object types we may need to symbolically evaluate methods, so this is not a
--- pure function.
-valueHasType :: Context -> Value -> Type -> Verify Bool
-valueHasType ctx _ TAny = return True
-valueHasType ctx (VInt i) TInt = return True
+-- | Check whether value has given type.
+valueHasType :: Context -> Value -> Type -> Bool
+valueHasType ctx _ TAny = True
+valueHasType ctx (VInt i) TInt = True
 valueHasType ctx (VTuple vs) (TTuple ts)
-  | length vs == length ts = allM (uncurry (valueHasType ctx)) (zip vs ts)
-  | otherwise = return False
+  | length vs == length ts = all (uncurry (valueHasType ctx)) (zip vs ts)
+  | otherwise = False
 valueHasType ctx (VMap values) (TMap tk tv) =
-  (&&) <$> allM (\key -> valueHasType ctx key tk) (M.keys values)
-       <*> allM (\val -> valueHasType ctx val tv) (M.elems values)
+  all (\key -> valueHasType ctx key tk) (M.keys values) &&
+  all (\val -> valueHasType ctx val tv) (M.elems values)
 valueHasType ctx (Sym sv) t = symValueHasType ctx sv t
-valueHasType ctx (VRef a) (TNamed typeName)
-  | Just obj <- ctx ^? ctxObjs . ix a = do
-  maybeTypeDen <- view (typeDenotations . at typeName)
-  case maybeTypeDen of
-    Nothing -> error $ "Named type not found: " ++ typeName
-    Just (ObjectType mtdEffects)
-      | M.keys mtdEffects == M.keys (obj ^. objMethods) ->
-         and <$> (forM (M.elems $ obj ^. objMethods) $ \mtd -> do
-                     mtdPaths <- symEval (mtd ^. methodBody, emptyCtx, [])
-                     undefined
-         )
-    _ -> return False
-valueHasType _ _ _ = return False
+valueHasType ctx (VRef a) t
+  | Just t' <- ctx ^? ctxObjs . ix a . objType = t == t'
+valueHasType _ _ _ = False
 
 -- | Check if symbolic value has a given type.
-symValueHasType :: Context -> SymValue -> Type -> Verify Bool
-symValueHasType ctx sv TAny = return True
-symValueHasType ctx (SymVar _ t') t = return $ t == t'
+symValueHasType :: Context -> SymValue -> Type -> Bool
+symValueHasType ctx sv TAny = True
+symValueHasType ctx (SymVar _ t') t = t == t'
 symValueHasType ctx (Insert k v m) (TMap tk tv) = do
   -- TODO: this could be more precise: if we know that m is definitely not
   -- a map at this point, we can return True if k has type tk and v has type tv
   -- we should call the solver to check if this is the case to figure this out.
-  and <$> sequence [ valueHasType ctx k tk
-                   , valueHasType ctx v tv
-                   , valueHasType ctx m (TMap tk tv)]
-symValueHasType ctx _ _ = return False
+  and [ valueHasType ctx k tk
+      , valueHasType ctx v tv
+      , valueHasType ctx m (TMap tk tv)]
+symValueHasType ctx _ _ = False
 
 -- | Value to use to initialize new variables:
 defaultValue :: Value
@@ -629,6 +616,4 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv { _typeDenotations = M.empty
-                           , _splitEq = False }
-
+emptyVerifyEnv = VerifyEnv { _splitEq = False }

@@ -175,17 +175,11 @@ data Prop = Value :=: Value
 -- them as a list simplifies reasoning about which paths are prefixes of others.
 type PathCond = [Prop]
 
--- | The denotation of a named type specifies what can be assumed about objects of more complex types
--- and what must be shown when assigning to a field of that type.
-data TypeDenotation =
-  ObjectType { _methodEffects :: M.Map Var ([Value] -> Context -> [(Value, Context, PathCond)])  }
-  deriving (Typeable)
-
 data Binding = Binding { _bindingName :: Var
                        , _bindingConst :: Bool }
   deriving (Eq, Ord, Show, Read)
 
-concat <$> mapM makeLenses [ ''Method, ''Object, ''Context, ''Place, ''TypeDenotation
+concat <$> mapM makeLenses [ ''Method, ''Object, ''Context, ''Place
                            , ''Binding, ''Local, ''Field, ''Expr, ''Value ]
 
 -- | Returns a set of free variables in the expression and a set of bound identifiers
