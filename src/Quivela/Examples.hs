@@ -191,8 +191,8 @@ symcallMapParam =
   [prog|
 type T = new(p: int) { method f() { p } }
 new (x: map int T = map) {
-  method insert(i) {
-    x[i] = new T(x=i)
+  method insert(i:int) {
+    x[i] = new T(p=i)
   }
   method call(i: int) {
     y = x[i] & y.f()
@@ -205,8 +205,8 @@ new (x: map int T = map) {
   [prog|
 type T = new(p: int) { method f() { p } }
 new (x: map int T = map) {
-  method ins(i: int) {
-    x[i] = new T(x=i)
+  method insert(i: int) {
+    x[i] = new T(p=i)
   }
   method call(i: int) {
     x[i] & i
