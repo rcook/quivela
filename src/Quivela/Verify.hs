@@ -567,12 +567,11 @@ propToZ3 (x :=>: y) = z3CallM "=>" [x, y]
 propToZ3 (x :&: y) = z3CallM "and" [x, y]
 propToZ3 (Forall [] p) = toZ3 p
 propToZ3 (Forall formals p) = do
-  -- debug $ "FORALL: " ++ show formals
   argNames <- mapM (\(x, t) -> (,) <$> (translateVar x =<< typeToZ3 t) <*> pure t) formals
   concatM [ pure "(forall ("
           , intercalate " " <$> mapM (\(n, t) -> do
                                          typ <- typeToZ3 t
-                                         return $ "(" ++ n ++ " " ++ typ ++ " )") argNames
+                                         return $ "(" ++ n ++ " " ++ typ ++ ")") argNames
           , pure ") "
           , toZ3 p
           , pure ")" ]

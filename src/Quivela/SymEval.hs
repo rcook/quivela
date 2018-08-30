@@ -466,7 +466,7 @@ symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
   -- path into a successful lookup and a failing one. If we have enough type
   -- information on the map, hopefully the call will be resolved to a type for
   -- which we know the method body.
-  debug $ "Symbolic call on map lookup" ++ show (Lookup k m) ++ " of type: " ++ show (TMap tk tv)
+  -- debug $ "Symbolic call on map lookup" ++ show (Lookup k m) ++ " of type: " ++ show (TMap tk tv)
   (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
   res <- symEvalCall fv name args ctx' ((e :=: fv) : pathCond')
   return $ (VError, ctx, (e :=: VError) : pathCond') : res
