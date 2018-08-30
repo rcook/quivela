@@ -213,3 +213,10 @@ new (x: map int T = map) {
   }
 }|]
   : []
+
+extraMethodsTest :: [ProofPart]
+extraMethodsTest =
+  [prog| new() { method f() { 1 } } |]
+  ≈
+  [prog| new() { } |]
+  : []

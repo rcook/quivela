@@ -700,6 +700,18 @@ checkEqv useSolvers prefix invs lhs rhs = do
     invsRel <- concat <$> mapM (invToVC [] a1 res1 a1' res1') invs
     remainingInvVCs <- checkVCs (invLHS ++ invRHS ++ invsRel)
     let mtds = sharedMethods a1 ctx1 a1' ctx1'
+    -- check that there are no other methods except invariants:
+    let allMethods :: Addr -> Context -> S.Set String
+        allMethods addr ctx = S.fromList . map (^. methodName)
+                            . filter (not . (^. isInvariant))
+                            . M.elems $ (ctx ^. ctxObjs . ix addr . objMethods)
+        lhsMethods = allMethods a1 ctx1
+        rhsMethods = allMethods a1' ctx1'
+    when (lhsMethods /= rhsMethods) $ do
+      -- FIXME: output which methods are the extra ones
+      let extraMtds = (lhsMethods `S.difference` rhsMethods) `S.union`
+                      (rhsMethods `S.difference` lhsMethods)
+      error $ "LHS and RHS do not have the same non-invariant methods; extra methods: " ++ show extraMtds
     (t, remainingVCs) <- fmap (second ([("_invsInit", remainingInvVCs)] ++)) . time $ forM mtds $ \mtd -> do
       debug $ "Checking method: " ++ mtd ^. methodName
       onlySimpleTypes (mtd ^. methodFormals)

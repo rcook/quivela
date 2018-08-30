@@ -33,9 +33,11 @@ assertEvalResult msg e v = do
   (res, _, _) <- singleResult <$> (runVerify emptyVerifyEnv $ (symEval (e, emptyCtx, [])))
   assertEqual msg res v
 
+assertVerifyError :: String -> Expr -> [ProofPart] -> Assertion
+assertVerifyError msg prefix proof = assertError msg $ prove' emptyVerifyEnv prefix proof
+
 assertParses :: String -> String -> Expr -> Assertion
-assertParses msg progText e = do
-  assertEqual msg (parseExpr progText) e
+assertParses msg progText e = assertEqual msg (parseExpr progText) e
 
 parserTests = map (TestCase . uncurry3 assertParses) $
   [ ("integer constants", "23", EConst (VInt 23))
@@ -87,6 +89,7 @@ tests = TestList $ parserTests ++
   , TestCase $ assertVerified "call on symbolic object" nop symcallTest
   , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
   , TestCase $ assertVerified "object maps with an invariant" nop symcallMapParam
+  , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
   ]
 
 main :: IO ()
