@@ -84,7 +84,7 @@ type Results = [Result]
 -- | Throws an error if there is more than one result in the list. Used for
 -- evaluating programs that are not supposed to have more than one result.
 singleResult :: [Result] -> Result
-singleResult [res@(_, _, [])] = res
+singleResult [res@(_, _, _)] = res
 singleResult ress = error $ "Multiple results: " ++ show ress
 
 -- | Subtyping relation. @t <: s@ holds iff t is a subtype of s.
@@ -383,27 +383,29 @@ callMethod addr mtd args ctx pathCond =
                 pathCond')]
 
 -- | Produce a list of symbolic values to use for method calls.
-symArgs :: Context -> [(Var, Type)] -> Verify ([Value], Context)
-symArgs ctx args = foldM (\(vals, ctx') (name, typ) -> do
-                             (val, ctx'') <- typedValue name typ ctx'
-                             return (vals ++ [val], ctx'')) ([], ctx) args
+symArgs :: Context -> [(Var, Type)] -> Verify ([Value], Context, PathCond)
+symArgs ctx args = foldM (\(vals, ctx', pathCond) (name, typ) -> do
+                             (val, ctx'', pathCond') <- typedValue name typ ctx'
+                             return (vals ++ [val], ctx'', pathCond' ++ pathCond)) ([], ctx, []) args
 -- symArgs args = mapM (uncurry typedValue) args
 
-typedValue :: Var -> Type -> Context -> Verify (Value, Context)
+typedValue :: Var -> Type -> Context -> Verify (Value, Context, PathCond)
 typedValue name (TTuple ts) ctx = do
-  (vals, ctx') <- symArgs ctx (zip (repeat name) ts)
-  return $ (VTuple vals, ctx)
+  (vals, ctx', pathCond') <- symArgs ctx (zip (repeat name) ts)
+  return $ (VTuple vals, ctx', pathCond')
 typedValue name (TNamed t) ctx
   | Just tdecl <- ctx ^? ctxTypeDecls . ix t = do
-      (args, ctx') <- symArgs ctx (tdecl ^. typedeclFormals)
-      (val, ctx'', []) <- singleResult <$>
+      (args, ctx', pathCond') <- symArgs ctx (tdecl ^. typedeclFormals)
+      (val, ctx'', pathCond'') <- singleResult <$>
                           symEval (ENewConstr t (zip (map fst (tdecl ^. typedeclFormals))
-                                                     (map EConst args)), ctx', [])
-      return (val, ctx'')
+                                                     (map EConst args)), ctx', pathCond')
+      let pathCondEqs = zipWith (\(name, typ) argVal -> Sym (Deref val name) :=: argVal)
+                                (tdecl ^. typedeclFormals) args
+      return (val, ctx'', pathCondEqs ++ pathCond'')
   | otherwise = error $ "No such type: " ++ t
 typedValue name t ctx = do
   freshName <- freshVar name
-  return (Sym (SymVar freshName t), ctx)
+  return (Sym (SymVar freshName t), ctx, [])
 
 -- | `symEvalCall obj name args ...` symbolically evaluates a method call to method name on object obj
 symEvalCall :: Value -> Var -> [Value] -> Context -> PathCond -> Verify [(Value, Context, PathCond)]
@@ -459,13 +461,13 @@ symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
   -- path into a successful lookup and a failing one. If we have enough type
   -- information on the map, hopefully the call will be resolved to a type for
   -- which we know the method body.
-  (fv, ctx') <- typedValue "sym_lookup" tv ctx
-  res <- symEvalCall fv name args ctx' (Not (e :=: VError) : pathCond)
-  return $ (VError, ctx, (e :=: VError) : pathCond) : res
-symEvalCall (Sym (SymVar sv (TNamed t))) name args ctx pathCond = do
+  (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
+  res <- symEvalCall fv name args ctx' ((e :=: fv) : pathCond')
+  return $ (VError, ctx, (e :=: VError) : pathCond') : res
+symEvalCall (symVal@(Sym (SymVar sv (TNamed t)))) name args ctx pathCond = do
   -- Allocate a new object of the required type
-  (sv', ctx') <- typedValue "sym_obj" (TNamed t) ctx
-  symEvalCall sv' name args ctx' pathCond
+  (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
+  symEvalCall (VRef a') name args ctx' (symVal :=: VRef a' : pathCond')
 symEvalCall (Sym sv) name args ctx pathCond = error "Not implemented: calls on untyped symbolic objects"
 symEvalCall obj name args ctx pathCond =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name

@@ -61,6 +61,8 @@ data SymValue = SymVar String Type
   | Div Value Value
   | Le Value Value
   | ITE Prop Value Value
+  | SymRef String
+  | Deref Value String
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- | Quivela values

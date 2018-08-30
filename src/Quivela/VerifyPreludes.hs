@@ -21,6 +21,9 @@ z3Prelude = [heredoc|
                      (VRef (addr Int)))
                     (nil (cons (hd Value) (tl Values)))
                     (nils (conss (hds Values) (tls Valuess)))))
+
+(declare-fun deref (Value String) Value)
+
 ;; Maps:
 (declare-fun insert (Value Value Value) Value)
 (declare-fun lookup (Value Value) Value)

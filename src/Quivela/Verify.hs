@@ -223,10 +223,11 @@ invToVCnonRelational assms addr res@(v, ctx, pathCond) inv = do
   let univInvs = collectInvariants addr ctx
   fmap concat . forM univInvs $ \univInv -> do
     let formals = univInv ^. methodFormals
-    (args, ctx') <- symArgs ctx formals
+    (args, ctx', pathCond') <- symArgs ctx formals
     let scope = M.fromList (zip (map fst formals)
                                 (zip args (map snd formals)))
-    paths <- symEval (univInv ^. methodBody, set ctxThis addr (set ctxScope scope ctx'), pathCond)
+    paths <- symEval ( univInv ^. methodBody, set ctxThis addr (set ctxScope scope ctx')
+                     , pathCond' ++ pathCond)
     foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
       return $ [VC { _assumptions = nub $ pathCondI ++ assms
                    , _conditionName = "univInvPreserved"
@@ -239,19 +240,42 @@ onlySimpleTypes foo = when (not . null . listify isNamed $ foo)
         isNamed (TNamed _) = True
         isNamed _ = False
 
+-- | Return a list of all reference values occurring in some data
+collectRefs :: Data p => p -> [Value]
+collectRefs = listify isRef
+  where isRef (VRef _) = True
+        isRef _ = False
+
 universalInvariantAssms :: Addr -> Context -> PathCond -> Verify [Prop]
 universalInvariantAssms addr ctx pathCond =
   fmap concat . forM (collectInvariants addr ctx) $ \invariantMethod -> do
     let formals = invariantMethod ^. methodFormals
     onlySimpleTypes formals
-    (args, ctx') <- symArgs ctx formals
+    (args, ctx', pathCond') <- symArgs ctx formals
     let scope = M.fromList (zip (map fst formals)
                                 (zip args (map snd formals)))
-    paths <- symEval (invariantMethod ^. methodBody, set ctxThis addr (set ctxScope scope ctx), pathCond)
+    let oldRefs = collectRefs ctx'
+    let oldSymVars = collectSymVars ctx'
+    paths <- symEval (invariantMethod ^. methodBody, set ctxThis addr (set ctxScope scope ctx), pathCond' ++ pathCond)
     let argNames = map (\(Sym (SymVar name t)) -> (name, t)) args
     foreachM (return paths) $ \(res, ctxI, pathCondI) -> do
-      return [Forall argNames (
-                 (conjunction pathCondI) :=>: (Not (res :=: VError)))]
+      -- If there were symbolic objects created on demand, we may now have a bunch
+      -- of extra symbolic variables that were introduced. Since these are going
+      -- to be arbitrary parameters, we have to quantify over them as well here:
+      -- TODO: check for duplicate symvars of different types
+      let newSymVars = collectSymVars (res, ctxI, pathCondI) \\ oldSymVars
+      let newRefs = map (\(VRef a) -> a) $ collectRefs (res, ctxI, pathCondI) \\ oldRefs
+      refVars <- mapM (freshVar . ("symref" ++) . show) newRefs
+      let replaceRef :: Data p => Addr -> Value -> p -> p
+          replaceRef a v = everywhere (mkT replace)
+            where replace (VRef a') | a == a' = v
+                                    | otherwise = VRef a'
+                  replace x = x
+          replaceAllRefs :: Data p => p -> p
+          replaceAllRefs x = foldr (\(ref, symref) p -> replaceRef ref symref p) x
+                                   (zip newRefs (map (Sym . SymRef) refVars))
+      return $ replaceAllRefs [Forall (nub $ argNames ++ map ((, TInt)) refVars ++ newSymVars) $
+                                  (conjunction pathCondI) :=>: (Not (res :=: VError))]
 
 
 -- | Generate the verification conditions for two sets of results (i.e.
@@ -533,6 +557,11 @@ z3Call fun args = "(" ++ fun ++ " " ++ intercalate " " args ++ ")"
 z3CallM :: (ToZ3 a) => String -> [a] -> Emitter String
 z3CallM fun args = z3Call fun <$> mapM toZ3 args
 
+typeToZ3 :: Type -> Emitter String
+typeToZ3 TAny = return "Value"
+typeToZ3 TInt = return "Int"
+typeToZ3 _ = return "Value"
+
 propToZ3 :: Prop -> Emitter String
 propToZ3 PTrue = return "true"
 propToZ3 PFalse = return "false"
@@ -542,9 +571,12 @@ propToZ3 (x :=>: y) = z3CallM "=>" [x, y]
 propToZ3 (x :&: y) = z3CallM "and" [x, y]
 propToZ3 (Forall [] p) = toZ3 p
 propToZ3 (Forall formals p) = do
-  argNames <- mapM (\(x, t) -> translateVar x "Value") formals
+  -- debug $ "FORALL: " ++ show formals
+  argNames <- mapM (\(x, t) -> (,) <$> (translateVar x =<< typeToZ3 t) <*> pure t) formals
   concatM [ pure "(forall ("
-          , pure $ intercalate " " (map (\n -> "(" ++ n ++ " Value)") argNames)
+          , intercalate " " <$> mapM (\(n, t) -> do
+                                         typ <- typeToZ3 t
+                                         return $ "(" ++ n ++ " " ++ typ ++ " )") argNames
           , pure ") "
           , toZ3 p
           , pure ")" ]
@@ -586,6 +618,9 @@ symValueToZ3 (Mul v1 v2) = z3CallM "mul" [v1, v2]
 symValueToZ3 (Div v1 v2) = z3CallM "divi" [v1, v2]
 symValueToZ3 (Le v1 v2) = z3CallM "le" [v1, v2]
 symValueToZ3 (ITE tst thn els) = z3Call "ite" <$> sequence [toZ3 tst, toZ3 thn, toZ3 els]
+symValueToZ3 (SymRef name) = z3Call "VRef" <$> sequence [translateVar name "Int"]
+symValueToZ3 (Deref obj name) = z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
+-- symValueToZ3 x = error $ "symValueToZ3: unhandled value: " ++ show x
 
 vcToZ3 :: VC -> Emitter ()
 vcToZ3 vc = do
@@ -673,7 +708,8 @@ checkEqv useSolvers prefix invs lhs rhs = do
     (t, remainingVCs) <- fmap (second ([("_invsInit", remainingInvVCs)] ++)) . time $ forM mtds $ \mtd -> do
       debug $ "Checking method: " ++ mtd ^. methodName
       onlySimpleTypes (mtd ^. methodFormals)
-      (args, _) <- symArgs ctx1 (mtd ^. methodFormals)
+      (args, _, _) <- symArgs ctx1 (mtd ^. methodFormals)
+      -- TODO: double-check that we don't need path condition here.
       vcs <- methodEquivalenceVCs mtd invs args res1 res1'
       verificationResult <- if useSolvers then checkVCs vcs else return vcs
 
