@@ -186,6 +186,33 @@ new (x: map int T = map) {
 }|]
   : []
 
+mapInvariantField :: Proof
+mapInvariantField = [prog|
+type T = new(p: int) { method f() { p } }
+new (x: map int T = map) {
+  method insert(i:int) {
+    x[i] = new T(p=i)
+  }
+  method call(i: int) {
+    y = x[i] & y.f()
+  }
+  invariant par(i: int) {
+    !x[i] | (x[i].p == i)
+  }
+}|]
+  ≈ Hint [NoInfer, fieldEqual ["x"]]:
+  [prog|
+type T = new(p: int) { method f() { p } }
+new (x: map int T = map) {
+  method insert(i: int) {
+    x[i] = new T(p=i)
+  }
+  method call(i: int) {
+    x[i] & i
+  }
+}|]
+  : []
+
 extraMethodsTest :: Proof
 extraMethodsTest =
   [prog| new() { method f() { 1 } } |]
