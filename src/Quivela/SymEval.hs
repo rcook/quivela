@@ -502,7 +502,15 @@ symEval (expr@(EProj obj name), ctx, pathCond) =
       VRef addr
         | Just loc <- ctx' ^? ctxObjs . ix addr . objLocals . ix name ->
           return [(loc ^. localValue, ctx', pathCond')]
-      Sym sv -> return [(Sym (Deref (Sym sv) name), ctx', pathCond')]
+      Sym sv -> do
+        -- we might be able to make progress from here by forcing
+        -- the receiver value to something more concrete:
+        forced <- force (Sym sv) ctx pathCond
+        if forced == [(val, ctx', pathCond')]
+        then return [(Sym (Deref val name), ctx', pathCond')]
+        else foreachM (pure forced) $ \(val', ctx'', pathCond'') -> do
+          symEval (EProj (EConst val') name, ctx'', pathCond'')
+      VError -> return [(VError, ctx', pathCond')]
       _ ->  error $ "Invalid projection expression: " ++ show expr
 symEval (EIdx base idx, ctx, pathCond) =
   foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
