@@ -497,10 +497,13 @@ symEval (ETupleProj etup eidx, ctx, pathCond) =
     foreachM (symEval (eidx, ctx', pathCond')) $ \(vidx, ctx'', pathCond'') ->
       return [(lookupInTuple vtup vidx, ctx'', pathCond'')]
 symEval (expr@(EProj obj name), ctx, pathCond) =
-  foreachM (findLValue expr ctx pathCond) $ \case
-    Just (place, ctx', pathCond', False) | Just v <- ctx' ^? (place ^. placeLens) ->
-      return [(v, ctx', pathCond')]
-    _ -> error $ "Invalid projection expression: " ++ show expr
+  foreachM (symEval (obj, ctx, pathCond)) $ \(val, ctx', pathCond') ->
+    case val of
+      VRef addr
+        | Just loc <- ctx' ^? ctxObjs . ix addr . objLocals . ix name ->
+          return [(loc ^. localValue, ctx', pathCond')]
+      Sym sv -> return [(Sym (Deref (Sym sv) name), ctx', pathCond')]
+      _ ->  error $ "Invalid projection expression: " ++ show expr
 symEval (EIdx base idx, ctx, pathCond) =
   foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
     foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
