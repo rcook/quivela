@@ -206,6 +206,7 @@ invToAsm (VRef addrL, ctxL, pathCondL) (VRef addrR, ctxR, pathCondR) inv =
   case inv of
     EqualInv f g -> return [f addrL ctxL :=: g addrR ctxR]
     _ -> return []
+invToAsm (v1, _, _) (v1', _ ,_) _ = error "invToAsm called with non-address arguments"
 
 conjunction :: [Prop] -> Prop
 conjunction [] = PTrue
@@ -313,6 +314,8 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
                                          Sym (AdversaryCall (ctx1' ^. ctxAdvCalls)) }
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
+resultsToVCs invs (v1, _, _) _ (v1', _, _) _ =
+  error $ "resultsToVCs called with non-address values" ++ show (v1, v1')
 
 
 -- | Collect non-trivial verification conditions for a given method, invariants and arguments
@@ -333,6 +336,8 @@ methodEquivalenceVCs mtd invs args
                      -- debug $ "Discarding VC as trivial: " ++ show vc
                      return False
                      else return True) vcs
+methodEquivalenceVCs mtd invs args (v1, _, _) (v1', _, _) =
+  error $ "methodEquivalenceVCs called with non-reference values: " ++ show (v1, v1')
 
 
 -- | Helper function for writing equality invariants. Produces an exception
@@ -358,6 +363,7 @@ sharedMethods addrL ctxL addrR ctxR
   -- TODO: check that there are no extraneous methods and that they
   -- take the same number (and type) of arguments
   in filter (not . (^. isInvariant)) . map (fromJust . (`M.lookup` mtdsL)) $ sharedNames
+  | otherwise = error "Invalid addresses passed to sharedMethods"
 
 -- TODO: merge with previous implementation
 freshEmitterVar :: String -> String -> Emitter String
@@ -405,9 +411,11 @@ collectSymVars vc =
         propBind (Forall formals x) bound = ([], bound ++ map fst formals)
         propBind _ bound = ([], bound)
         toTup (SymVar x t) = (x, t)
+        toTup _ = undefined
 
 symVarName :: SymValue -> Var
 symVarName (SymVar n t) = n
+symVarName x = error "symVarName: Not a SymVar: " ++ show x
 
 -- | Type class for things that can be converted into Dafny terms
 class ToDafny a where
@@ -464,6 +472,7 @@ symValToDafny (ITE tst thn els) = do
   tstDafny <- toDafny tst
   [thnDafny, elsDafny] <- mapM toDafny [thn, els]
   return $ "(if " ++ tstDafny ++ " then " ++ thnDafny ++ " else " ++ elsDafny ++ ")"
+symValToDafny e = error $ "symValToDafny: unhandled: " ++ show e
 
 valueToDafny :: Value -> Emitter String
 valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
@@ -801,6 +810,7 @@ commonVars prefixFields addrL ctxL addrR ctxR
       in map (\field -> prefixFields ++ [field]) (M.keys common) ++
          (concatMap (\(field, aL, aR) -> commonVars (prefixFields ++ [field]) aL ctxL aR ctxR)
                     . catMaybes . M.elems $ commonObjs)
+  | otherwise = error "commonVars called with invalid addresses"
 
 
 inferInvariants :: Expr -> Step -> Verify Step
