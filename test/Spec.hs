@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
 import Control.Applicative
-import Control.DeepSeq
+import qualified Control.DeepSeq as DS
 import Control.Exception
 import qualified Data.Map as M
 import Test.HUnit
@@ -16,7 +16,7 @@ assertVerified msg prefix proof = do
 
 assertError :: String -> IO a -> Assertion
 assertError msg x = do
-  errored <- fmap force $ catch (x >> pure False) handler
+  errored <- fmap DS.force $ catch (x >> pure False) handler
   if not errored then
       assertFailure $ "Should have failed: " ++ msg
   else

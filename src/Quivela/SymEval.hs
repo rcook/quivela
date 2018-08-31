@@ -393,6 +393,27 @@ typedValue name t ctx = do
   freshName <- freshVar name
   return (Sym (SymVar freshName t), ctx, [])
 
+-- | Introduce path split for values that can be simplified further
+-- with additional assumptions in the path condition:
+force :: Value -> Context -> PathCond -> Verify [Result]
+force e@(Sym (Lookup k m)) ctx pathCond
+  | TMap tk tv <- typeOfValue ctx m,
+    valueHasType ctx k tk = do
+  -- If we are trying to call a method on a symbolic map lookup, we split the
+  -- path into a successful lookup and a failing one. If we have enough type
+  -- information on the map, hopefully the call will be resolved to a type for
+  -- which we know the method body.
+  -- debug $ "Symbolic call on map lookup" ++ show (Lookup k m) ++ " of type: " ++ show (TMap tk tv)
+  (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
+  -- res <- symEval fv name args ctx' ((e :=: fv) : pathCond')
+  return [ (VError, ctx, (e :=: VError) : pathCond)
+         , (fv, ctx', (e :=: fv) : pathCond') ]
+force (symVal@(Sym (SymVar sv (TNamed t)))) ctx pathCond = do
+  -- Allocate a new object of the required type
+  (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
+  return [(VRef a', ctx', symVal :=: VRef a' : pathCond')]
+force v ctx pathCond = return [(v, ctx, pathCond)]
+
 -- | `symEvalCall obj name args ...` symbolically evaluates a method call to method name on object obj
 symEvalCall :: Value -> Var -> [Value] -> Context -> PathCond -> Verify [(Value, Context, PathCond)]
 symEvalCall (VRef addr) name args ctx pathCond
@@ -440,24 +461,15 @@ symEvalCall VNil name args ctx pathCond
   | Just mtd <- findMethod 0 name ctx =
       callMethod 0 mtd args ctx pathCond
   | otherwise = error $ "Call to non-existent method: " ++ name
-symEvalCall e@(Sym (Lookup k m)) name args ctx pathCond
-  | TMap tk tv <- typeOfValue ctx m,
-    valueHasType ctx k tk = do
-  -- If we are trying to call a method on a symbolic map lookup, we split the
-  -- path into a successful lookup and a failing one. If we have enough type
-  -- information on the map, hopefully the call will be resolved to a type for
-  -- which we know the method body.
-  -- debug $ "Symbolic call on map lookup" ++ show (Lookup k m) ++ " of type: " ++ show (TMap tk tv)
-  (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
-  res <- symEvalCall fv name args ctx' ((e :=: fv) : pathCond')
-  return $ (VError, ctx, (e :=: VError) : pathCond') : res
-symEvalCall (symVal@(Sym (SymVar sv (TNamed t)))) name args ctx pathCond = do
-  -- Allocate a new object of the required type
-  (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
-  symEvalCall (VRef a') name args ctx' (symVal :=: VRef a' : pathCond')
-symEvalCall (Sym sv) name args ctx pathCond =
-  error $ "Not implemented: calls on untyped symbolic objects: (" ++
-          show sv ++ ")." ++ name ++ "(" ++ show args ++ ")"
+symEvalCall (Sym sv) name args ctx pathCond = do
+  forced <- force (Sym sv) ctx pathCond
+  if forced == [(Sym sv, ctx, pathCond)]
+     then error $ "Not implemented: calls on untyped symbolic objects: (" ++
+                   show sv ++ ")." ++ name ++ "(" ++ show args ++ ")"
+     else foreachM (return forced) $ \(val, ctx', pathCond') -> do
+       -- debug $ "Forced symbolic value to: " ++ show (val, ctx', pathCond')
+       symEvalCall val name args ctx' pathCond'
+symEvalCall VError name args ctx pathCond = return [(VError, ctx, pathCond)]
 symEvalCall obj name args ctx pathCond =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name
 
