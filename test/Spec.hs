@@ -70,7 +70,7 @@ parserTests = map (TestCase . uncurry3 assertParses) $
   ]
 
 tests :: Test
-tests = TestList $ parserTests ++
+tests = TestList $ parserTests ++ invalidCases ++
   [ TestCase $ assertEvalError "assigning to constant variable" assignConst
   , TestCase $ assertEvalError "assigning to constant variable" assignConst'
   , TestCase $ assertEvalError "ill-typed assignment to object field" illTypedAssign
@@ -83,6 +83,7 @@ tests = TestList $ parserTests ++
   , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
   , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
   , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
+  , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
   , TestCase $ assertVerified "& well-behaved" nop andExample
   , TestCase $ assertVerified "simple equality invariant" nop eqInvExample
   , TestCase $ assertVerified "simple const annotation" nop constExample
@@ -97,13 +98,13 @@ tests = TestList $ parserTests ++
   , TestCase $ assertVerified "call on symbolic object" nop symcallTest
   , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
   , TestCase $ assertVerified "object maps with an invariant" nop symcallMapParam
-  , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
-  ] ++
-  map (TestCase . uncurry (`doesntVerify` nop))
-  [ ("trivial contradiction", incorrectVerify1)
-  , ("incorrect arithmetic", incorrectVerify2)
-  , ("variable capure in method inlining", incorrectMethodInlineCapture)
+  , TestCase $ assertVerified "object maps with invariant using field access" nop mapInvariantField
   ]
+  where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
+          [ ("trivial contradiction", incorrectVerify1)
+          , ("incorrect arithmetic", incorrectVerify2)
+          , ("variable capture in method inlining", incorrectMethodInlineCapture)
+          ]
 
 main :: IO ()
 main = runTestTT tests >> return ()
