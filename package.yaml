@@ -55,6 +55,7 @@ library:
   - HUnit
   - deepseq
   - parsec
+  - filepath
 
 executables:
   quivela:

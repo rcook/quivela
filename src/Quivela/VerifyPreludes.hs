@@ -11,8 +11,8 @@ import Quivela.Util
 
 -- | Z3 encoding for quivela values and operations on them
 z3Prelude :: String
-z3Prelude = $(readFileCompileTime "src/Quivela/quivela.smt2")
+z3Prelude = $(readFileCompileTime "quivela.smt2")
 
 -- | Dafny encoding for quivela values and operations on them
 dafnyPrelude :: String
-dafnyPrelude = $(readFileCompileTime "src/Quivela/quivela.dfy")
+dafnyPrelude = $(readFileCompileTime "quivela.dfy")
