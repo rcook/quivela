@@ -104,6 +104,9 @@ typeOfSymValue ctx (Lookup idx map) = TAny
   -- we don't know if idx is going to be in the map, so
   -- we can't give more precise type information here.
 typeOfSymValue ctx (AdversaryCall _) = TAny
+typeOfSymValue ctx (Add v1 v2)
+  | typeOfValue ctx v1 == TInt && typeOfValue ctx v2 == TInt = TInt
+  | otherwise = TAny
 typeOfSymValue ctx v = error $ "Not implemented: typeOfSymValue: " ++ show v
 
 -- | Infer the type of a value. 'TAny' is returned when the inference can't
@@ -150,6 +153,7 @@ valueHasType _ _ _ = False
 -- | Check if symbolic value has a given type.
 symValueHasType :: Context -> SymValue -> Type -> Bool
 symValueHasType ctx sv TAny = True
+symValueHasType ctx (Add e1 e2) TInt = valueHasType ctx e1 TInt && valueHasType ctx e2 TInt
 symValueHasType ctx (SymVar _ t') t = t == t'
 symValueHasType ctx (Insert k v m) (TMap tk tv) = do
   -- TODO: this could be more precise: if we know that m is definitely not
