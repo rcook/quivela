@@ -44,6 +44,7 @@ data Invariant = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
   -- ^ Equality of a value from the LHS and RHS contexts
   | Rewrite Expr Expr
   | NoInfer -- ^ turn off proof hint inference for this step
+  | IgnoreCache -- ^ Don't use verification cache when checking this step
   | Infer -- ^ Try to automatically infer proof hints
   -- ^ Rewriting with an assumption. Currently we only support a single
   -- rewrite hint in each proof step
@@ -69,6 +70,8 @@ instance PartialEq Invariant where
   EqualInv _ _ === _ = Just False
   Infer === Infer = Just True
   Infer === _ = Just False
+  IgnoreCache === IgnoreCache = Just True
+  IgnoreCache === _ = Just False
 
 
 -- | Verification conditions
@@ -695,7 +698,7 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs =
   where lhs' = rewriteExpr from to lhs
 checkEqv useSolvers prefix invs lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use alreadyVerified
-  if cached
+  if cached && not (any ((== Just True) . (===IgnoreCache)) invs)
   then do
     debug "Skipping cached verification step"
     return []
