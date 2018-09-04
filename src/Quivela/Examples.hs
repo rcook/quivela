@@ -293,3 +293,15 @@ ifEqvFalse =
   ≈
   [prog| new() { method f(x) { if (x) { 7 } else { 9 } } } |]
   : []
+
+commuteNews :: Proof
+commuteNews =
+  [prog|
+new () { method f() { x = new() {}, y = new() {}, <x, y> } } |]
+  ≈
+  [prog|
+new () { method f() { x = new() {}, y = new() {}, <y, x> } } |]
+  : []
+
+addressesSymbolic :: Expr
+addressesSymbolic = [prog'| x = new() {}, y = new() {}, x + y |]
