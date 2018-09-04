@@ -81,7 +81,7 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertEvalError "ill-typed object creation using constructor" illTypedObjectCreationNamed
   , TestCase $ assertEvalResult "multiple indexing expressions in sequence" doubleIdx (VInt 5)
   , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
-  , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VInt 1)
+  , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VTuple [VInt 1, VInt 2])
   , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
   , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
   , TestCase $ assertVerified "& well-behaved" nop andExample

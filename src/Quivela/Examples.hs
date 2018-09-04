@@ -120,7 +120,7 @@ a = (new (const x=(new(const y = 5) {1})) {1} ),
 a.x.y |]
 
 incrementFieldDeref :: Expr
-incrementFieldDeref = [prog'| x = (new(a=1) { 2 }) , x.a++ |]
+incrementFieldDeref = [prog'| x = (new(a=1) { 2 }) , <x.a++, x.a> |]
 
 typedeclTest :: Expr
 typedeclTest = [prog'| type T = new(x) { method f() { x } } , y = new T(x=5), y.f() |]
