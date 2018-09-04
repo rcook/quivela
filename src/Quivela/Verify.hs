@@ -151,7 +151,8 @@ emptyVC = VC { _conditionName = "vc"
 -- Not technically a correct show instance, since it's not an inverse of `read`
 instance Show VC where
   show (VC name assms goal) =
-    unlines [ "\nAssumptions: "
+    unlines [ "\nName: " ++ name
+            , "\nAssumptions: "
             , intercalate "\n" (map show assms)
             , "Goal: "
             , show goal ]
@@ -231,7 +232,7 @@ invToVCnonRelational assms addr res@(v, ctx, pathCond) inv = do
                      , pathCond' ++ pathCond)
     foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
       return $ [VC { _assumptions = nub $ pathCondI ++ assms
-                   , _conditionName = "univInvPreserved"
+                   , _conditionName = "univInvPreserved_" ++ (univInv ^. methodName)
                    , _goal = Not (res :=: VError) }]
 
 onlySimpleTypes :: Data p => p -> Verify ()
