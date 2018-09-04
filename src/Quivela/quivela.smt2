@@ -5,12 +5,29 @@
                    (((VInt (val Int))
                      VError
                      VNil
-                     (VTuple (elts Values))
-                     (VRef (addr Int)))
+                     (VTuple (elts Values)))
                     (nil (cons (hd Value) (tl Values)))
                     (nils (conss (hds Values) (tls Valuess)))))
 
 (declare-fun deref (Value String) Value)
+
+;; Addresses can be potentially coerced to any value
+(declare-fun vref (Int) Value)
+
+;; as long they don't collide with previous addresses
+;; Trick to avoid quadratic number of trigger instantiantions that
+;; would result from a conventional encoding of injectivity
+(declare-fun vref-inv (Value) Int)
+(assert (forall ((a Int))
+                (! (= (vref-inv (vref a)) a)
+                   :pattern (vref a))))
+
+;; Since programs can only obtain references from new() expressions,
+;; and we assume these are bitstrings of the length of the security parameter,
+;; they are never the empty bitstring (i.e. VError)
+(assert (forall ((a Int))
+                (not (= (vref a) VError))))
+
 
 ;; Maps:
 (declare-fun insert (Value Value Value) Value)

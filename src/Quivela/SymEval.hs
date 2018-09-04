@@ -10,6 +10,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE PatternSynonyms #-}
 module Quivela.SymEval where
 
 import Control.Applicative ((<$>))
@@ -107,6 +108,12 @@ typeOfSymValue ctx (AdversaryCall _) = TAny
 typeOfSymValue ctx (Add v1 v2)
   | typeOfValue ctx v1 == TInt && typeOfValue ctx v2 == TInt = TInt
   | otherwise = TAny
+typeOfSymValue ctx (Ref a)
+  -- If the reference points to an object, use that object's type of the reference
+  -- I'm not sure if we shouldn't instead distinguish between a reference to a typed
+  -- object and that typed object instead on the type level.
+  | Just obj <- ctx ^. ctxObjs . at a = obj ^. objType
+  | otherwise = TAny
 typeOfSymValue ctx v = error $ "Not implemented: typeOfSymValue: " ++ show v
 
 -- | Infer the type of a value. 'TAny' is returned when the inference can't
@@ -115,12 +122,6 @@ typeOfValue :: Context -> Value -> Type
 typeOfValue ctx (VInt i) = TInt
 typeOfValue ctx VError = TAny
 typeOfValue ctx VNil = TAny
-typeOfValue ctx (VRef a)
-  -- If the reference points to an object, use that object's type of the reference
-  -- I'm not sure if we shouldn't instead distinguish between a reference to a typed
-  -- object and that typed object instead on the type level.
-  | Just obj <- ctx ^. ctxObjs . at a = obj ^. objType
-  | otherwise = TAny
 typeOfValue ctx (Sym sv) = typeOfSymValue ctx sv
 typeOfValue ctx (VTuple vs) = TTuple $ map (typeOfValue ctx) vs
 typeOfValue ctx (VMap vs) = TMap tk tv
@@ -146,8 +147,6 @@ valueHasType ctx (VMap values) (TMap tk tv) =
   all (\key -> valueHasType ctx key tk) (M.keys values) &&
   all (\val -> valueHasType ctx val tv) (M.elems values)
 valueHasType ctx (Sym sv) t = symValueHasType ctx sv t
-valueHasType ctx (VRef a) t
-  | Just t' <- ctx ^? ctxObjs . ix a . objType = t == t'
 valueHasType _ _ _ = False
 
 -- | Check if symbolic value has a given type.
@@ -155,6 +154,8 @@ symValueHasType :: Context -> SymValue -> Type -> Bool
 symValueHasType ctx sv TAny = True
 symValueHasType ctx (Add e1 e2) TInt = valueHasType ctx e1 TInt && valueHasType ctx e2 TInt
 symValueHasType ctx (SymVar _ t') t = t == t'
+symValueHasType ctx (Ref a) t
+  | Just t' <- ctx ^? ctxObjs . ix a . objType = t == t'
 symValueHasType ctx (Insert k v m) (TMap tk tv) = do
   -- TODO: this could be more precise: if we know that m is definitely not
   -- a map at this point, we can return True if k has type tk and v has type tv

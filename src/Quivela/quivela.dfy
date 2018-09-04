@@ -1,7 +1,14 @@
 type Addr = nat
 type Var = string
 
-datatype Value = Int(val: int) | Tuple(elts:List<Value>) | Map(vals: List<Pair<Value, Value>>) | Ref(addr: Addr) | Nil() | Error()
+datatype Value = Int(val: int) | Tuple(elts:List<Value>) | Map(vals: List<Pair<Value, Value>>) | Nil() | Error()
+
+function method RefInv(v: Value): int
+
+function method Ref(addr: int): Value
+  ensures RefInv(Ref(addr)) == addr
+
+function method Deref(obj: Value, field: string): Value
 
 
 // lists

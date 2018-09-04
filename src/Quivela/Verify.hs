@@ -6,6 +6,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE PatternSynonyms #-}
 module Quivela.Verify where
 
 import Control.Applicative ((<$>))
@@ -476,13 +477,16 @@ symValToDafny (ITE tst thn els) = do
   tstDafny <- toDafny tst
   [thnDafny, elsDafny] <- mapM toDafny [thn, els]
   return $ "(if " ++ tstDafny ++ " then " ++ thnDafny ++ " else " ++ elsDafny ++ ")"
-symValToDafny e = error $ "symValToDafny: unhandled: " ++ show e
+symValToDafny (Ref a) = return $ "VRef(" ++ show a ++ ")"
+symValToDafny (SymRef s) = dafnyFunCall "VRef" <$> sequence [translateVar s "int"]
+symValToDafny (Deref obj field) =
+  dafnyFunCall "Deref" <$> sequence [toDafny obj, pure ("\"" ++ field ++ "\"")]
+-- symValToDafny e = error $ "symValToDafny: unhandled: " ++ show e
 
 valueToDafny :: Value -> Emitter String
 valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
 valueToDafny (VTuple vs) = concatM [pure "Tuple(", toDafny vs, pure ")"]
 valueToDafny (VMap m) = concatM [pure "Map(", toDafny (M.toList m), pure ")"]
-valueToDafny (VRef a) = return $ "Ref(" ++ show a ++ ")"
 valueToDafny VNil = return "Nil()"
 valueToDafny VError = return "Error()"
 valueToDafny (Sym sv) = symValToDafny sv
@@ -608,7 +612,8 @@ valueToZ3 VError = return "VError"
 valueToZ3 (VTuple vs) = z3Call "VTuple" <$> sequence [valuesToZ3 vs]
 valueToZ3 (VMap map) = freshEmitterVar "map" "Value" -- TODO: map same maps to same variable
 valueToZ3 VNil = return "VNil"
-valueToZ3 (VRef addr) = return $ z3Call "VRef" [show addr]
+valueToZ3 (Sym (Ref addr)) =
+  return $ z3Call "vref" [show addr] -- vref is an uninterpreted function instead of a constructor
 valueToZ3 (Sym sv) = symValueToZ3 sv
 
 symValueToZ3 :: SymValue -> Emitter String
@@ -626,9 +631,13 @@ symValueToZ3 (Mul v1 v2) = z3CallM "mul" [v1, v2]
 symValueToZ3 (Div v1 v2) = z3CallM "divi" [v1, v2]
 symValueToZ3 (Le v1 v2) = z3CallM "le" [v1, v2]
 symValueToZ3 (ITE tst thn els) = z3Call "ite" <$> sequence [toZ3 tst, toZ3 thn, toZ3 els]
-symValueToZ3 (SymRef name) = z3Call "VRef" <$> sequence [translateVar name "Int"]
+symValueToZ3 (SymRef name) = z3Call "vref" <$> sequence [translateVar name "Int"]
 symValueToZ3 (Deref obj name) = z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
+symValueToZ3 (Ref a) = z3Call "vref" <$> sequence [toZ3 a]
 -- symValueToZ3 x = error $ "symValueToZ3: unhandled value: " ++ show x
+
+instance ToZ3 Integer where
+  toZ3 = return . show
 
 vcToZ3 :: VC -> Emitter ()
 vcToZ3 vc = do

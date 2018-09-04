@@ -10,6 +10,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE PatternSynonyms #-}
 module Quivela.Language where
 
 import Control.Applicative ((<$>))
@@ -61,9 +62,14 @@ data SymValue = SymVar String Type
   | Div Value Value
   | Le Value Value
   | ITE Prop Value Value
-  | SymRef String
+  | SymRef String -- FIXME: check if we can remove these and use refs for everything
+  | Ref Addr
   | Deref Value String
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+
+-- Since we pattern-match repeatedly on references in various places, we define
+-- a pattern synonym that handles the fact that references are actually symbolic
+pattern VRef a = Sym (Ref a)
 
 -- | Quivela values
 data Value = VInt Integer
@@ -71,7 +77,6 @@ data Value = VInt Integer
   | VTuple [Value]
   | VError
   | VNil
-  | VRef Addr
   | Sym { _symVal :: SymValue }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
