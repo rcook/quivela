@@ -67,6 +67,10 @@ parserTests = map (TestCase . uncurry3 assertParses) $
   , ("call on new in parentheses"
     ,"(new () { method f(x: int) { x = <1, 2> } }).f(7)"
     ,ECall {_callObj = ENew {_newFields = [], _newBody = ESeq (EMethod {_emethodName = "f", _emethodArgs = [("x",TInt)], _emethodBody = EAssign {_lhs = EVar "x", _rhs = ETuple [EConst (VInt 1),EConst (VInt 2)]}, _eisInvariant = False}) ENop}, _callName = "f", _callArgs = [EConst (VInt 7)]})
+  , ("if expression with braces", "if (1) { 3 } else { a + b }",
+     EIf (EConst (VInt 1)) (EConst (VInt 3)) (ECall {_callObj = EConst VNil, _callName = "+", _callArgs = [EVar "a",EVar "b"]}))
+  , ("if without braces", "if (x < y) a + b else 1+2",
+     EIf (ECall {_callObj = EConst VNil, _callName = "<", _callArgs = [EVar "x",EVar "y"]}) (ECall {_callObj = EConst VNil, _callName = "+", _callArgs = [EVar "a",EVar "b"]}) (ECall {_callObj = EConst VNil, _callName = "+", _callArgs = [EConst (VInt 1),EConst (VInt 2)]}))
   ]
 
 tests :: Test

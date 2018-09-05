@@ -104,6 +104,7 @@ data Expr = ENop
           | ETuple [Expr]
           | ETupleProj Expr Expr
           | ESeq Expr Expr
+          | EIf Expr Expr Expr
           | ETypeDecl { _typedeclName :: String
                       , _typedeclFormals :: [(Var, Type)]
                       , _typedeclValues :: [(Var, Value)]

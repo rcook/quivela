@@ -103,7 +103,7 @@ expr = do
   where
     term = do
       base <- parens (withState (set inArgs False . set inFieldInit False . set inTuple False) expr)
-         <|> try unqualifiedFunCall <|> baseExpr
+         <|> try unqualifiedFunCall <|> baseExpr <|> ifExpr
          <|> try newExpr <|> newConstrExpr <|> methodExpr <|> invariantExpr <|> typedecl
          <?> "basic expression"
       try (combExpr base) <|> return base
@@ -138,6 +138,17 @@ projExpr = EProj <$> baseExpr <*> (symbol "." *> identifier)
 
 projExpr' :: Expr -> Parser Expr
 projExpr' expr = EProj expr <$> (symbol "." *> identifier)
+
+ifExpr :: Parser Expr
+ifExpr = EIf <$> (reserved "if" *> symbol "(" *> expr <* symbol ")")
+             <*> ifArm
+             <*> (reserved "else" *> ifArm)
+         <?> "conditional"
+  where ifArm = do
+          inBraces <- (symbol "{" *> pure True) <|> pure False
+          e <- expr
+          if inBraces then symbol "}" else pure ""
+          return e
 
 unqualifiedFunCall :: Parser Expr
 unqualifiedFunCall = ECall (EConst VNil) <$> identifier <*> callParams
