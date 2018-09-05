@@ -323,3 +323,10 @@ new () { method f() { if (new(){}) { 5 } else { 6 } } }|]
   [prog|
 new () { method f() { if (new(){}) { 5 } else { 6 } } }|]
   : []
+
+commuteRands :: Proof
+commuteRands =
+  [prog| new() { method f() { x = rnd(), y = rnd(), <x, y> } } |]
+  ≈ Hint [IgnoreCache]:
+  [prog| new() { method f() { x = rnd(), y = rnd(), <y, x> } } |]
+  : []

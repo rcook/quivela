@@ -117,6 +117,7 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "commute two new(){} expressions used in result" nop commuteNews
   , TestCase $ assertVerified "commute two new(){} expressions with an extra new on one side" nop commuteNewPathCondition
   , TestCase $ assertVerified "reason about new()s used only in path condition" nop commuteNewContradictoryPath
+  , TestCase $ assertVerified "syntactic sugar rnd() also commutes" nop commuteRands
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)
