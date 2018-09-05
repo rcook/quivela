@@ -305,3 +305,21 @@ new () { method f() { x = new() {}, y = new() {}, <y, x> } } |]
 
 addressesSymbolic :: Expr
 addressesSymbolic = [prog'| x = new() {}, y = new() {}, x + y |]
+
+commuteNewPathCondition :: Proof
+commuteNewPathCondition =
+  [prog|
+new () { method f() { new() {} } } |]
+  ≈ Hint [IgnoreCache]:
+  [prog|
+new () { method f() { x = new() {}, y = new() {}, if (x) { y } else { y } } }|]
+  : []
+
+commuteNewContradictoryPath :: Proof
+commuteNewContradictoryPath =
+  [prog|
+new () { method f() { if (new(){}) { 5 } else { 6 } } }|]
+  ≈ Hint [IgnoreCache]:
+  [prog|
+new () { method f() { if (new(){}) { 5 } else { 6 } } }|]
+  : []

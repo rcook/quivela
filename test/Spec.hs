@@ -114,6 +114,9 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
   , TestCase $ assertVerified "object maps with an invariant" nop symcallMapParam
   , TestCase $ assertVerified "object maps with invariant using field access" nop mapInvariantField
+  , TestCase $ assertVerified "commute two new(){} expressions used in result" nop commuteNews
+  , TestCase $ assertVerified "commute two new(){} expressions with an extra new on one side" nop commuteNewPathCondition
+  , TestCase $ assertVerified "reason about new()s used only in path condition" nop commuteNewContradictoryPath
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)
