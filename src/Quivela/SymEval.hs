@@ -354,7 +354,9 @@ symEvalList (e : es) ctx pathCond =
 
 -- | Return an unused address in the current context
 nextAddr :: Context -> Addr
-nextAddr ctx = maximum (M.keys (ctx ^. ctxObjs)) + 1
+nextAddr ctx = case ctx ^. ctxAllocStrategy of
+                 Increase -> maximum (M.keys (ctx ^. ctxObjs)) + 1
+                 Decrease -> minimum (M.keys (ctx ^. ctxObjs)) - 1
 
 -- | Uncurry a three-argument function (useful for partial application)
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d

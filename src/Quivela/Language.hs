@@ -148,6 +148,13 @@ data Object = Object { _objLocals :: M.Map Var Local
 -- as Haskell expressions.
 type TypeName = String
 
+-- | To make our lives easier reasoning about equivalences that require
+-- new to be commutative, we would like the address identifiers used on the left-hand
+-- side and the right-hand side to be disjoint. We implement this by using negative
+-- numbers for addresses on the right-hand side and positive numbers otherwise. This
+-- datatype encodes which allocation scheme to use.
+data AllocStrategy = Increase | Decrease
+  deriving (Eq, Read, Show, Ord, Data, Typeable)
 
 data Context = Context { _ctxObjs :: M.Map Addr Object
                        , _ctxThis :: Addr
@@ -157,6 +164,7 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
                        , _ctxTypeDecls :: M.Map Var Expr
                        -- ^ Map from type names to typedecl expressions (all values in this
                        -- map can be assumed to be of the form (ETypeDecl ...)
+                       , _ctxAllocStrategy :: AllocStrategy
                        }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
@@ -264,7 +272,11 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                    , _ctxAdvCalls = []
                    , _ctxScope = M.empty
                    , _ctxTypeDecls = M.empty
+                   , _ctxAllocStrategy = Increase
                    }
+
+emptyCtxRHS :: Context
+emptyCtxRHS = set ctxAllocStrategy Decrease emptyCtx
 
 -- | Print out debugging information.
 debug :: (MonadIO m) => String -> m ()

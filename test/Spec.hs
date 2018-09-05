@@ -29,10 +29,13 @@ assertError msg x = do
 assertEvalError :: String -> Expr -> Assertion
 assertEvalError msg e = assertError msg . runVerify emptyVerifyEnv $ symEval (e, emptyCtx, [])
 
-assertEvalResult :: String -> Expr -> Value -> Assertion
-assertEvalResult msg e v = do
-  (res, _, _) <- singleResult <$> (runVerify emptyVerifyEnv $ (symEval (e, emptyCtx, [])))
+assertEvalResult' :: String -> Context -> Expr -> Value -> Assertion
+assertEvalResult' msg ctx e v = do
+  (res, _, _) <- singleResult <$> (runVerify emptyVerifyEnv $ (symEval (e, ctx, [])))
   assertEqual msg res v
+
+assertEvalResult :: String -> Expr -> Value -> Assertion
+assertEvalResult msg e v = assertEvalResult' msg emptyCtx e v
 
 assertVerifyError :: String -> Expr -> Proof -> Assertion
 assertVerifyError msg prefix proof = assertError msg $ prove' emptyVerifyEnv prefix proof
@@ -88,6 +91,8 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VTuple [VInt 1, VInt 2])
   , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
   , TestCase $ assertEvalResult "Addresses can be used as symbolic values" addressesSymbolic (Sym (Add (Sym (Ref 1)) (Sym (Ref 2))))
+  , TestCase $ assertEvalResult' "Decreasing allocation strategy should yield negative addresses"
+                 (emptyCtx { _ctxAllocStrategy = Decrease }) (parseExpr "<new() {}, new() {}>") (VTuple [Sym {_symVal = Ref (-1)},Sym {_symVal = Ref (-2)}])
   , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
   , TestCase $ doesntVerify "if expression equivalence differing on one branch" nop ifEqvFalse
   , TestCase $ assertVerified "& well-behaved" nop andExample
