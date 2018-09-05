@@ -87,6 +87,7 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
   , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VTuple [VInt 1, VInt 2])
   , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
+  , TestCase $ assertEvalResult "Addresses can be used as symbolic values" addressesSymbolic (Sym (Add (Sym (Ref 1)) (Sym (Ref 2))))
   , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
   , TestCase $ doesntVerify "if expression equivalence differing on one branch" nop ifEqvFalse
   , TestCase $ assertVerified "& well-behaved" nop andExample
