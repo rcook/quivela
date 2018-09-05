@@ -258,3 +258,38 @@ incorrectMethodInlineCapture =
   [prog| new () { method f(x) { y = 5 , y + x }
                   method g(x) { y = 6, (y = 5, y + x) + x } } |]
   : []
+
+ifSymbolic :: Proof
+ifSymbolic =
+  [prog| new () { method f(x) { if (x) { 5 } else { 6 } } } |]
+  ≈
+  [prog| new () { method f(x) { if (!x) { 6 } else { 5 } } } |]
+  : []
+
+ifSimp :: Proof
+ifSimp =
+  [prog| new () { method f() { if (x) 5 else 5 } } |]
+  ≈
+  [prog| new () { method f() { 5 } } |]
+  : []
+
+ifConcreteTrue :: Proof
+ifConcreteTrue =
+  [prog| new () { method f() { if (1) 7 else 8 } } |]
+  ≈
+  [prog| new () { method f() { 7 } } |]
+  : []
+
+ifConcreteFalse :: Proof
+ifConcreteFalse =
+  [prog| new() { method f() { if (2 < 1) 7 else 8 } } |]
+  ≈
+  [prog| new() { method f() { 8 } } |]
+  : []
+
+ifEqvFalse :: Proof
+ifEqvFalse =
+  [prog| new() { method f(x) { if (x) { 7 } else { 8 } } } |]
+  ≈
+  [prog| new() { method f(x) { if (x) { 7 } else { 9 } } } |]
+  : []

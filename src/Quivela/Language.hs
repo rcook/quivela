@@ -229,6 +229,11 @@ varBindings (ETypeDecl name formals values body) =
                                                   , _immutable = False}) values)
                      body)
 varBindings (ENewConstr name values) = varBindingsList (S.empty, S.empty) (map snd values)
+varBindings (EIf cnd thn els) =
+  varBindings cnd `bindingSeq`
+  (let (thnFree, thnBound) = varBindings thn
+       (elsFree, elsBound) = varBindings els
+    in (thnFree `S.union` elsFree, thnBound `S.union` elsBound))
 
 -- | Combine two pieces of binding information assuming that the second set of bindings
 -- is produced by an expression that will be evaluated after the first

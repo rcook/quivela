@@ -536,6 +536,15 @@ symEval (EAssign lhs rhs, ctx, pathCond) =
           error $ "Assignment to constant location: " ++ show lhs
         return [(rhsVal, set (place ^. placeLens) rhsVal ctx'', pathCond'')]
       _ -> error $ "Invalid l-value: " ++ show lhs
+symEval (EIf cnd thn els, ctx, pathCond) = do
+  foreachM (symEval (cnd, ctx, pathCond)) handle
+  where handle (cndVal, ctx', pathCond')
+          | isSymbolic cndVal = do
+              thnPaths <- symEval (thn, ctx', Not (cndVal :=: VError) : pathCond')
+              elsPaths <- symEval (els, ctx', cndVal :=: VError : pathCond')
+              return $ thnPaths ++ elsPaths
+          | cndVal == VError = symEval (els, ctx', pathCond')
+          | otherwise = symEval (thn, ctx', pathCond')
 symEval (ESeq e1 e2, ctx, pathCond) = do
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     symEval (e2, ctx', pathCond')

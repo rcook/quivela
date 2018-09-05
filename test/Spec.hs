@@ -88,12 +88,17 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertEvalResult "post-increment on object field" incrementFieldDeref  (VTuple [VInt 1, VInt 2])
   , TestCase $ assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
   , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
+  , TestCase $ assertVerifyError "if expression equivalence differing on one branch" nop ifEqvFalse
   , TestCase $ assertVerified "& well-behaved" nop andExample
   , TestCase $ assertVerified "simple equality invariant" nop eqInvExample
   , TestCase $ assertVerified "simple const annotation" nop constExample
   , TestCase $ assertVerified "addition is commutative and 0 is identity" nop addExample
   , TestCase $ assertVerified "multiplication example" nop mulExample
   , TestCase $ assertVerified "arithmetic example" nop arithExample
+  , TestCase $ assertVerified "if-else with symbolic condition" nop ifSymbolic
+  , TestCase $ assertVerified "if-else with same value in both branches" nop ifSimp
+  , TestCase $ assertVerified "if-else with true guard" nop ifConcreteTrue
+  , TestCase $ assertVerified "if-else with false guard" nop ifConcreteFalse
   , TestCase $ assertVerified "post-increment example 1" nop postIncrExample3
   , TestCase $ assertVerified "post-increment example 2" nop postIncrExample2
   , TestCase $ assertVerified "post-increment example 3" nop postIncrExample1
