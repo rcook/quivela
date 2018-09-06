@@ -78,6 +78,7 @@ data Value = VInt Integer
   | VMap { _valMap :: M.Map Value Value }
   | VTuple [Value]
   | VNil
+  | VSet { _valSet :: S.Set Value }
   | Sym { _symVal :: SymValue }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
@@ -111,10 +112,19 @@ data Expr = ENop
           | ETupleProj Expr Expr
           | ESeq Expr Expr
           | EIf Expr Expr Expr
+          | EUnion Expr Expr
+          | EIntersect Expr Expr
           | ETypeDecl { _typedeclName :: String
                       , _typedeclFormals :: [(Var, Type)]
                       , _typedeclValues :: [(Var, Value)]
                       , _typedeclBody :: Expr }
+          | ESetCompr { _comprVar :: Var
+                      , _comprBase :: Expr
+                      , _comprPred :: Expr } -- set comprehensions
+          | EMapCompr { _comprVar :: Var
+                      , _comprValue :: Expr
+                      , _comprBase :: Expr
+                      , _comprPred :: Expr } -- map comprehensions
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 instance Serialize SymValue
