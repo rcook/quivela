@@ -58,10 +58,10 @@ parserTests = map (TestCase . uncurry3 assertParses) $
   , ("& is right-assoc", "a & b & c"
     ,ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "a",ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "b",EVar "c"]}]})
   , ("& and ,", "a & b , c & d"
-    ,ESeq (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "a",EVar "b"]}) (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "c",EVar "d"]}))
+    ,ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "a",ESeq (EVar "b") (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "c",EVar "d"]})]})
   , (", is right-assoc", "a , b , c", ESeq (EVar "a") (ESeq (EVar "b") (EVar "c")))
   , ("& and , and | mix correctly",  "a | b , c & d",
-     ESeq (ECall {_callObj = EConst VNil, _callName = "|", _callArgs = [EVar "a",EVar "b"]}) (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "c",EVar "d"]}))
+      ECall {_callObj = EConst VNil, _callName = "|", _callArgs = [EVar "a",ESeq (EVar "b") (ECall {_callObj = EConst VNil, _callName = "&", _callArgs = [EVar "c",EVar "d"]})]})
   , ("associativity of ! and |", "!a | b",
      ECall {_callObj = EConst VNil, _callName = "|", _callArgs = [ECall {_callObj = EConst VNil, _callName = "!", _callArgs = [EVar "a"]},EVar "b"]})
   , ("projections, indexing, and method calls in one expression"

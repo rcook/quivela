@@ -95,9 +95,10 @@ expr = do
           , binary "==" (binCall "==") AssocNone ]
           ++ (if inTup then [] else [binary ">" (binCall ">") AssocNone])
         , [ binary "=" EAssign AssocNone ]
-        , [ binary "&" (binCall "&") AssocRight ]
-        , [ binary "|" (binCall "|") AssocRight ]
-        , if inField || inTup || inArg then [] else [binary "," ESeq AssocRight]
+        , [ binary "&" (binCall "&") AssocRight
+          , binary "|" (binCall "|") AssocRight ]
+          ++
+          (if inField || inTup || inArg then [] else [binary "," ESeq AssocRight])
         ]
   buildExpressionParser table term
   where
