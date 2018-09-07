@@ -188,26 +188,26 @@ new (x: map int T = map) {
 
 mapInvariantField :: Proof
 mapInvariantField = [prog|
-type T = new(p: int) { method f() { p } }
-new (x: map int T = map) {
-  method insert(i:int) {
+type T = new(p: *) { method f() { p } }
+new (x: map * T = map) {
+  method insert(i) {
     x[i] = new T(p=i)
   }
-  method call(i: int) {
+  method call(i) {
     y = x[i] & y.f()
   }
-  invariant par(i: int) {
+  invariant par(i) {
     !x[i] | (x[i].p == i)
   }
 }|]
   ≈ Hint [NoInfer, fieldEqual ["x"]]:
   [prog|
-type T = new(p: int) { method f() { p } }
-new (x: map int T = map) {
-  method insert(i: int) {
+type T = new(p: *) { method f() { p } }
+new (x: map * T = map) {
+  method insert(i) {
     x[i] = new T(p=i)
   }
-  method call(i: int) {
+  method call(i) {
     x[i] & i
   }
 }|]
