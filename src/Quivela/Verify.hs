@@ -252,6 +252,31 @@ collectRefs = listify isRef
   where isRef (VRef _) = True
         isRef _ = False
 
+
+-- | Substitute x by v in p
+substSymVar :: Var -> Value -> Prop -> Prop
+substSymVar x v p = everywhereBut (mkQ False binds) (mkT replace) p
+  where binds (Forall vs e) = x `elem` map fst vs
+        binds _ = False
+        replace (Sym (SymVar y t)) | x == y = v
+        replace e = e
+
+-- To make Z3 cope with forall quantifications better, make sure there are no forall-quantified
+-- variables x occurring in one assumption of the form (x = E) by replacing x by E in the
+-- rest of the formula.
+onePointTransform :: [(Var, Type)] -> [Prop] -> Prop -> ([(Var, Type)], [Prop], Prop)
+onePointTransform vs assms conseq = foldr removeVar (vs, assms, conseq) spuriousAssms
+  where spuriousAssms = catMaybes $
+          map (\x -> listToMaybe . catMaybes $
+           map (\assm -> case assm of
+                           Sym (SymVar y t) :=: e -> if y == x then Just (x, e, assm) else Nothing
+                           e :=: Sym (SymVar y t) -> if y == x then Just (x, e, assm) else Nothing
+                           _ -> Nothing) assms) (map fst vs)
+        removeVar (spurVar, spurExpr, origAssm) (vs', assms', conseq') =
+          ( filter ((/= spurVar) . fst) vs'
+          , map (substSymVar spurVar spurExpr) . filter (/= origAssm) $ assms'
+          , substSymVar spurVar spurExpr conseq' )
+
 universalInvariantAssms :: Addr -> Context -> PathCond -> Verify [Prop]
 universalInvariantAssms addr ctx pathCond =
   fmap concat . forM (collectInvariants addr ctx) $ \invariantMethod -> do
@@ -280,8 +305,9 @@ universalInvariantAssms addr ctx pathCond =
           replaceAllRefs :: Data p => p -> p
           replaceAllRefs x = foldr (\(ref, symref) p -> replaceRef ref symref p) x
                                    (zip newRefs (map (Sym . SymRef) refVars))
-      return $ replaceAllRefs [Forall (nub $ argNames ++ map ((, TInt)) refVars ++ newSymVars) $
-                                  (conjunction pathCondI) :=>: (Not (res :=: VError))]
+          (vs, assms, conseq) = onePointTransform (nub $ argNames ++ map ((, TInt)) refVars ++ newSymVars)
+                                                  pathCondI (Not (res :=: VInt 0))
+      return $ replaceAllRefs [Forall vs (conjunction assms :=>: conseq)]
 
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = M.Map Addr Addr
