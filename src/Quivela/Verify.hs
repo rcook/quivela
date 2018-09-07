@@ -54,6 +54,7 @@ data ProofHint = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
   -- rewrite hint in each proof step
   | Admit
   -- ^ Don't check this step
+  | Note String
   deriving Generic
 
 -- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
@@ -76,6 +77,8 @@ instance PartialEq ProofHint where
   Infer === _ = Just False
   IgnoreCache === IgnoreCache = Just True
   IgnoreCache === _ = Just False
+  Note s === Note s' = Just (s == s')
+  Note _ === _ = Just False
 
 -- | Verification conditions
 data VC = VC { _conditionName :: String
@@ -811,9 +814,13 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs =
 checkEqv useSolvers prefix invs lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use alreadyVerified
   withCache <- view useCache
+  let noteText = concatMap (\hint -> case hint of
+                           Note n -> n
+                           _ -> "") invs
+      note = if noteText == "" then "" else noteText ++ ": "
   if cached && not (any ((== Just True) . (===IgnoreCache)) invs) && withCache
   then do
-    debug "Skipping cached verification step"
+    debug $ note ++ "Skipping cached verification step"
     return []
   else do
     (_, prefixCtx, pathCond) <- fmap singleResult .
@@ -837,9 +844,9 @@ checkEqv useSolvers prefix invs lhs rhs = do
       -- FIXME: output which methods are the extra ones
       let extraMtds = (lhsMethods `S.difference` rhsMethods) `S.union`
                       (rhsMethods `S.difference` lhsMethods)
-      error $ "LHS and RHS do not have the same non-invariant methods; extra methods: " ++ show extraMtds
+      error $ note ++ "LHS and RHS do not have the same non-invariant methods; extra methods: " ++ show extraMtds
     (t, remainingVCs) <- fmap (second ([("_invsInit", remainingInvVCs)] ++)) . time $ forM mtds $ \mtd -> do
-      debug $ "Checking method: " ++ mtd ^. methodName
+      debug $ note ++ "Checking method: " ++ mtd ^. methodName
       onlySimpleTypes (mtd ^. methodFormals)
       (args, _, _) <- symArgs ctx1 (mtd ^. methodFormals)
       -- TODO: double-check that we don't need path condition here.
@@ -849,11 +856,11 @@ checkEqv useSolvers prefix invs lhs rhs = do
       return (mtd ^. methodName, verificationResult)
     if (not . all (null . snd) $ remainingVCs)
     then do
-      liftIO . putStrLn $ "Verification failed for step: " ++ show lhs ++ " ≈ " ++ show rhs
+      liftIO . putStrLn $ note ++ "Verification failed for step: "
       liftIO $ print remainingVCs
     else do
       cacheVerified lhs rhs
-      liftIO . putStrLn $ "Verification succeeded in " ++ formatSeconds t
+      liftIO . putStrLn $ note ++ "Verification succeeded in " ++ formatSeconds t
     return remainingVCs
 
 -- | Mark a pair of expressions as successfully verified in the cache
