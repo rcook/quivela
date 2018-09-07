@@ -61,8 +61,8 @@ method EtM(e,mac) {
             <em,t>
         }
         method dec(a,c) {
-            em = c^0,
-            t = c^1,
+            em = c`0,
+            t = c`1,
             c &
             mac.verify(<a,em>,t) &
             e.dec(em)
@@ -95,8 +95,8 @@ new (const e=_e,const mac=_mac) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         e.dec(em)
@@ -113,8 +113,8 @@ new (const e=_e,const mac=MacI(_mac)) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         e.dec(em)
@@ -133,8 +133,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(e=_e) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         e.dec(em)
@@ -153,8 +153,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
@@ -173,8 +173,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         <em,t>
     }
     method dec(a:*, c:<*,*>) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
@@ -194,8 +194,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.h[em] &
@@ -216,8 +216,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=new(const e=_e,h=0) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
@@ -233,8 +233,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaC(_e)) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
@@ -250,8 +250,8 @@ new (const mac=MacI(_mac),const cpa=CpaC(_e)) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
@@ -267,8 +267,8 @@ new (const mac=MacI(_mac),const cpa=CpaI(_e)) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
@@ -284,8 +284,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.dec(em)
@@ -302,8 +302,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
         <em,t>
     }
     method dec(a, c) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.d[em]
@@ -321,8 +321,8 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e),d=0) {
         <em,t>
     }
     method dec(a:*, c:<*,*>) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.d[em]
@@ -340,8 +340,8 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
         <em,t>
     }
     method dec(a:*,c:<*,*>) {
-        em = c^0,
-        t = c^1,
+        em = c`0,
+        t = c`1,
         c &
         mac.verify(<a,em>,t) &
         cpa.d[em]
@@ -359,8 +359,8 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
          <em,t>
      }
      method dec(a:*,c:<*,*>) {
-         em = c^0,
-         t = c^1,
+         em = c`0,
+         t = c`1,
          c &
          mac.verify(<a,em>,t) &  // t & mac.tg[<a,em>] == t
          cpa.d[em] &
@@ -449,7 +449,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
     [prog|
   new (const e=(new(const e=_e,const mac=_mac) {
           method enc(a, m) { m & em = e.enc(m) & em & t = mac.tag(<a,em>) & <em,t> }
-          method dec(a, c) { em = c^0,  t = c^1,  mac.verify(<a, em>, t) & e.dec(em) }
+          method dec(a, c) { em = c`0,  t = c`1,  mac.verify(<a, em>, t) & e.dec(em) }
       }), d=0) {
       method enc(a, m) { c=e.enc(a, zero(m)) & d[<a,c>] = m & c }
       method dec(a, c) { d[<a,c>] }

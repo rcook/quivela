@@ -88,7 +88,7 @@ expr = do
   let table =
         [ [ prefix "!" (ECall (EConst VNil) "!" . (:[])) ]
         , [ postfix "++" (ECall (EConst VNil) "++" . (:[])) ]
-        , [ binary "^" ETupleProj AssocLeft ]
+        , [ binary "`" ETupleProj AssocLeft ]
         , [ binary "*" (binCall "*") AssocLeft, binary "/" (binCall "/") AssocLeft ]
         , [ binary "+" (binCall "+") AssocLeft, binary "-" (binCall "-") AssocLeft ]
         , [ binary "<" (binCall "<") AssocNone
