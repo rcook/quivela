@@ -49,6 +49,6 @@ prove' env prefix steps = do
 
 
 -- | A shorthand for rewriting using quivela terms written in concrete syntax.
-rewrite :: String -> String -> Invariant
+rewrite :: String -> String -> ProofHint
 rewrite e1 e2 = Rewrite (parseExpr e1) (parseExpr e2)
 
