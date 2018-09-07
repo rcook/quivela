@@ -45,28 +45,26 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method rcv()     { ch.rcv() & r<s & h[r++] }
 
 }|]
-   ≈ let renamedChannelEqs = map (\chanField -> fieldEqual ("ch" : tail chanField)) channelFields
-     in Hint (NoInfer : directEqs ++ renamedChannelEqs): -- inlining
+   ≈
    [prog|
 new (const n=n, const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { h[s++] = <m>, (c = ch.e.enc(ch.s,Z(m)) & n.snd(c) & ch.s++, 1), 1 }
     method rcv()     { (c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r++, m) & r<s & h[r++] }
 
 }|]
-   ≈ Hint (NoInfer : directEqs ++ renamedChannelEqs):
+   ≈
    [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { h[s++] = <m>, ((c = e.enc(ch.s,Z(m)) & ch.e.d[ch.s][c] = <Z(m)> & c) & n.snd(c) & ch.s++, 1), 1 }
     method rcv()     { c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r++, r<s & h[r++] }
 }|]
-   ≈ let commonInvs = map fieldEqual [["ch", "r"], ["ch", "s"], ["ch", "e", "d"], ["s"], ["r"], ["h"]]
-     in Hint (NoInfer : commonInvs):
+   ≈
    [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { h[s++] = <m>, (c = e.enc(ch.s,Z(m)) & ch.e.d[ch.s][c] = <Z(m)> & n.snd(c) & ch.s++), 1 }
     method rcv()     { c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r++, r<s & h[r++] }
 }|]
-    ≈ Hint ([NoInfer] ++ directEqs ++ renamedChannelEqs):
+    ≈
    [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[s++] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
@@ -74,13 +72,13 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     invariant iS()     { ch.s == s }
     invariant iR()     { ch.r == r }
 }|]
-    ≈ Hint ([NoInfer] ++ directEqs ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
     method rcv()     { c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r<ch.s & ch.r++, (ch.r-1)<ch.s & h[ch.r-1] }
 }|]
-    ≈ Hint ([NoInfer] ++ [fieldEqual ["h"]] ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
@@ -88,7 +86,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i1() { ch.r <= ch.s }
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
 }|]
-    ≈ Hint ([NoInfer] ++ [fieldEqual ["h"]] ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
@@ -96,7 +94,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i1() { ch.r <= ch.s }
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
 }|]
-    ≈ Hint ([NoInfer] ++ [fieldEqual ["h"]] ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <m> & ch.s++), 1 }
@@ -105,7 +103,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
     invariant i3(a, c) { !ch.e.d[a][c] | h[a] == ch.e.d[a][c] }
 }|]
-    ≈ Hint ([NoInfer] ++ [fieldEqual ["h"]] ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <m> & ch.s++), 1 }
@@ -114,7 +112,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
     invariant i3(a, c) { !ch.e.d[a][c] | h[a] == ch.e.d[a][c] }
 }|]
-    ≈ Hint ([NoInfer] ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e))) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & ch.e.d[ch.s][c] = <m> & ch.s++), 1 }
@@ -122,13 +120,13 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e))) {
     invariant i1() { ch.r <= ch.s }
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
 }|]
-    ≈ Hint ([NoInfer] ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e))) {
     method snd(m)    { ch.snd(m) }
     method rcv()     { ch.rcv() }
 }|]
-    ≈ Hint ([NoInfer] ++ renamedChannelEqs):
+    ≈
     [prog|
 new (const ch=ChC(n,AEAD(e))) {
     method snd(m)    { ch.snd(m) }
