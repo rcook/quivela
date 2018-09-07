@@ -31,13 +31,13 @@ prove (set useCache False emptyVerifyEnv)
          eqs = directEqs ++
                map (fieldEqual) channelFields in
    [prog| Fifo(ChC(n, AEAD(e))) |]
-   ≈ Hint (NoInfer : eqs) :
+   ≈ Hint ([Note "Unfold Fifo", NoInfer] ++ eqs) :
    [prog|
 new (const n=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { h[s++] = <m>, n.snd(Z(m)), 1 }
     method rcv()     { n.rcv() & r<s & h[r++] }
 }|]
-   ≈ Hint (NoInfer : directEqs ++
+   ≈ Hint ([Note "Rename n", NoInfer] ++ directEqs ++
            map (\chanField -> fieldsEqual chanField ("ch" : tail chanField)) channelFields): -- renaming n to ch, caching ch.n as n, ch.e.e as e
    [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
@@ -45,26 +45,26 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method rcv()     { ch.rcv() & r<s & h[r++] }
 
 }|]
-   ≈
+   ≈ Hint [Note "Inline calls to ch.*"]:
    [prog|
 new (const n=n, const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { h[s++] = <m>, (c = ch.e.enc(ch.s,Z(m)) & n.snd(c) & ch.s++, 1), 1 }
     method rcv()     { (c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r++, m) & r<s & h[r++] }
 
 }|]
-   ≈
+   ≈ Hint [Note "Inline call to ch.e.enc"]:
    [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { h[s++] = <m>, ((c = e.enc(ch.s,Z(m)) & ch.e.d[ch.s][c] = <Z(m)> & c) & n.snd(c) & ch.s++, 1), 1 }
     method rcv()     { c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r++, r<s & h[r++] }
 }|]
-   ≈
+   ≈ Hint [Note "Associativity; logic"]:
    [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { h[s++] = <m>, (c = e.enc(ch.s,Z(m)) & ch.e.d[ch.s][c] = <Z(m)> & n.snd(c) & ch.s++), 1 }
     method rcv()     { c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r++, r<s & h[r++] }
 }|]
-    ≈
+    ≈ Hint [Note "Adding invariants ch.s == s, ch.r == r"]:
    [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[s++] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
@@ -72,13 +72,13 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     invariant iS()     { ch.s == s }
     invariant iR()     { ch.r == r }
 }|]
-    ≈
+    ≈ Hint [Note "Replace s and r by ch.s and ch.r"]:
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),s=0,r=0,h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
     method rcv()     { c = n.rcv() & m=ch.e.d[ch.r][c] & ch.r<ch.s & ch.r++, (ch.r-1)<ch.s & h[ch.r-1] }
 }|]
-    ≈
+    ≈ Hint [Note "Invariants ch.r <= ch.s and ch.e.d[a][c] ==> a < ch.s"]:
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
@@ -86,7 +86,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i1() { ch.r <= ch.s }
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
 }|]
-    ≈
+    ≈ Hint [Note "Store m instead Z(m) in h"]:
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <Z(m)> & ch.s++), 1 }
@@ -94,7 +94,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i1() { ch.r <= ch.s }
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
 }|]
-    ≈
+    ≈ Hint [Note "Invariant ch.e.d[a][c] ==> h[a] == ch.e.d[a][c]"]:
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <m> & ch.s++), 1 }
@@ -103,7 +103,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
     invariant i3(a, c) { !ch.e.d[a][c] | h[a] == ch.e.d[a][c] }
 }|]
-    ≈
+    ≈ Hint [Note "Replace h[ch.r-1] by m"]:
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & h[ch.s] = <m> & ch.e.d[ch.s][c] = <m> & ch.s++), 1 }
@@ -112,7 +112,7 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e)),h=0) {
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
     invariant i3(a, c) { !ch.e.d[a][c] | h[a] == ch.e.d[a][c] }
 }|]
-    ≈
+    ≈ Hint [Note "h auxiliary"]:
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e))) {
     method snd(m)    { (c = e.enc(ch.s,Z(m)) & n.snd(c) & ch.e.d[ch.s][c] = <m> & ch.s++), 1 }
@@ -120,19 +120,20 @@ new (const n=n,const e=e,const ch=ChC(n,AEAD(e))) {
     invariant i1() { ch.r <= ch.s }
     invariant i2(a, c) { !ch.e.d[a][c] | a < ch.s }
 }|]
-    ≈
+    ≈ Hint [Note "uninline calls to ChC"]:
     [prog|
 new (const n=n,const e=e,const ch=ChC(n,AEAD(e))) {
     method snd(m)    { ch.snd(m) }
     method rcv()     { ch.rcv() }
 }|]
-    ≈
+    ≈ Hint [Note "n and e auxiliary"]:
     [prog|
 new (const ch=ChC(n,AEAD(e))) {
     method snd(m)    { ch.snd(m) }
     method rcv()     { ch.rcv() }
 }|]
-    ≈ Hint [ NoInfer
+    ≈ Hint [ Note "Drop wrapper object"
+           , NoInfer
            , fieldsEqual ["ch", "r"] ["r"]
            , fieldsEqual ["ch", "s"] ["s"]
            , fieldsEqual ["ch", "e", "d"] ["e", "d"] ]:
