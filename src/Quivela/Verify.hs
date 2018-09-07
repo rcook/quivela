@@ -49,9 +49,6 @@ data ProofHint = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
   | Rewrite Expr Expr
   | NoInfer -- ^ turn off proof hint inference for this step
   | IgnoreCache -- ^ Don't use verification cache when checking this step
-  | Infer -- ^ Try to automatically infer proof hints
-  -- ^ Rewriting with an assumption. Currently we only support a single
-  -- rewrite hint in each proof step
   | Admit
   -- ^ Don't check this step
   | Note String
@@ -73,8 +70,6 @@ instance PartialEq ProofHint where
   Admit === _ = Just False
   EqualInv _ _ === EqualInv _ _ = Nothing
   EqualInv _ _ === _ = Just False
-  Infer === Infer = Just True
-  Infer === _ = Just False
   IgnoreCache === IgnoreCache = Just True
   IgnoreCache === _ = Just False
   Note s === Note s' = Just (s == s')
@@ -939,7 +934,6 @@ commonVars prefixFields addrL ctxL addrR ctxR
 
 inferInvariants :: Expr -> Step -> Verify Step
 inferInvariants prefix step@(lhs, invs, rhs)
-  | (not $ any (\x -> (x === Infer) == Just True) invs) && not (null invs) = return step
   | any (\x -> (x === NoInfer) == Just True) invs = return step
   | otherwise = do
   (_, prefixCtx, _) <- singleResult <$> symEval (prefix, emptyCtx, [])
