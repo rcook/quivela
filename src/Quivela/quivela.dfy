@@ -156,3 +156,27 @@ lemma Length_Cons<T>()
 {
 
 }
+
+// Zeroing out messages
+function method ValLength(v: Value): nat
+
+lemma ValLengthAssms()
+  ensures ValLength(Int(0)) == 0
+  ensures forall v :: v != Int(0) && v != Map(LNil()) ==> ValLength(v) > 0
+
+function method Zeroes(n: nat): Value
+  ensures ValLength(Zeroes(n)) == n
+  ensures Zeroes(0) == Int(0)
+
+function method Z(m: Value): Value
+{
+  Zeroes(ValLength(m))
+}
+
+
+lemma Z_sane()
+  ensures forall v:Value, w:Value :: ValLength(v) == ValLength(w) ==> Z(v) == Z(w)
+  ensures Z(Int(0)) == Int(0)
+{
+  ValLengthAssms();
+}

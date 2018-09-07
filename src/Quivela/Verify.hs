@@ -579,6 +579,7 @@ symValToDafny (Ref a) = return $ "VRef(" ++ show a ++ ")"
 symValToDafny (SymRef s) = dafnyFunCall "VRef" <$> sequence [translateVar s "int"]
 symValToDafny (Deref obj field) =
   dafnyFunCall "Deref" <$> sequence [toDafny obj, pure ("\"" ++ field ++ "\"")]
+symValToDafny (Z v) = dafnyFunCall "Z" <$> sequence [toDafny v]
 -- symValToDafny e = error $ "symValToDafny: unhandled: " ++ show e
 
 valueToDafny :: Value -> Emitter String
@@ -730,6 +731,7 @@ symValueToZ3 (ITE tst thn els) = z3Call "ite" <$> sequence [toZ3 tst, toZ3 thn, 
 symValueToZ3 (SymRef name) = z3Call "vref" <$> sequence [translateVar name "Int"]
 symValueToZ3 (Deref obj name) = z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
 symValueToZ3 (Ref a) = z3Call "vref" <$> sequence [toZ3 a]
+symValueToZ3 (Z v) = z3CallM "Z" [v]
 -- symValueToZ3 x = error $ "symValueToZ3: unhandled value: " ++ show x
 
 instance ToZ3 Integer where

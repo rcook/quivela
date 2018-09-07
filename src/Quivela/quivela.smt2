@@ -78,5 +78,23 @@
 ;; Adversary values:
 (declare-fun adversary (Valuess) Value)
 
+
+;; Zeroing out messages:
+;; We assume this gives us a value representing a bitstring of n zeroes
+(declare-fun zeroes (Int) Value)
+
+(declare-fun length (Value) Int)
+
+(assert (forall ((n Int)) (= (length (zeroes n)) n)))
+
+(assert (= (length (VInt 0)) 0))
+(assert (forall ((v Value)) (>= (length v) 0)))
+(assert (forall ((v Value))
+                (=> (not (= v (VInt 0)))
+                   (> (length v) 0))))
+
+(define-fun Z ((v Value)) Value
+  (zeroes (length v)))
+
 ;; Tuple projection:
 (declare-fun proj (Value Value) Value)

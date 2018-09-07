@@ -432,6 +432,7 @@ symEvalCall (VRef addr) name args ctx pathCond
                  , pathCond )]
   | Just mtd <- findMethod addr name ctx = callMethod addr mtd args ctx pathCond
   | otherwise = evalError ("Called non-existent method: " ++ name ++ "[" ++ show addr ++ "]") ctx
+symEvalCall VNil "Z" [m] ctx pathCond = return [(Sym (Z m), ctx, pathCond)]
 symEvalCall VNil "rnd" [] ctx pathCond = symEval (ENew [] ENop, ctx, pathCond)
 symEvalCall VNil "+" [arg1, arg2] ctx pathCond
   | isSymbolic arg1 || isSymbolic arg2 =

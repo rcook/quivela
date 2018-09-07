@@ -35,7 +35,7 @@ method CpaC(e) {
 
 method CpaI(e) {
     new (const e=e,d=0) {
-        method enc(m) { c = e.enc(zero(m)) & d[c] = m & c }
+        method enc(m) { c = e.enc(Z(m)) & d[c] = m & c }
         method dec(c) { d[c] }
     }
 }
@@ -44,7 +44,7 @@ method CpaI(e) {
 
 method AeadI(e) {
     new (const e=e,d=0) {
-        method enc(a,m) { c = e.enc(a,zero(m)) & d[<a,c>] = m & c }
+        method enc(a,m) { c = e.enc(a,Z(m)) & d[<a,c>] = m & c }
         method dec(a,c) { d[<a,c>] }
     }
 }
@@ -70,12 +70,6 @@ method EtM(e,mac) {
     }
 }
 
-// zero a bit-string (`& 0` ensures zero-length strings remain zero-length)
-// We now need to make this a builtin function that uses an uninterpreted length function
-// under the hood. As a stop gap to remove VError from the language first, we change
-// this to & 1 (which basically only leaves the information of whether m was 0 for the adversary)
-// as a stopgap so the proof still goes through.
-method zero(m) { m & 1  }
 _e = adversary()
 _mac = adversary()
 |]) $ let mac_tg = fieldEqual ["mac", "tg"]
@@ -296,7 +290,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
 new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
     method enc(a, m) {
         m &
-        em = e.enc(zero(m)) &
+        em = e.enc(Z(m)) &
         cpa.d[em] = m &
         t = mac.tag(<a,em>) &
         <em,t>
@@ -314,7 +308,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e)) {
 new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e),d=0) {
     method enc(a:*, m:*) {
         m &
-        em = e.enc(zero(m)) &
+        em = e.enc(Z(m)) &
         cpa.d[em] = m &
         t = mac.tag(<a,em>) &
         d[<a,<em,t>>] = m &
@@ -333,7 +327,7 @@ new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e),d=0) {
 new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
     method enc(a:*,m:*) {
         m &
-        em = e.enc(zero(m)) &
+        em = e.enc(Z(m)) &
         cpa.d[em] = m &
         t = mac.tag(<a,em>) &
         d[<a,<em,t>>] = m &
@@ -352,7 +346,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
  new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
      method enc(a:*,m:*) {
          m &
-         em = e.enc(zero(m)) &
+         em = e.enc(Z(m)) &
          cpa.d[em] = m &
          t = mac.tag(<a,em>) &
          d[<a,<em,t>>] = m &
@@ -374,7 +368,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
   new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
       method enc(a, m) {
           m &
-          em = e.enc(zero(m)) &
+          em = e.enc(Z(m)) &
           cpa.d[em] = m &
           t = mac.tag(<a,em>) &
           d[<a,<em,t>>] = m &
@@ -390,7 +384,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
   new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
       method enc(a, m) {
           m &
-          em = e.enc(zero(m)) &
+          em = e.enc(Z(m)) &
           cpa.d[em] = m &
           t = mac.tag(<a,em>) &
           d[<a,<em,t>>] = m &
@@ -405,7 +399,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
   new (const e=_e,const mac=MacI(_mac),const cpa=CpaI(_e),d=0) {
       method enc(a, m) {
           m &
-          em = e.enc(zero(m)) &
+          em = e.enc(Z(m)) &
           cpa.d[em] = m &
           t = mac.tag(<a,em>) &
           d[<a,<em,t>>] = m &
@@ -420,7 +414,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
   new (const e=_e,const mac=MacI(_mac),d=0) {
       method enc(a, m) {
           m &
-          em = e.enc(zero(m)) &
+          em = e.enc(Z(m)) &
           em &
           t = mac.tag(<a,em>) &
           d[<a,<em,t>>] = m &
@@ -435,7 +429,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
   new (const e=_e,const mac=_mac,d=0) {
       method enc(a, m) {
           m &
-          em = e.enc(zero(m)) &
+          em = e.enc(Z(m)) &
           em &
           t = mac.tag(<a,em>) &
           d[<a,<em,t>>] = m &
@@ -451,7 +445,7 @@ new (const e=Enc(_e),const mac=MacI(_mac),const cpa=CpaI(Enc(_e)),d=0) {
           method enc(a, m) { m & em = e.enc(m) & em & t = mac.tag(<a,em>) & <em,t> }
           method dec(a, c) { em = c`0,  t = c`1,  mac.verify(<a, em>, t) & e.dec(em) }
       }), d=0) {
-      method enc(a, m) { c=e.enc(a, zero(m)) & d[<a,c>] = m & c }
+      method enc(a, m) { c=e.enc(a, Z(m)) & d[<a,c>] = m & c }
       method dec(a, c) { d[<a,c>] }
   }|]
      ≈ -- Hint [d]:

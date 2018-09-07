@@ -65,6 +65,7 @@ data SymValue = SymVar String Type
   | SymRef String -- FIXME: check if we can remove these and use refs for everything
   | Ref Addr
   | Deref Value String
+  | Z Value
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- Since we pattern-match repeatedly on references in various places, we define
