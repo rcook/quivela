@@ -70,8 +70,13 @@
 (define-fun divi ((v Value) (w Value)) Value
   (VInt (/ (to-int v) (to-int w))))
 
-(define-fun le ((v Value) (w Value)) Value
+(define-fun lt ((v Value) (w Value)) Value
   (ite (< (to-int v) (to-int w))
+       (VInt 1)
+       (VInt 0)))
+
+(define-fun le ((v Value) (w Value)) Value
+  (ite (<= (to-int v) (to-int w))
        (VInt 1)
        (VInt 0)))
 

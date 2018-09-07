@@ -95,6 +95,7 @@ tests = TestList $ parserTests ++ invalidCases ++
                  (emptyCtx { _ctxAllocStrategy = Decrease }) (parseExpr "<new() {}, new() {}>") (VTuple [Sym {_symVal = Ref (-1)},Sym {_symVal = Ref (-2)}])
   , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
   , TestCase $ doesntVerify "if expression equivalence differing on one branch" nop ifEqvFalse
+  , TestCase $ assertVerified "<= works" nop leTaut
   , TestCase $ assertVerified "& well-behaved" nop andExample
   , TestCase $ assertVerified "simple equality invariant" nop eqInvExample
   , TestCase $ assertVerified "simple const annotation" nop constExample

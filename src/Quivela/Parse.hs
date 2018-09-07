@@ -92,7 +92,8 @@ expr = do
         , [ binary "*" (binCall "*") AssocLeft, binary "/" (binCall "/") AssocLeft ]
         , [ binary "+" (binCall "+") AssocLeft, binary "-" (binCall "-") AssocLeft ]
         , [ binary "<" (binCall "<") AssocNone
-          , binary "==" (binCall "==") AssocNone ]
+          , binary "==" (binCall "==") AssocNone
+          , binary "<=" (binCall "<=") AssocNone ]
           ++ (if inTup then [] else [binary ">" (binCall ">") AssocNone])
         , [ binary "=" EAssign AssocNone ]
         , [ binary "&" (binCall "&") AssocRight

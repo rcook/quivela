@@ -60,6 +60,7 @@ data SymValue = SymVar String Type
   | Sub Value Value
   | Mul Value Value
   | Div Value Value
+  | Lt Value Value
   | Le Value Value
   | ITE Prop Value Value
   | SymRef String -- FIXME: check if we can remove these and use refs for everything

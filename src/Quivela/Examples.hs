@@ -330,3 +330,10 @@ commuteRands =
   ≈ Hint [IgnoreCache]:
   [prog| new() { method f() { x = rnd(), y = rnd(), <y, x> } } |]
   : []
+
+leTaut :: Proof
+leTaut =
+  [prog| new() { method f() { x <= x } } |]
+  ≈
+  [prog| new() { method f() { 1 } } |]
+  : []

@@ -461,10 +461,15 @@ symEvalCall VNil "/" [arg1, arg2] ctx pathCond
   | otherwise = error $ "Division of non-symbolic non-integers: " ++ show (arg1, arg2)
 symEvalCall VNil "<" [arg1, arg2] ctx pathCond
   | isSymbolic arg1 || isSymbolic arg2 =
-      return [(Sym (Le arg1 arg2), ctx, pathCond)]
+      return [(Sym (Lt arg1 arg2), ctx, pathCond)]
   | VInt n <- arg1, VInt m <- arg2 =
-      return [(if n < m then VInt 1 else (VInt 0), ctx, pathCond)]
-  | otherwise = return [((VInt 0), ctx, pathCond)]
+      return [(if n < m then VInt 1 else VInt 0, ctx, pathCond)]
+  | otherwise = error $ "Comparison of non-symbolic non-integers: " ++ show (arg1, arg2)
+symEvalCall VNil "<=" [arg1, arg2] ctx pathCond
+  | isSymbolic arg1 || isSymbolic arg2 = return [(Sym (Le arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1, VInt m <- arg2 =
+      return [(if n <= m then VInt 1 else VInt 0, ctx, pathCond)]
+  | otherwise = error $ "Comparison of non-symbolic non-integers: " ++ show (arg1, arg2)
 symEvalCall VNil name args ctx pathCond
   | Just mtd <- findMethod (ctx ^. ctxThis) name ctx =
       callMethod (ctx ^. ctxThis) mtd args ctx pathCond

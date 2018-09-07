@@ -569,6 +569,8 @@ symValToDafny (Sub e1 e2) =
   dafnyFunCall "Sub" <$> mapM toDafny [e1, e2]
 symValToDafny (Div e1 e2) =
   dafnyFunCall "Div" <$> mapM toDafny [e1, e2]
+symValToDafny (Lt e1 e2) =
+  dafnyFunCall "Lt" <$> mapM toDafny [e1, e2]
 symValToDafny (Le e1 e2) =
   dafnyFunCall "Le" <$> mapM toDafny [e1, e2]
 symValToDafny (ITE tst thn els) = do
@@ -727,6 +729,7 @@ symValueToZ3 (Sub v1 v2) = z3CallM "sub" [v1, v2]
 symValueToZ3 (Mul v1 v2) = z3CallM "mul" [v1, v2]
 symValueToZ3 (Div v1 v2) = z3CallM "divi" [v1, v2]
 symValueToZ3 (Le v1 v2) = z3CallM "le" [v1, v2]
+symValueToZ3 (Lt v1 v2) = z3CallM "lt" [v1, v2]
 symValueToZ3 (ITE tst thn els) = z3Call "ite" <$> sequence [toZ3 tst, toZ3 thn, toZ3 els]
 symValueToZ3 (SymRef name) = z3Call "vref" <$> sequence [translateVar name "Int"]
 symValueToZ3 (Deref obj name) = z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
