@@ -438,32 +438,32 @@ symEvalCall VNil "+" [arg1, arg2] ctx pathCond
       return [(Sym (Add arg1 arg2), ctx, pathCond)]
   | VInt n <- arg1, VInt m <- arg2 =
       return [(VInt (n + m), ctx, pathCond)]
-  | otherwise  = return [(VError, ctx, pathCond)]
+  | otherwise  = error $ "Addition of non-symbolic non-integers: " ++ show (arg1, arg2)
 symEvalCall VNil "-" [arg1, arg2] ctx pathCond
   | isSymbolic arg1 || isSymbolic arg2 =
       return [(Sym (Sub arg1 arg2), ctx, pathCond)]
   | VInt n <- arg1, VInt m <- arg2 =
       return [(VInt (n - m), ctx, pathCond)]
-  | otherwise = return [(VError, ctx, pathCond)]
+  | otherwise = error $ "Subtraction of non-symbolic non-integers: " ++ show (arg1, arg2)
 symEvalCall VNil "*" [arg1, arg2] ctx pathCond
   | isSymbolic arg1 || isSymbolic arg2 =
       return [(Sym (Mul arg1 arg2), ctx, pathCond)]
   | VInt n <- arg1, VInt m <- arg2 =
       return [(VInt (n * m), ctx, pathCond)]
-  | otherwise = return [(VError, ctx, pathCond)]
+  | otherwise = error $ "Multiplication of non-symbolic non-integers: " ++ show (arg1, arg2)
 symEvalCall VNil "/" [arg1, arg2] ctx pathCond
   | isSymbolic arg1 || isSymbolic arg2 =
       return [(Sym (Div arg1 arg2), ctx, pathCond)]
   | VInt n <- arg1, VInt m <- arg2 =
-      if m == 0 then return [(VError, ctx, pathCond)]
+      if m == 0 then return [((VInt 0), ctx, pathCond)]
       else return [(VInt (n `div` m), ctx, pathCond)]
-  | otherwise = return [(VError, ctx, pathCond)]
+  | otherwise = error $ "Division of non-symbolic non-integers: " ++ show (arg1, arg2)
 symEvalCall VNil "<" [arg1, arg2] ctx pathCond
   | isSymbolic arg1 || isSymbolic arg2 =
       return [(Sym (Le arg1 arg2), ctx, pathCond)]
   | VInt n <- arg1, VInt m <- arg2 =
-      return [(if n < m then VInt 1 else VError, ctx, pathCond)]
-  | otherwise = return [(VError, ctx, pathCond)]
+      return [(if n < m then VInt 1 else (VInt 0), ctx, pathCond)]
+  | otherwise = return [((VInt 0), ctx, pathCond)]
 symEvalCall VNil name args ctx pathCond
   | Just mtd <- findMethod (ctx ^. ctxThis) name ctx =
       callMethod (ctx ^. ctxThis) mtd args ctx pathCond
