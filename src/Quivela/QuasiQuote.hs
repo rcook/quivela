@@ -45,7 +45,7 @@ prove' env prefix steps = do
   (t, results) <- time $ mapM doCheck (toSteps steps)
   debug $ "Total verification time: " ++ formatSeconds t
   return $ sum results
-  where doCheck = runVerify emptyVerifyEnv . proveStep prefix
+  where doCheck = runVerify env . proveStep prefix
 
 
 -- | A shorthand for rewriting using quivela terms written in concrete syntax.

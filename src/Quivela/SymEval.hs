@@ -38,6 +38,8 @@ import Quivela.Parse
 -- only contains information about named types which are defined outside of quivela.
 data VerifyEnv = VerifyEnv { _splitEq :: Bool
                            -- ^ Split == operator into two paths during symbolic evaluation?
+                           , _useCache :: Bool
+                           -- ^ Should we cache verification steps that succeed and not recheck them?
                            }
   deriving Typeable
 
@@ -657,4 +659,4 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv { _splitEq = False }
+emptyVerifyEnv = VerifyEnv { _splitEq = False, _useCache = True }

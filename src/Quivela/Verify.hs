@@ -808,7 +808,8 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs =
   where lhs' = rewriteExpr from to lhs
 checkEqv useSolvers prefix invs lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use alreadyVerified
-  if cached && not (any ((== Just True) . (===IgnoreCache)) invs)
+  withCache <- view useCache
+  if cached && not (any ((== Just True) . (===IgnoreCache)) invs) && withCache
   then do
     debug "Skipping cached verification step"
     return []
