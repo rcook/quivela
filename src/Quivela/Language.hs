@@ -75,7 +75,6 @@ pattern VRef a = Sym (Ref a)
 data Value = VInt Integer
   | VMap { _valMap :: M.Map Value Value }
   | VTuple [Value]
-  | VError
   | VNil
   | Sym { _symVal :: SymValue }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)

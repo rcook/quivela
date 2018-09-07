@@ -1,7 +1,7 @@
 type Addr = nat
 type Var = string
 
-datatype Value = Int(val: int) | Tuple(elts:List<Value>) | Map(vals: List<Pair<Value, Value>>) | Nil() | Error()
+datatype Value = Int(val: int) | Tuple(elts:List<Value>) | Map(vals: List<Pair<Value, Value>>) | Nil()
 
 function method RefInv(v: Value): int
 
@@ -92,7 +92,7 @@ function method Nth<T>(xs: List<T>, n: nat): T
 }
 
 function method Insert(k: Value, v: Value, m: Value): Value
-  ensures Insert(k, v, m) != Error
+  ensures Insert(k, v, m) != Int(0)
 {
   if m.Map?
     then Map(AssocSet(m.vals, k, v))
@@ -104,30 +104,30 @@ function method Lookup(k: Value, m: Value): Value
   if m.Map?
     then match AssocGet(m.vals, k)
     case Some(v) => v
-    case None => Error
-  else Error
+    case None => Int(0)
+  else Int(0)
 }
 
 function method Proj(tup: Value, idx: Value): Value
 {
   if tup.Tuple? && idx.Int? && 0 <= idx.val < Length(tup.elts)
     then Nth(tup.elts, idx.val)
-  else Error
+  else Int(0)
 }
 
 function method Add(e1: Value, e2: Value): Value
 {
-  if e1.Int? && e2.Int? then Int(e1.val + e2.val) else Error
+  if e1.Int? && e2.Int? then Int(e1.val + e2.val) else Int(0)
 }
 
 function method Sub(e1: Value, e2: Value): Value
 {
-  if e1.Int? && e2.Int? then Int(e1.val - e2.val) else Error
+  if e1.Int? && e2.Int? then Int(e1.val - e2.val) else Int(0)
 }
 
 function method Le(e1: Value, e2: Value): Value
 {
-  if e1.Int? && e2.Int? && e1.val < e2.val then Int(1) else Error
+  if e1.Int? && e2.Int? && e1.val < e2.val then Int(1) else Int(0)
 }
 
 lemma LookupSame()

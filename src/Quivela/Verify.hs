@@ -237,7 +237,7 @@ invToVCnonRelational assms addr res@(v, ctx, pathCond) inv = do
     foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
       return $ [VC { _assumptions = nub $ pathCondI ++ assms
                    , _conditionName = "univInvPreserved_" ++ (univInv ^. methodName)
-                   , _goal = Not (res :=: VError) }]
+                   , _goal = Not (res :=: VInt 0) }]
 
 onlySimpleTypes :: Data p => p -> Verify ()
 onlySimpleTypes foo = when (not . null . listify isNamed $ foo)
@@ -586,7 +586,6 @@ valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
 valueToDafny (VTuple vs) = concatM [pure "Tuple(", toDafny vs, pure ")"]
 valueToDafny (VMap m) = concatM [pure "Map(", toDafny (M.toList m), pure ")"]
 valueToDafny VNil = return "Nil()"
-valueToDafny VError = return "Error()"
 valueToDafny (Sym sv) = symValToDafny sv
 
 instance ToDafny Prop where
@@ -706,7 +705,6 @@ valuessToZ3 (vs : vss) = z3Call "conss" <$> sequence [valuesToZ3 vs, valuessToZ3
 
 valueToZ3 :: Value -> Emitter String
 valueToZ3 (VInt i) = return $ z3Call "VInt" [show i]
-valueToZ3 VError = return "VError"
 valueToZ3 (VTuple vs) = z3Call "VTuple" <$> sequence [valuesToZ3 vs]
 valueToZ3 (VMap map) = freshEmitterVar "map" "Value" -- TODO: map same maps to same variable
 valueToZ3 VNil = return "VNil"

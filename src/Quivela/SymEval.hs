@@ -119,8 +119,8 @@ typeOfSymValue ctx v = error $ "Not implemented: typeOfSymValue: " ++ show v
 -- | Infer the type of a value. 'TAny' is returned when the inference can't
 -- figure out anything more precise.
 typeOfValue :: Context -> Value -> Type
+typeOfValue ctx (VInt 0) = TAny
 typeOfValue ctx (VInt i) = TInt
-typeOfValue ctx VError = TAny
 typeOfValue ctx VNil = TAny
 typeOfValue ctx (Sym sv) = typeOfSymValue ctx sv
 typeOfValue ctx (VTuple vs) = TTuple $ map (typeOfValue ctx) vs
@@ -139,6 +139,7 @@ allM pred list = and <$> mapM pred list
 -- | Check whether value has given type.
 valueHasType :: Context -> Value -> Type -> Bool
 valueHasType ctx _ TAny = True
+valueHasType ctx (VInt 0) (TMap _ _) = True
 valueHasType ctx (VInt i) TInt = True
 valueHasType ctx (VTuple vs) (TTuple ts)
   | length vs == length ts = all (uncurry (valueHasType ctx)) (zip vs ts)
@@ -413,7 +414,7 @@ force e@(Sym (Lookup k m)) ctx pathCond
   -- debug $ "Symbolic call on map lookup" ++ show (Lookup k m) ++ " of type: " ++ show (TMap tk tv)
   (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
   -- res <- symEval fv name args ctx' ((e :=: fv) : pathCond')
-  return [ (VError, ctx, (e :=: VError) : pathCond)
+  return [ (VInt 0, ctx, (e :=: VInt 0) : pathCond)
          , (fv, ctx', (e :=: fv) : pathCond') ]
 force (symVal@(Sym (SymVar sv (TNamed t)))) ctx pathCond = do
   -- Allocate a new object of the required type
@@ -477,7 +478,7 @@ symEvalCall (Sym sv) name args ctx pathCond = do
      else foreachM (return forced) $ \(val, ctx', pathCond') -> do
        -- debug $ "Forced symbolic value to: " ++ show (val, ctx', pathCond')
        symEvalCall val name args ctx' pathCond'
-symEvalCall VError name args ctx pathCond = return [(VError, ctx, pathCond)]
+symEvalCall (VInt 0) name args ctx pathCond = return [((VInt 0), ctx, pathCond)]
 symEvalCall obj name args ctx pathCond =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name
 
@@ -518,17 +519,18 @@ symEval (expr@(EProj obj name), ctx, pathCond) =
         then return [(Sym (Deref val name), ctx', pathCond')]
         else foreachM (pure forced) $ \(val', ctx'', pathCond'') -> do
           symEval (EProj (EConst val') name, ctx'', pathCond'')
-      VError -> return [(VError, ctx', pathCond')]
-      _ ->  error $ "Invalid projection expression: " ++ show expr
+      -- VInt 0 -> return [(VInt 0, ctx', pathCond')]
+      _ -> return [(Sym (Deref val name), ctx', pathCond')]
 symEval (EIdx base idx, ctx, pathCond) =
   foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
     foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
       case baseVal of
+        VInt 0 -> return [(VInt 0, ctx'', pathCond'')] -- 0 is the empty map
         VMap vals -> case M.lookup idxVal vals of
                        Just val -> return [(val, ctx'', pathCond'')]
-                       Nothing -> return [(VError, ctx'', pathCond'')]
+                       Nothing -> return [((VInt 0), ctx'', pathCond'')]
         Sym sv -> return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
-        _ -> return [(VError, ctx'', pathCond'')]
+        _ -> return [((VInt 0), ctx'', pathCond'')]
 symEval (EAssign lhs rhs, ctx, pathCond) =
   foreachM (symEval (rhs, ctx, pathCond)) $ \(rhsVal, ctx', pathCond') ->
     foreachM (findLValue lhs ctx' pathCond') $ \case
@@ -544,10 +546,10 @@ symEval (EIf cnd thn els, ctx, pathCond) = do
   foreachM (symEval (cnd, ctx, pathCond)) handle
   where handle (cndVal, ctx', pathCond')
           | isSymbolic cndVal = do
-              thnPaths <- symEval (thn, ctx', Not (cndVal :=: VError) : pathCond')
-              elsPaths <- symEval (els, ctx', cndVal :=: VError : pathCond')
+              thnPaths <- symEval (thn, ctx', Not (cndVal :=: (VInt 0)) : pathCond')
+              elsPaths <- symEval (els, ctx', cndVal :=: (VInt 0) : pathCond')
               return $ thnPaths ++ elsPaths
-          | cndVal == VError = symEval (els, ctx', pathCond')
+          | cndVal == VInt 0 = symEval (els, ctx', pathCond')
           | otherwise = symEval (thn, ctx', pathCond')
 symEval (ESeq e1 e2, ctx, pathCond) = do
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
@@ -560,10 +562,7 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
       | Just oldVal <- ctx' ^? (place ^. placeLens) -> do
       updPaths <- symEval ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
                           , ctx', pathCond')
-      return . map (\(newVal, ctx'', pathCond'') ->
-                       if newVal == VError
-                       then (VError, ctx'', pathCond'')
-                       else (oldVal, ctx'', pathCond'')) $ updPaths
+      return . map (\(newVal, ctx'', pathCond'') -> (oldVal, ctx'', pathCond'')) $ updPaths
     _ -> error $ "Invalid l-value in post-increment: " ++ show lval
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
@@ -571,35 +570,35 @@ symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
       doSplit <- view splitEq
       if (isSymbolic v1 || isSymbolic v2) && (v1 /= v2)
       then if doSplit
-           then return [ (VError, ctx'', Not (v1 :=: v2) : pathCond'')
+           then return [ (VInt 0, ctx'', Not (v1 :=: v2) : pathCond'')
                        , (VInt 1, ctx'', v1 :=: v2 : pathCond'')]
-           else return [(Sym (ITE (v1 :=: v2) (VInt 1) VError), ctx'', pathCond'')]
+           else return [(Sym (ITE (v1 :=: v2) (VInt 1) (VInt 0)), ctx'', pathCond'')]
       else if v1 == v2
            then return [ (VInt 1, ctx'', pathCond'') ]
-           else return [ (VError, ctx'', pathCond'') ]
+           else return [ (VInt 0, ctx'', pathCond'') ]
 symEval (ECall (EConst VNil) "!" [e], ctx, pathCond) = do
   foreachM (symEval (e, ctx, pathCond)) $ \(v, ctx', pathCond') ->
     case v of
-      Sym sv -> return [ (VInt 1, ctx', v :=: VError : pathCond')
-                       , (VError, ctx', Not (v :=: VError) : pathCond') ]
-      VError -> return [ (VInt 1, ctx', pathCond') ]
-      _ -> return [ (VError, ctx', pathCond') ]
+      Sym sv -> return [ (VInt 1, ctx', v :=: VInt 0 : pathCond')
+                       , (VInt 0, ctx', Not (v :=: (VInt 0)) : pathCond') ]
+      (VInt 0) -> return [ (VInt 1, ctx', pathCond') ]
+      _ -> return [ ((VInt 0), ctx', pathCond') ]
 symEval (ECall (EConst VNil) "&" [e1, e2], ctx, pathCond) = do
   foreachM (symEval (e1, ctx, pathCond)) handleCase
   where
-    handleCase (VError, ctx', pathCond') = return [(VError, ctx', pathCond')]
+    handleCase ((VInt 0), ctx', pathCond') = return [((VInt 0), ctx', pathCond')]
     handleCase (Sym sv, ctx', pathCond') = do
       -- TODO: ask verifier if v can be proven to be Error/not-Error
-      cfgs <- symEval (e2, ctx', Not (Sym sv :=: VError) : pathCond')
-      return $ (VError, ctx', Sym sv :=: VError : pathCond') : cfgs
+      cfgs <- symEval (e2, ctx', Not (Sym sv :=: VInt 0) : pathCond')
+      return $ ((VInt 0), ctx', Sym sv :=: VInt 0 : pathCond') : cfgs
     handleCase (v, ctx', pathCond') = symEval (e2, ctx', pathCond')
 symEval (ECall (EConst VNil) "|" [e1, e2], ctx, pathCond) = do
   foreachM (symEval (e1, ctx, pathCond)) handleCase
   where
-    handleCase (VError, ctx', pathCond') = symEval (e2, ctx', pathCond')
+    handleCase ((VInt 0), ctx', pathCond') = symEval (e2, ctx', pathCond')
     handleCase (Sym sv, ctx', pathCond') = do
-      cfgs <- symEval (e2, ctx', (Sym sv :=: VError) : pathCond')
-      return $ (Sym sv, ctx', Not (Sym sv :=: VError) : pathCond') : cfgs
+      cfgs <- symEval (e2, ctx', (Sym sv :=: VInt 0) : pathCond')
+      return $ (Sym sv, ctx', Not (Sym sv :=: VInt 0) : pathCond') : cfgs
     handleCase (v, ctx', pathCond') = return [(v, ctx', pathCond')]
 symEval (ECall (EConst VNil) "adversary" [], ctx, pathCond) = do
   return [(VRef (nextAddr ctx)

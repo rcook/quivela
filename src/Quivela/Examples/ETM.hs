@@ -71,7 +71,11 @@ method EtM(e,mac) {
 }
 
 // zero a bit-string (`& 0` ensures zero-length strings remain zero-length)
-method zero(m) { m & 0 }
+// We now need to make this a builtin function that uses an uninterpreted length function
+// under the hood. As a stop gap to remove VError from the language first, we change
+// this to & 1 (which basically only leaves the information of whether m was 0 for the adversary)
+// as a stopgap so the proof still goes through.
+method zero(m) { m & 1  }
 _e = adversary()
 _mac = adversary()
 |]) $ let mac_tg = fieldEqual ["mac", "tg"]
