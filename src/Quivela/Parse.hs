@@ -10,11 +10,12 @@ import Data.List
 import qualified Data.Set as S
 import qualified Data.Map as M
 import System.IO
-import Text.Parsec
+import Text.Parsec hiding (parse)
 import Text.Parsec.Expr
 import qualified Text.Parsec.Token as Token
 import Text.Parsec.Language
 
+import Quivela.Diff
 import Quivela.Language
 
 languageDef =
@@ -31,6 +32,7 @@ languageDef =
                                      , "method"
                                      , "type"
                                      , "map"
+                                     , "delete"
                                      ]
            , Token.reservedOpNames = ["+", "-", "*", "/", "="
                                      , "&", "|", "!", ".", "[", "]", "^"
@@ -256,14 +258,42 @@ typedecl = do
 program :: Parser Expr
 program = foldr1 ESeq <$> many1 expr
 
+overrideMethod :: Parser Diff
+overrideMethod = OverrideMethod <$> methodExpr
+
+diffs :: Parser [Diff]
+diffs = many1 overrideMethod
+
+modField :: Parser [Diff]
+modField = do
+  reserved "new" *> symbol "(" *> symbol "..."  *> symbol ","
+  fieldOp <- try (NewField <$> field) <|> (reserved "delete" *>
+                                           (DeleteField <$> identifier))
+  symbol ")"
+  symbol "{" *> symbol "..."
+  rest <- many overrideMethod
+  symbol "}"
+  return $ fieldOp : rest
+
 initialParserState :: ParserState
 initialParserState = ParserState { _inTuple = False, _inFieldInit = False, _inArgs = False }
 
-parseExpr :: String -> Expr
-parseExpr s =
-  case runParser (whiteSpace *> program <* whiteSpace <* eof) initialParserState "" s of
+diffOrExpr :: Parser (Either [Diff] Expr)
+diffOrExpr =
+  try (Left <$> modField)
+  <|>
+  lookAhead (reserved "new") *> (Right <$> expr)
+  <|>
+  Left <$> many1 overrideMethod
+
+parse :: Parser a -> String -> a
+parse p s =
+  case runParser (whiteSpace *> p <* whiteSpace <* eof) initialParserState "" s of
     Left err -> error $ "Parse error: " ++ show err
     Right expr -> expr
+
+parseExpr :: String -> Expr
+parseExpr s = parse program s
 
 parseFile :: MonadIO m => FilePath -> m Expr
 parseFile file = parseExpr <$> liftIO (readFile file)
