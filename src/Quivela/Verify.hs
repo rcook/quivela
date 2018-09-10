@@ -794,14 +794,15 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs =
   if lhs' == rhs then return []
   else error $ "Invalid rewrite step:\n" ++ show lhs' ++ "\n/=\n" ++ show rhs
   where lhs' = rewriteExpr from to lhs
-checkEqv useSolvers prefix invs lhs rhs = do
+checkEqv useSolvers prefix hintsIn lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use alreadyVerified
+  (_, hints, _) <- inferInvariants prefix (lhs, hintsIn, rhs)
   withCache <- view useCache
   let noteText = concatMap (\hint -> case hint of
                            Note n -> n
-                           _ -> "") invs
+                           _ -> "") hints
       note = if noteText == "" then "" else noteText ++ ": "
-  if cached && not (any ((== Just True) . (===IgnoreCache)) invs) && withCache
+  if cached && not (any ((== Just True) . (===IgnoreCache)) hints) && withCache
   then do
     debug $ note ++ "Skipping cached verification step"
     return []
@@ -811,9 +812,9 @@ checkEqv useSolvers prefix invs lhs rhs = do
     res1@(VRef a1, ctx1, _) <- singleResult <$> symEval (lhs, prefixCtx, pathCond)
     res1'@(VRef a1', ctx1', _) <- singleResult <$> symEval (rhs, prefixCtx, pathCond)
     -- check that invariants hold initially
-    invLHS <- concat <$> mapM (invToVCnonRelational [] a1 res1) invs
-    invRHS <- concat <$> mapM (invToVCnonRelational [] a1' res1') invs
-    invsRel <- concat <$> mapM (invToVC [] a1 res1 a1' res1') invs
+    invLHS <- concat <$> mapM (invToVCnonRelational [] a1 res1) hints
+    invRHS <- concat <$> mapM (invToVCnonRelational [] a1' res1') hints
+    invsRel <- concat <$> mapM (invToVC [] a1 res1 a1' res1') hints
     remainingInvVCs <- checkVCs (invLHS ++ invRHS ++ invsRel)
     let mtds = sharedMethods a1 ctx1 a1' ctx1'
     -- check that there are no other methods except invariants:
@@ -833,7 +834,7 @@ checkEqv useSolvers prefix invs lhs rhs = do
       onlySimpleTypes (mtd ^. methodFormals)
       (args, _, _) <- symArgs ctx1 (mtd ^. methodFormals)
       -- TODO: double-check that we don't need path condition here.
-      vcs <- methodEquivalenceVCs mtd invs args res1 res1'
+      vcs <- methodEquivalenceVCs mtd hints args res1 res1'
       verificationResult <- if useSolvers then checkVCs vcs else return vcs
 
       return (mtd ^. methodName, verificationResult)
@@ -944,10 +945,9 @@ toSteps (Prog lhs : Hint invs : Prog rhs : steps') = (lhs, invs, rhs) : toSteps 
 toSteps _ = error "Invalid sequence of steps"
 
 proveStep :: Expr -> Step -> Verify Int
-proveStep prefix step = handleStep =<< inferInvariants prefix step
-  where handleStep (lhs, invs, rhs) = do
-          remaining <- checkEqv True prefix invs lhs rhs
-          return . sum . map (length . snd) $ remaining
+proveStep prefix (lhs, invs, rhs) = do
+  remaining <- checkEqv True prefix invs lhs rhs
+  return . sum . map (length . snd) $ remaining
 
 -- | A handy alias for cons; this makes a sequence of proof steps look more like
 -- an actual equivalence relation.
