@@ -20,10 +20,18 @@ replaceMethod emtd ebody
         bodyExprs = seqToList ebody
 replaceMethod emtd ebody = foldr ESeq ENop (seqToList ebody ++ [emtd])
 
+replaceField :: Field -> [Field] -> [Field]
+replaceField newField oldFields
+  | any (\oldField -> oldField ^. fieldName == newField ^. fieldName) oldFields =
+      map replace oldFields
+  where replace oldField | oldField ^. fieldName == newField ^. fieldName = newField
+                         | otherwise = oldField
+replaceField newField oldFields = oldFields ++ [newField]
+
 applyDiff :: Diff -> Expr -> Expr
 applyDiff d en@(ENew{}) =
   case d of
-    NewField f -> over newFields (++[f]) en
+    NewField f -> over newFields (replaceField f) en
     DeleteField s -> over newFields (filter (not . (==s) . (^. fieldName))) en
     OverrideMethod em -> over newBody (replaceMethod em) en
 applyDiff d e = error "Can only apply diffs to new expressions"
