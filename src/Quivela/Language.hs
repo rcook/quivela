@@ -194,6 +194,38 @@ data Binding = Binding { _bindingName :: Var
                        , _bindingConst :: Bool }
   deriving (Eq, Ord, Show, Read)
 
+-- | Proof hints. These include relational invariants, use of assumptions
+-- and controlling convenience features such as automatic inference of relational
+-- equalities.
+data ProofHint = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
+  -- ^ Equality of a value from the LHS and RHS contexts
+  | Rewrite Expr Expr
+  | NoInfer -- ^ turn off proof hint inference for this step
+  | IgnoreCache -- ^ Don't use verification cache when checking this step
+  | Admit
+  -- ^ Don't check this step
+  | Note String
+  deriving Generic
+
+data Diff = NewField Field
+          | DeleteField Var
+          | OverrideMethod Expr -- assumes expr is an EMethod
+          deriving (Read, Show, Eq, Ord)
+
+-- | One part of a quivela proof, which is either an expression, or a proof hint.
+-- An followed by a hint and another expression is verified using that hint,
+-- while two expressions in a row are verified without additional proof hints.
+-- The steps are chained automatically, e.g. @[e1, h1, e2, e3]@ will result in verifying
+-- @e1 ~[h1] e2 ~ e3@
+data ProofPart = Prog Expr | PDiff [Diff] | Hint [ProofHint]
+
+type Proof = [ProofPart]
+
+instance Show ProofPart where
+  show (Prog e) = "Program:\n" ++ show e
+  show (PDiff d) = "Diff:\n" ++ show d
+  show _ = "<invariant>"
+
 concat <$> mapM makeLenses [ ''Method, ''Object, ''Context, ''Place
                            , ''Binding, ''Local, ''Field, ''Expr, ''Value ]
 

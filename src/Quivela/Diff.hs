@@ -4,11 +4,6 @@ import Control.Lens
 
 import Quivela.Language
 
-data Diff = NewField Field
-          | DeleteField Var
-          | OverrideMethod Expr -- assumes expr is an EMethod
-          deriving (Read, Show, Eq, Ord)
-
 seqToList ENop = []
 seqToList (ESeq e1 e2) = e1 : seqToList e2
 seqToList _ = error "Invalid argument to seqToList"

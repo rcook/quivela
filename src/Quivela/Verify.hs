@@ -37,22 +37,10 @@ import System.IO.Temp
 import System.Process
 
 import Quivela.Language
+import Quivela.Diff
 import Quivela.SymEval
 import Quivela.Parse
 import Quivela.VerifyPreludes
-
--- | Type of proof hints. These include relational invariants, use of assumptions
--- and controlling convenience features such as automatic inference of relational
--- equalities.
-data ProofHint = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
-  -- ^ Equality of a value from the LHS and RHS contexts
-  | Rewrite Expr Expr
-  | NoInfer -- ^ turn off proof hint inference for this step
-  | IgnoreCache -- ^ Don't use verification cache when checking this step
-  | Admit
-  -- ^ Don't check this step
-  | Note String
-  deriving Generic
 
 -- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
 -- then the boolean x indicates that a and b are equal/unequal. Otherwise, it cannot be determined
@@ -943,23 +931,14 @@ inferInvariants prefix step@(lhs, invs, rhs)
   debug $ "Inferred equality invariants on fields: " ++ show comVars
   return (lhs, invs ++ map fieldEqual comVars, rhs)
 
--- | One part of a quivela proof, which is either an expression, or a proof hint.
--- An followed by a hint and another expression is verified using that hint,
--- while two expressions in a row are verified without additional proof hints.
--- The steps are chained automatically, e.g. @[e1, h1, e2, e3]@ will result in verifying
--- @e1 ~[h1] e2 ~ e3@
-data ProofPart = Prog Expr | Hint [ProofHint]
-
-type Proof = [ProofPart]
-
-instance Show ProofPart where
-  show (Prog e) = "Program:\n" ++ show e
-  show _ = "<invariant>"
-
 -- | Convert a series of proof parts into a sequence of steps
 toSteps :: [ProofPart] -> [Step]
 toSteps [] = []
-toSteps [Prog exp] = []
+toSteps [_] = []
+toSteps (Prog lhs : PDiff diffs : steps') =
+  toSteps (Prog lhs : Prog (applyDiffs diffs lhs) : steps')
+toSteps (Prog lhs : Hint h : PDiff diffs : steps') =
+  toSteps (Prog lhs : Hint h : Prog (applyDiffs diffs lhs) : steps')
 toSteps (Prog lhs : Prog rhs : steps') = (lhs, [], rhs) : toSteps (Prog rhs : steps')
 toSteps (Prog lhs : Hint invs : Prog rhs : steps') = (lhs, invs, rhs) : toSteps (Prog rhs : steps')
 toSteps _ = error "Invalid sequence of steps"
