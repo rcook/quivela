@@ -28,12 +28,20 @@ replaceField newField oldFields
                          | otherwise = oldField
 replaceField newField oldFields = oldFields ++ [newField]
 
+deleteMethod :: Var -> Expr -> Expr
+deleteMethod mtdName body =
+  over (iso seqToList (foldr ESeq ENop))
+       (filter (\e -> case e of
+                        oldMtd@EMethod{} -> oldMtd ^. emethodName /= mtdName
+                        _ -> True)) body
+
 applyDiff :: Diff -> Expr -> Expr
 applyDiff d en@(ENew{}) =
   case d of
     NewField f -> over newFields (replaceField f) en
-    DeleteField s -> over newFields (filter (not . (==s) . (^. fieldName))) en
+    DeleteField s -> over newFields (filter ((/=s) . (^. fieldName))) en
     OverrideMethod em -> over newBody (replaceMethod em) en
+    DeleteMethod mname -> over newBody (deleteMethod mname) en
 applyDiff d e = error "Can only apply diffs to new expressions"
 
 applyDiffs :: [Diff] -> Expr -> Expr

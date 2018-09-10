@@ -15,7 +15,6 @@ import Text.Parsec.Expr
 import qualified Text.Parsec.Token as Token
 import Text.Parsec.Language
 
-import Quivela.Diff
 import Quivela.Language
 
 languageDef =
@@ -261,8 +260,14 @@ program = foldr1 ESeq <$> many1 expr
 overrideMethod :: Parser Diff
 overrideMethod = OverrideMethod <$> (methodExpr <|> invariantExpr)
 
+deleteMethod :: Parser Diff
+deleteMethod = DeleteMethod <$> (reserved "delete" *> identifier)
+
 diffs :: Parser [Diff]
-diffs = many1 overrideMethod
+diffs = many1 methodDiff
+
+methodDiff :: Parser Diff
+methodDiff = deleteMethod <|> overrideMethod
 
 modField :: Parser [Diff]
 modField = do
@@ -271,7 +276,7 @@ modField = do
                                            (DeleteField <$> identifier))
   symbol ")"
   symbol "{" *> symbol "..."
-  rest <- many overrideMethod
+  rest <- many methodDiff
   symbol "}"
   return $ fieldOp : rest
 
@@ -284,7 +289,7 @@ diffOrExpr =
   <|>
   lookAhead (reserved "new") *> (Prog <$> expr)
   <|>
-  PDiff <$> many1 overrideMethod
+  PDiff <$> many1 methodDiff
   <|> Prog <$> expr
 
 parse :: Parser a -> String -> a

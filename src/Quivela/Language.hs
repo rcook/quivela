@@ -210,6 +210,7 @@ data ProofHint = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
 data Diff = NewField Field
           | DeleteField Var
           | OverrideMethod Expr -- assumes expr is an EMethod
+          | DeleteMethod Var
           deriving (Read, Show, Eq, Ord)
 
 -- | One part of a quivela proof, which is either an expression, or a proof hint.
