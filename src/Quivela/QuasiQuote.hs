@@ -16,7 +16,7 @@ import Quivela.Verify
 -- | Construct a term that parses the given string as a quivela expression
 -- and return it as a 'ProofPart'.
 quivelaParse :: String -> TH.ExpQ
-quivelaParse s = [| Prog $ $(quivelaParse' s) |]
+quivelaParse s = [| parseProofPart $ $(litE $ TH.StringL s) |]
 
 -- | Same as 'quivelaParse' but without the 'ProofPart' wrapper.
 quivelaParse' :: String -> TH.ExpQ

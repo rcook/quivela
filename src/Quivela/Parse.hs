@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-module Quivela.Parse (parseExpr, parseFile) where
+module Quivela.Parse (parseExpr, parseFile, parseProofPart) where
 
 import Control.Lens
 import Control.Monad
@@ -278,13 +278,14 @@ modField = do
 initialParserState :: ParserState
 initialParserState = ParserState { _inTuple = False, _inFieldInit = False, _inArgs = False }
 
-diffOrExpr :: Parser (Either [Diff] Expr)
+diffOrExpr :: Parser ProofPart
 diffOrExpr =
-  try (Left <$> modField)
+  try (PDiff <$> modField)
   <|>
-  lookAhead (reserved "new") *> (Right <$> expr)
+  lookAhead (reserved "new") *> (Prog <$> expr)
   <|>
-  Left <$> many1 overrideMethod
+  PDiff <$> many1 overrideMethod
+  <|> Prog <$> expr
 
 parse :: Parser a -> String -> a
 parse p s =
@@ -297,3 +298,6 @@ parseExpr s = parse program s
 
 parseFile :: MonadIO m => FilePath -> m Expr
 parseFile file = parseExpr <$> liftIO (readFile file)
+
+parseProofPart :: String -> ProofPart
+parseProofPart = parse diffOrExpr
