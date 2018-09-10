@@ -2,10 +2,10 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Quivela.Examples.ETM where
 
+import Control.Lens hiding (rewrite)
 import Quivela
 
-prefix = undefined
-prove emptyVerifyEnv
+prove (set useCache False emptyVerifyEnv)
   ([prog'|
 method MacI(mac) {
     new (const mac=mac,tg=0) {
