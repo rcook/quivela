@@ -122,23 +122,27 @@ expr = do
     postfix name fun       = Postfix (do{ reservedOp name; return fun })
 
 
-comprSuffix :: Var -> Parser (Expr, Expr)
-comprSuffix name = do
+comprSuffix :: Parser (Var, Expr, Expr)
+comprSuffix = do
   symbol "|"
-  string name *> whiteSpace
+  name <- identifier
   (reserved "in" <|> (symbol "∈" *> pure ()))
   -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
   base <- withState (set inTuple True) expr
   pred <- (symbol "," *> withState (set inTuple True) expr) <|> pure (EConst (VInt 1))
-  return (base, pred)
+  return (name, base, pred)
 
 setComprExpr :: Parser Expr
 setComprExpr = do
   symbol "{"
-  name <- identifier
-  (base, pred) <- comprSuffix name
+  fun <- withState (set pipeAsOr False) expr
+  symbol "|"
+  (name, base, pred) <- comprSuffix
   symbol "}"
-  return $ ESetCompr name base pred
+  return $ ESetCompr { _comprVar = name
+                     -- , _comprBase = base
+                     , _comprPred = ECall (EConst VNil) "&" [EIn (EVar name) base, pred]
+                     , _comprValue = fun }
 
 
 mapComprExpr :: Parser Expr
@@ -147,7 +151,12 @@ mapComprExpr = do
   name <- identifier
   symbol "->" <|> symbol "↦"
   val <- withState (set inTuple True . set pipeAsOr False) expr
-  (base, pred) <- comprSuffix name
+  symbol "|"
+  string name *> whiteSpace
+  (reserved "in" <|> (symbol "∈" *> pure ()))
+  -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
+  base <- withState (set inTuple True) expr
+  pred <- (symbol "," *> withState (set inTuple True) expr) <|> pure (EConst (VInt 1))
   return $ EMapCompr name val base pred
 
 

@@ -62,7 +62,12 @@ data SymValue = SymVar String Type
   | Div Value Value
   | Lt Value Value
   | Le Value Value
+  | SetCompr Value Var Prop
   | ITE Prop Value Value
+  | MapCompr Value Value Var Prop
+  | In Value Value
+  | Union Value Value
+  | Intersect Value Value
   | SymRef String -- FIXME: check if we can remove these and use refs for everything
   | Ref Addr
   | Deref Value String
@@ -112,6 +117,7 @@ data Expr = ENop
           | ETupleProj Expr Expr
           | ESeq Expr Expr
           | EIf Expr Expr Expr
+          | EIn Expr Expr
           | EUnion Expr Expr
           | EIntersect Expr Expr
           | ETypeDecl { _typedeclName :: String
@@ -119,7 +125,8 @@ data Expr = ENop
                       , _typedeclValues :: [(Var, Value)]
                       , _typedeclBody :: Expr }
           | ESetCompr { _comprVar :: Var
-                      , _comprBase :: Expr
+                      -- , _comprBase :: Expr
+                      , _comprValue :: Expr
                       , _comprPred :: Expr } -- set comprehensions
           | EMapCompr { _comprVar :: Var
                       , _comprValue :: Expr

@@ -201,11 +201,6 @@ invToAsm (VRef addrL, ctxL, pathCondL) (VRef addrR, ctxR, pathCondR) inv =
     _ -> return []
 invToAsm (v1, _, _) (v1', _ ,_) _ = error "invToAsm called with non-address arguments"
 
-conjunction :: [Prop] -> Prop
-conjunction [] = PTrue
-conjunction [p] = p
-conjunction ps = foldr1 (:&:) ps
-
 -- | Return all invariant methods in given context
 collectInvariants :: Addr -> Context -> [Method]
 collectInvariants addr ctx =

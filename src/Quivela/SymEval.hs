@@ -669,7 +669,35 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
             return [(val, ctxObjs . ix addr . objType .~ TNamed typeName $ ctx', pathCond')]
           _ -> return [(val, ctx', pathCond')] -- object creation may have returned an error
   | otherwise = error $ "No such type: " ++ typeName
+symEval (setCompr@ESetCompr{}, ctx, pathCond) = do
+  let x = setCompr ^. comprVar
+  -- Get new symbolic variable for variable bound by comprehension:
+  fv <- (Sym . (`SymVar` TAny)) <$> freshVar x
+  -- Bind name in new context, in which we can evaluate predicate
+  -- and function expression of comprehension
+  let newCtx = over ctxScope (M.insert x (fv, TAny)) ctx
+  predPaths <- symEval (fromJust (setCompr ^? comprPred), newCtx, pathCond)
+  comprs <- foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
+    -- foreachM (symEval (fromJust (setCompr ^? comprBase)
+    foreachM (symEval (fromJust (setCompr ^? comprValue), ctx', pathCond')) $ \(funVal, ctx'', pathCond'') -> do
+      return [Sym (SetCompr funVal x (conjunction $ Not (predVal :=: VInt 0) : pathCond' ++ pathCond''))]
+  return [(foldr (\sc v -> Sym (Union sc v)) (VSet S.empty) comprs, ctx, pathCond)]
+symEval (EIn elt set, ctx, pathCond) = do
+  foreachM (symEval (elt, ctx, pathCond)) $ \(velt, ctx', pathCond') ->
+    foreachM (symEval (set, ctx', pathCond'))  $ \(vset, ctx'', pathCond'') -> do
+      if (isSymbolic velt || isSymbolic vset)
+      then return [(Sym (In velt vset), ctx'', pathCond'')]
+      else case vset of
+             VSet vals -> (if velt `S.member` vals then return [(VInt 1, ctx'', pathCond'')]
+                           else return [(VInt 0, ctx'', pathCond'')])
+             _ -> error $ "Tried to test for set membership in concrete non-set value: " ++ show vset
+
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv = VerifyEnv { _splitEq = False, _useCache = True }
+
+conjunction :: [Prop] -> Prop
+conjunction [] = PTrue
+conjunction [p] = p
+conjunction ps = foldr1 (:&:) ps
