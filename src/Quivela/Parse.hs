@@ -283,14 +283,12 @@ modField = do
 initialParserState :: ParserState
 initialParserState = ParserState { _inTuple = False, _inFieldInit = False, _inArgs = False }
 
-diffOrExpr :: Parser ProofPart
-diffOrExpr =
-  try (PDiff <$> modField)
+diffOrProg :: Parser ProofPart
+diffOrProg =
+  try ((PDiff <$> modField) <* whiteSpace <* lookAhead eof)
   <|>
-  lookAhead (reserved "new") *> (Prog <$> expr)
-  <|>
-  PDiff <$> many1 methodDiff
-  <|> Prog <$> expr
+  try (PDiff <$> (many1 methodDiff <* whiteSpace <* lookAhead eof))
+  <|> (Prog <$> program)
 
 parse :: Parser a -> String -> a
 parse p s =
@@ -305,4 +303,4 @@ parseFile :: MonadIO m => FilePath -> m Expr
 parseFile file = parseExpr <$> liftIO (readFile file)
 
 parseProofPart :: String -> ProofPart
-parseProofPart = parse diffOrExpr
+parseProofPart = parse diffOrProg
