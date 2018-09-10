@@ -259,7 +259,7 @@ program :: Parser Expr
 program = foldr1 ESeq <$> many1 expr
 
 overrideMethod :: Parser Diff
-overrideMethod = OverrideMethod <$> methodExpr
+overrideMethod = OverrideMethod <$> (methodExpr <|> invariantExpr)
 
 diffs :: Parser [Diff]
 diffs = many1 overrideMethod
