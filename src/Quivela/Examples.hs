@@ -337,3 +337,24 @@ leTaut =
   ≈
   [prog| new() { method f() { 1 } } |]
   : []
+
+setInTest :: Proof
+setInTest =
+  [prog| new() { method f() { 1 ∈ {1} } } |]
+  ≈
+  [prog| new() { method f() { 1 } } |]
+  : []
+
+setInTest2 :: Proof
+setInTest2 =
+  [prog| new() { method f(x) { x ∈ {1} } } |]
+  ≈
+  [prog| new() { method f(x) { x == 1 } } |]
+  : []
+
+setComprTest1 :: Proof
+setComprTest1 =
+  [prog| new() { method f(y) { y ∈ {x | x ∈ {1}, 1} } } |]
+  ≈
+  [prog| new() { method f(y) { y == 1 } } |]
+  : []

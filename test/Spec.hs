@@ -119,6 +119,9 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "commute two new(){} expressions with an extra new on one side" nop commuteNewPathCondition
   , TestCase $ assertVerified "reason about new()s used only in path condition" nop commuteNewContradictoryPath
   , TestCase $ assertVerified "syntactic sugar rnd() also commutes" nop commuteRands
+  , TestCase $ assertVerified "basic set literals and membership" nop setInTest
+  , TestCase $ assertVerified "set membership in singleton set" nop setInTest2
+  , TestCase $ assertVerified "trivial set comprehension" nop setComprTest1
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)
