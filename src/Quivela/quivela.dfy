@@ -1,7 +1,7 @@
 type Addr = nat
 type Var = string
 
-datatype Value = Int(val: int) | Tuple(elts:List<Value>) | Map(vals: List<Pair<Value, Value>>) | Nil()
+datatype Value = Int(val: int) | Tuple(elts:List<Value>) | Map(vals: List<Pair<Value, Value>>) | Set(valSet: set<Value>) | Nil()
 
 function method RefInv(v: Value): int
 
@@ -10,6 +10,22 @@ function method Ref(addr: int): Value
 
 function method Deref(obj: Value, field: string): Value
 
+function method In(elt: Value, vals: Value): Value
+{
+  if vals.Set? && elt in vals.valSet then Int(1) else Int(0)
+}
+
+function method ToSet(s1: Value): set<Value>
+
+lemma ToSetAssms()
+  ensures ToSet(Int(0)) == {}
+  ensures forall xs :: ToSet(Set(xs)) == xs
+
+
+function method Union(s1: Value, s2: Value): Value
+{
+  Set(ToSet(s1) + ToSet(s2))
+}
 
 // lists
 datatype List<T> = Cons(car: T, cdr: List<T>) | LNil

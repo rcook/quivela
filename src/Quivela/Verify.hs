@@ -565,7 +565,13 @@ symValToDafny (SymRef s) = dafnyFunCall "VRef" <$> sequence [translateVar s "int
 symValToDafny (Deref obj field) =
   dafnyFunCall "Deref" <$> sequence [toDafny obj, pure ("\"" ++ field ++ "\"")]
 symValToDafny (Z v) = dafnyFunCall "Z" <$> sequence [toDafny v]
--- symValToDafny e = error $ "symValToDafny: unhandled: " ++ show e
+symValToDafny (SetCompr val name pred) = do
+  predD <- toDafny pred
+  valD <- valueToDafny val
+  nameD <- translateVar name "Value"
+  return $ "Set(set " ++ nameD ++ ":Value | " ++ predD ++ " :: " ++ valD ++ ")"
+symValToDafny (Union s1 s2) = dafnyFunCall "Union" <$> sequence [toDafny s1, toDafny s2]
+symValToDafny (In elt set) = dafnyFunCall "In" <$> sequence [toDafny elt, toDafny set]
 
 valueToDafny :: Value -> Emitter String
 valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
@@ -573,6 +579,9 @@ valueToDafny (VTuple vs) = concatM [pure "Tuple(", toDafny vs, pure ")"]
 valueToDafny (VMap m) = concatM [pure "Map(", toDafny (M.toList m), pure ")"]
 valueToDafny VNil = return "Nil()"
 valueToDafny (Sym sv) = symValToDafny sv
+valueToDafny (VSet vals) = do
+  valEncodings <- mapM valueToDafny (S.toList vals)
+  return $ "Set({" ++ intercalate ", " valEncodings ++ "})"
 
 instance ToDafny Prop where
   toDafny = propToDafny
