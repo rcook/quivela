@@ -136,7 +136,6 @@ setComprExpr :: Parser Expr
 setComprExpr = do
   symbol "{"
   fun <- withState (set pipeAsOr False) expr
-  symbol "|"
   (name, base, pred) <- comprSuffix
   symbol "}"
   return $ ESetCompr { _comprVar = name
