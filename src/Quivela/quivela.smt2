@@ -4,6 +4,8 @@
 (declare-datatypes ((Value 0) (Values 0) (Valuess 0))
                    (((VInt (val Int))
                      VNil
+                     (VSet (valSet (Array Value Bool)))
+                     (VMap (valMap (Array Value Value)))
                      (VTuple (elts Values)))
                     (nil (cons (hd Value) (tl Values)))
                     (nils (conss (hds Values) (tls Valuess)))))
@@ -29,29 +31,44 @@
 
 
 ;; Maps:
-(declare-fun insert (Value Value Value) Value)
-(declare-fun lookup (Value Value) Value)
 
-(assert (forall ((k Value) (v Value) (m Value))
-                (not (= (insert k v m) (VInt 0)))))
+; ;;; Maps embedded as z3 arrays:
+(define-const empty-map (Array Value Value)
+  ((as const (Array Value Value)) (VInt 0)))
 
-(assert (forall ((k Value) (v Value) (m Value))
-                (= (lookup k (insert k v m))
-                   v)))
+(declare-fun to-map (Value) (Array Value Value))
+(assert (= (to-map (VInt 0)) empty-map))
+(assert (forall ((m (Array Value Value)))
+                (= (to-map (VMap m)) m)))
 
-(assert (forall ((k Value) (k2 Value) (v Value) (m Value))
-                (=> (not (= k k2))
-                   (= (lookup k (insert k2 v m))
-                      (lookup k m)))))
+(define-fun insert ((k Value) (v Value) (m Value)) Value
+  (VMap (store (to-map m) k v)))
 
-(assert (forall ((k Value) (k2 Value) (v Value) (v2 Value) (m Value))
-                (=> (not (= k k2))
-                   (= (insert k v (insert k2 v2 m))
-                      (insert k2 v2 (insert k v m))))))
-
-(assert (forall ((k Value) (v Value) (v2 Value) (m Value))
-                (= (insert k v (insert k v2 m))
-                   (insert k v m))))
+(define-fun lookup ((k Value) (m Value)) Value
+  (select (to-map m) k))
+;; (declare-fun insert (Value Value Value) Value)
+;; (declare-fun lookup (Value Value) Value)
+;;
+;; (assert (forall ((k Value) (v Value) (m Value))
+;;                 (not (= (insert k v m) (VInt 0)))))
+;;
+;; (assert (forall ((k Value) (v Value) (m Value))
+;;                 (= (lookup k (insert k v m))
+;;                    v)))
+;;
+;; (assert (forall ((k Value) (k2 Value) (v Value) (m Value))
+;;                 (=> (not (= k k2))
+;;                    (= (lookup k (insert k2 v m))
+;;                       (lookup k m)))))
+;;
+;; (assert (forall ((k Value) (k2 Value) (v Value) (v2 Value) (m Value))
+;;                 (=> (not (= k k2))
+;;                    (= (insert k v (insert k2 v2 m))
+;;                       (insert k2 v2 (insert k v m))))))
+;;
+;; (assert (forall ((k Value) (v Value) (v2 Value) (m Value))
+;;                 (= (insert k v (insert k v2 m))
+;;                    (insert k v m))))
 
 ;; Arithmetic:
 ;; Interpreting a value as an integer:
@@ -103,3 +120,40 @@
 
 ;; Tuple projection:
 (declare-fun proj (Value Value) Value)
+
+;; Sets:
+(declare-fun to-set (Value) (Array Value Bool))
+(define-const empty-set (Array Value Bool)
+  ((as const (Array Value Bool)) false))
+(assert (= (to-set (VInt 0)) empty-set))
+(assert (forall ((set (Array Value Bool)))
+                (! (= (to-set (VSet set)) set)
+                   :pattern (VSet set))))
+;; restrict pattern to (to-set ..) if this turns out to get slow
+
+(define-fun vunion ((v Value) (w Value)) Value
+  (VSet ((_ map or) (to-set v) (to-set w))))
+
+
+(define-fun vmember ((v Value) (w Value)) Value
+  (ite (select (to-set w) v)
+       (VInt 1)
+       (VInt 0)))
+
+(define-fun vintersect ((v Value) (w Value)) Value
+  (VSet ((_ map and) (to-set v) (to-set w))))
+
+;; some experiments:
+;; (push)
+;; (declare-const small-vals (Array Value Bool))
+;;
+;; (assert (forall ((v Value))
+;;                 (=> (select small-vals v)
+;;                    (and (is-VInt v)
+;;                         (<= (val v) 10)))))
+;;
+;; (declare-const idx Value)
+;; (assert (and (select small-vals idx)
+;;              (= idx (VInt 11))))
+;; (check-sat)
+;; (pop)

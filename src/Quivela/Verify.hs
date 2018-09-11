@@ -692,11 +692,17 @@ valuessToZ3 (vs : vss) = z3Call "conss" <$> sequence [valuesToZ3 vs, valuessToZ3
 valueToZ3 :: Value -> Emitter String
 valueToZ3 (VInt i) = return $ z3Call "VInt" [show i]
 valueToZ3 (VTuple vs) = z3Call "VTuple" <$> sequence [valuesToZ3 vs]
-valueToZ3 (VMap map) = freshEmitterVar "map" "Value" -- TODO: map same maps to same variable
+-- valueToZ3 (VMap map) = freshEmitterVar "map" "Value" -- TODO: map same maps to same variable
+valueToZ3 (VMap mp) = do
+  elts <- foldM (\m (k, v) -> z3Call "store" <$> sequence [pure m, toZ3 k, toZ3 v])
+                "empty-map" (M.toList mp)
+  return $ z3Call "VMap" [elts]
 valueToZ3 VNil = return "VNil"
 valueToZ3 (Sym (Ref addr)) =
   return $ z3Call "vref" [show addr] -- vref is an uninterpreted function instead of a constructor
 valueToZ3 (Sym sv) = symValueToZ3 sv
+valueToZ3 (VSet vs) = z3Call "VSet" <$> sequence
+  [foldM (\set v -> z3Call "store" <$> sequence [pure set, toZ3 v, pure "true"]) "empty-set" (S.toList vs)]
 
 symValueToZ3 :: SymValue -> Emitter String
 symValueToZ3 (SymVar x t) =
@@ -718,6 +724,21 @@ symValueToZ3 (SymRef name) = z3Call "vref" <$> sequence [translateVar name "Int"
 symValueToZ3 (Deref obj name) = z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
 symValueToZ3 (Ref a) = z3Call "vref" <$> sequence [toZ3 a]
 symValueToZ3 (Z v) = z3CallM "Z" [v]
+symValueToZ3 (SetCompr (Sym (SymVar xV TAny)) x pred) = do
+    -- TODO: emit assumptions and newly introduced variables differently so we can handle
+    -- them cleanly when occurring in a negative position
+    setVar <- freshEmitterVar ("setcompr_" ++ x) "(Array Value Bool)"
+    emit $ "(declare-const " ++ setVar ++ " (Array Value Bool))"
+    xCode <- translateVar xV "Value"
+    predCode <- toZ3 pred
+    emit . unlines $ [ "(assert (forall ((" ++ xCode ++ " Value))"
+                     , "  (= (select " ++ setVar ++ " " ++ xCode ++ ")"
+                     , "      " ++ predCode ++ ")))" ]
+    return $ z3Call "VSet" [setVar]
+symValueToZ3 (SetCompr _ _ _) = freshEmitterVar "setCompr" "Value"
+  -- set comprehensions with map not supported in z3 backend
+symValueToZ3 (Union s1 s2) = z3CallM "vunion" [s1, s2]
+symValueToZ3 (In elt set) = z3CallM "vmember" [elt, set]
 -- symValueToZ3 x = error $ "symValueToZ3: unhandled value: " ++ show x
 
 instance ToZ3 Integer where
@@ -746,7 +767,9 @@ readLineFromZ3 = do
 
 checkWithZ3 :: VC -> Verify Bool
 checkWithZ3 vc = do
-  (_, vcLines) <- runEmitter $ vcToZ3 vc
+  -- TODO: implement a more structured way to handle variable
+  -- declarations inside a translation function
+  (_, vcLines) <- fmap (second nub) . runEmitter $ vcToZ3 vc
   sendToZ3 "(push)"
   sendToZ3 (unlines vcLines)
   sendToZ3 "(check-sat)"
