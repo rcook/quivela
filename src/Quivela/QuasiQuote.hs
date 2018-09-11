@@ -52,3 +52,10 @@ prove' env prefix steps = do
 rewrite :: String -> String -> ProofHint
 rewrite e1 e2 = Rewrite (parseExpr e1) (parseExpr e2)
 
+
+heredocExpr :: String -> TH.ExpQ
+heredocExpr s = [| $(litE $ TH.StringL s) |]
+
+-- | QuasiQuoter for multi-line string literals
+heredoc :: QuasiQuoter
+heredoc = QuasiQuoter heredocExpr undefined undefined undefined
