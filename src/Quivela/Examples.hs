@@ -358,3 +358,10 @@ setComprTest1 =
   ≈
   [prog| new() { method f(y) { y == 1 } } |]
   : []
+
+mapComprTest1 :: Proof
+mapComprTest1 =
+  [prog| new() { method f() { ([x ↦ 1 | 1])[5] } } |]
+  ≈
+  [prog| new() { method f() { 1 } } |]
+  : []

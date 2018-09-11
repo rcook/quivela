@@ -746,7 +746,25 @@ symValueToZ3 (SetCompr (Sym (SymVar xV TAny)) x pred) = do
     return $ z3Call "VSet" [setVar]
 symValueToZ3 (SetCompr _ _ _) = freshEmitterVar "setCompr" "Value"
   -- set comprehensions with map not supported in z3 backend
+symValueToZ3 (MapCompr x val pred) = do
+  mapVar <- freshEmitterVar ("mapcompr_" ++ x) "(Array Value Value)"
+  emit $ "(declare-const " ++ mapVar ++ " (Array Value Value))"
+  xT <- translateVar x "Value"
+  predT <- toZ3 pred
+  valT <-toZ3 val
+  -- if the predicate is satisfied, we map x to f(x)
+  emit . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
+                   , "  (=> " ++ predT
+                   , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
+                   , "         " ++ valT ++ "))))" ]
+  -- otherwise, x is not in the map:
+  emit . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
+                   , "  (=> (not " ++ predT ++ ")"
+                   , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
+                   , "         (VInt 0)))))" ]
+  return $ z3Call "VMap" [mapVar]
 symValueToZ3 (Union s1 s2) = z3CallM "vunion" [s1, s2]
+symValueToZ3 (MapUnion m1 m2) = z3CallM "munion" [m1, m2]
 symValueToZ3 (In elt set) = z3CallM "vmember" [elt, set]
 -- symValueToZ3 x = error $ "symValueToZ3: unhandled value: " ++ show x
 

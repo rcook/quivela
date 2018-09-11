@@ -64,9 +64,10 @@ data SymValue = SymVar String Type
   | Le Value Value
   | SetCompr Value Var Prop
   | ITE Prop Value Value
-  | MapCompr Value Value Var Prop
+  | MapCompr Var Value Prop
   | In Value Value
   | Union Value Value
+  | MapUnion Value Value
   | Intersect Value Value
   | SymRef String -- FIXME: check if we can remove these and use refs for everything
   | Ref Addr
@@ -130,7 +131,6 @@ data Expr = ENop
                       , _comprPred :: Expr } -- set comprehensions
           | EMapCompr { _comprVar :: Var
                       , _comprValue :: Expr
-                      , _comprBase :: Expr
                       , _comprPred :: Expr } -- map comprehensions
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 

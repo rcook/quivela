@@ -680,8 +680,19 @@ symEval (setCompr@ESetCompr{}, ctx, pathCond) = do
   comprs <- foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
     -- foreachM (symEval (fromJust (setCompr ^? comprBase)
     foreachM (symEval (fromJust (setCompr ^? comprValue), ctx', pathCond')) $ \(funVal, ctx'', pathCond'') -> do
-      return [Sym (SetCompr funVal x (conjunction $ Not (predVal :=: VInt 0) : pathCond' ++ pathCond''))]
+      return [Sym (SetCompr funVal x (conjunction $ Not (predVal :=: VInt 0) : pathCond''))]
   return [(foldr (\sc v -> Sym (Union sc v)) (VSet S.empty) comprs, ctx, pathCond)]
+symEval (mapCompr@EMapCompr{}, ctx, pathCond) = do
+  let x = mapCompr ^. comprVar
+  -- FIXME: factor out commonalities with ESetCompr case
+  fv <- freshVar x
+  let fvExpr = Sym (SymVar fv TAny)
+  let newCtx = over ctxScope (M.insert x (fvExpr, TAny)) ctx
+  predPaths <- symEval (fromJust (mapCompr ^? comprPred), newCtx, pathCond)
+  comprs <- foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
+    foreachM (symEval (fromJust (mapCompr ^? comprValue), newCtx, pathCond)) $ \(funVal, ctx'', pathCond'') -> do
+      return [Sym (MapCompr fv funVal (conjunction $ Not (predVal :=: VInt 0) : pathCond' ++ pathCond''))]
+  return [(foldr (\sc v -> Sym (MapUnion sc v)) (VMap M.empty) comprs, ctx, pathCond)]
 symEval (EIn elt set, ctx, pathCond) = do
   foreachM (symEval (elt, ctx, pathCond)) $ \(velt, ctx', pathCond') ->
     foreachM (symEval (set, ctx', pathCond'))  $ \(vset, ctx'', pathCond'') -> do

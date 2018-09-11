@@ -46,29 +46,19 @@
 
 (define-fun lookup ((k Value) (m Value)) Value
   (select (to-map m) k))
-;; (declare-fun insert (Value Value Value) Value)
-;; (declare-fun lookup (Value Value) Value)
-;;
-;; (assert (forall ((k Value) (v Value) (m Value))
-;;                 (not (= (insert k v m) (VInt 0)))))
-;;
-;; (assert (forall ((k Value) (v Value) (m Value))
-;;                 (= (lookup k (insert k v m))
-;;                    v)))
-;;
-;; (assert (forall ((k Value) (k2 Value) (v Value) (m Value))
-;;                 (=> (not (= k k2))
-;;                    (= (lookup k (insert k2 v m))
-;;                       (lookup k m)))))
-;;
-;; (assert (forall ((k Value) (k2 Value) (v Value) (v2 Value) (m Value))
-;;                 (=> (not (= k k2))
-;;                    (= (insert k v (insert k2 v2 m))
-;;                       (insert k2 v2 (insert k v m))))))
-;;
-;; (assert (forall ((k Value) (v Value) (v2 Value) (m Value))
-;;                 (= (insert k v (insert k v2 m))
-;;                    (insert k v m))))
+
+(declare-fun combine-decl (Value Value) Value)
+
+(define-fun combine ((v Value) (w Value)) Value
+  (ite (= (VInt 0) v)
+       w
+       v))
+(assert (forall ((v Value) (w Value))
+                (= (combine-decl v w)
+                   (combine v w))))
+
+(define-fun munion ((k Value) (v Value)) Value
+  (VMap ((_ map (combine-decl (Value Value) Value)) (to-map k) (to-map v))))
 
 ;; Arithmetic:
 ;; Interpreting a value as an integer:
@@ -157,3 +147,19 @@
 ;;              (= idx (VInt 11))))
 ;; (check-sat)
 ;; (pop)
+
+;; (declare-const simple-map (Array Value Value))
+;;
+;; (assert (forall ((k Value))
+;;                 (! (= (not (= (select simple-map k)
+;;                               (VInt 0)))
+;;                       (and (is-VInt k)
+;;                            (<= (val k) 10)
+;;                            (= (select simple-map k)
+;;                               (add k (VInt 2)))))
+;;                    :pattern (select simple-map k))))
+;;
+;; (declare-const k Value)
+;; (assert (and (not (= (select simple-map k) (VInt 0)))
+;;              (= (select simple-map k) (VInt 13))))
+;; (check-sat)

@@ -113,7 +113,7 @@ expr = do
   where
     term = do
       base <- parens (withState (set pipeAsOr True . set inArgs False . set inFieldInit False . set inTuple False) expr)
-         <|> try unqualifiedFunCall <|> try baseExpr <|> ifExpr <|> try setComprExpr
+         <|> try unqualifiedFunCall <|> try baseExpr <|> ifExpr <|> try setComprExpr <|> try mapComprExpr
          <|> try newExpr <|> newConstrExpr <|> methodExpr <|> invariantExpr <|> typedecl
          <?> "basic expression"
       try (combExpr base) <|> return base
@@ -151,12 +151,14 @@ mapComprExpr = do
   symbol "->" <|> symbol "↦"
   val <- withState (set inTuple True . set pipeAsOr False) expr
   symbol "|"
-  string name *> whiteSpace
-  (reserved "in" <|> (symbol "∈" *> pure ()))
+  --  (reserved "in" <|> (symbol "∈" *> pure ()))
   -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
-  base <- withState (set inTuple True) expr
-  pred <- (symbol "," *> withState (set inTuple True) expr) <|> pure (EConst (VInt 1))
-  return $ EMapCompr name val base pred
+  pred <- withState (set inTuple True) expr
+  symbol "]"
+  return $ EMapCompr { _comprVar = name
+                     , _comprValue = val
+                     , _comprPred = pred
+                     }
 
 
 combExpr :: Expr -> Parser Expr
