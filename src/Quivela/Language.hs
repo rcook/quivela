@@ -128,7 +128,6 @@ data Expr = ENop
                       , _typedeclValues :: [(Var, Value)]
                       , _typedeclBody :: Expr }
           | ESetCompr { _comprVar :: Var
-                      -- , _comprBase :: Expr
                       , _comprValue :: Expr
                       , _comprPred :: Expr } -- set comprehensions
           | EMapCompr { _comprVar :: Var
