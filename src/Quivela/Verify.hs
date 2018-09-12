@@ -859,7 +859,11 @@ checkEqv :: Bool -> Expr -> [ProofHint] -> Expr -> Expr -> Verify [(Var, [VC])]
 checkEqv useSolvers prefix [Admit] lhs rhs = do
   -- debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
   return []
-checkEqv useSolvers prefix [Rewrite from to] lhs rhs =
+checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
+  (_, prefixCtx, _) <- fmap singleResult . symEval $ (prefix, emptyCtx, [])
+  unless ((from, to) `elem` (prefixCtx ^. ctxAssumptions) ||
+          (to, from) `elem` (prefixCtx ^. ctxAssumptions)) $
+    fail $ "No such assumption: " ++ show from ++ " ≈ " ++ show to
   if lhs' == rhs then return []
   else error $ "Invalid rewrite step:\n" ++ show lhs' ++ "\n/=\n" ++ show rhs
   where lhs' = rewriteExpr from to lhs

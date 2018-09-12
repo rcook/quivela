@@ -741,7 +741,8 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
                                    then return [(VInt 1, ctx'', pathCond'')]
                                    else return [(VInt 0, ctx'', pathCond'')]
              _ -> error $ "Concrete non-map arguments for ⊆ operator: " ++ show (v1, v2)
-
+symEval (EAssume e1 e2, ctx, pathCond) =
+  return [(VNil, over ctxAssumptions ((e1, e2):) ctx, pathCond)]
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 
 emptyVerifyEnv :: VerifyEnv

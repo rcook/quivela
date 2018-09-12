@@ -35,6 +35,7 @@ languageDef =
                                      , "delete"
                                      , "in"
                                      , "set"
+                                     , "assume"
                                      ]
            , Token.reservedOpNames = ["+", "-", "*", "/", "=", "<", "<="
                                      , "&", "|", "!", ".", "[", "]", "^"
@@ -116,7 +117,7 @@ expr = do
     term = do
       base <- parens (withState (set pipeAsOr True . set inArgs False . set inFieldInit False . set inTuple False) expr)
          <|> try unqualifiedFunCall <|> try baseExpr <|> ifExpr <|> try setComprExpr <|> try mapComprExpr
-         <|> try newExpr <|> newConstrExpr <|> methodExpr <|> typedecl
+         <|> try newExpr <|> newConstrExpr <|> methodExpr <|> typedecl <|> assumeExpr
          <?> "basic expression"
       try (combExpr base) <|> return base
     binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
@@ -133,6 +134,9 @@ comprSuffix = do
   base <- withState (set inTuple True) expr
   pred <- (symbol "," *> withState (set inTuple True) expr) <|> pure (EConst (VInt 1))
   return (name, base, pred)
+
+assumeExpr :: Parser Expr
+assumeExpr = reserved "assume" *> (EAssume <$> expr <*> (symbol "≈" *> expr))
 
 setComprExpr :: Parser Expr
 setComprExpr = do

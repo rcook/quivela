@@ -136,6 +136,7 @@ data Expr = ENop
           | EMapCompr { _comprVar :: Var
                       , _comprValue :: Expr
                       , _comprPred :: Expr } -- map comprehensions
+          | EAssume Expr Expr
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 instance Serialize SymValue
@@ -188,6 +189,7 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
                        -- ^ Map from type names to typedecl expressions (all values in this
                        -- map can be assumed to be of the form (ETypeDecl ...)
                        , _ctxAllocStrategy :: AllocStrategy
+                       , _ctxAssumptions :: [(Expr, Expr)]
                        }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
@@ -329,6 +331,7 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                    , _ctxScope = M.empty
                    , _ctxTypeDecls = M.empty
                    , _ctxAllocStrategy = Increase
+                   , _ctxAssumptions = []
                    }
 
 emptyCtxRHS :: Context

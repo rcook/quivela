@@ -72,6 +72,11 @@ method EtM(e,mac) {
 
 _e = adversary()
 _mac = adversary()
+
+assume _e ≈ Enc(_e)
+assume _mac ≈ MacI(_mac)
+assume CpaI(_e) ≈ CpaC(_e)
+
 |]) $ let mac_tg = fieldEqual ["mac", "tg"]
           cpa_d = fieldEqual ["cpa", "d"]
           d = fieldEqual ["d"]
