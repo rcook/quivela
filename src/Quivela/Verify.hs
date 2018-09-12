@@ -781,16 +781,25 @@ symValueToZ3 (In elt set) = z3CallM "vmember" [elt, set]
 instance ToZ3 Integer where
   toZ3 = return . show
 
+-- | Runs an action in a writer monad, but suppresses its output and instead
+-- returns it in the results
+intercept :: MonadWriter w m => m a -> m (a, w)
+intercept action = censor (const mempty) (listen action)
+
 vcToZ3 :: VC -> Emitter ()
 vcToZ3 vc = do
-  emit $ ";; " ++ (vc ^. conditionName)
-  translatedAssms <- mapM toZ3 (vc ^. assumptions)
-  goalProp <- toZ3 (vc ^. goal)
+  emitRaw $ ";; " ++ (vc ^. conditionName)
+  -- FIXME: this is a hacky way to make sure we output the variable
+  -- declarations before the places where we need them.
+  -- Really we should be doing this in a more structured way.
+  (translatedAssms, assmOutput) <- intercept $ mapM toZ3 (vc ^. assumptions)
+  (goalProp, goalOutput) <- intercept $ toZ3 (vc ^. goal)
   vars <- use usedVars
   forM vars $ \(var, typ) ->
-    emit $ z3Call "declare-const" [var, typ]
-  mapM (\asm -> emit (z3Call "assert" [asm])) translatedAssms
-  emit $ z3Call "assert" [z3Call "not" [goalProp]]
+    emitRaw $ z3Call "declare-const" [var, typ]
+  mapM_ emit (assmOutput ++ goalOutput)
+  mapM_ (\asm -> emitRaw (z3Call "assert" [asm])) translatedAssms
+  emitRaw $ z3Call "assert" [z3Call "not" [goalProp]]
 
 sendToZ3 :: String -> Verify ()
 sendToZ3 line = do
