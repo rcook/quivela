@@ -83,14 +83,14 @@ _mac = adversary()
   [prog|
 new (const e=_e, const mac=_mac) {
     method enc(a, m) { m & em = e.enc(m) & t = mac.tag(<a,em>) & <em,t> }
-    method dec(a, c) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & e.dec(em) }
+    method dec(a, c) { <em,t> = c, c & mac.verify(<a,em>,t) & e.dec(em) }
 }
 |]
    ≈ Hint [rewrite "_mac" "MacI(_mac)"]:
    [prog|
 new (const e=_e, const mac=MacI(_mac)) {
     method enc(a, m) { m & em = e.enc(m) & t = mac.tag(<a,em>) & <em,t> }
-    method dec(a, c) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & e.dec(em) }
+    method dec(a, c) { <em,t> = c, c & mac.verify(<a,em>,t) & e.dec(em) }
 }|]
    ≈ Hint [Note "Introducing cpa"]:
    [prog|
@@ -102,7 +102,7 @@ new (..., const cpa=new(const e=_e) {
    ≈ Hint [Note "Replace calls to e by calls to cpa"]:
    [prog|
     method enc(a, m) { m & em = cpa.enc(m) & t = mac.tag(<a,em>) & <em,t> }
-    method dec(a, c) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & cpa.dec(em) }
+    method dec(a, c) { <em,t> = c, c & mac.verify(<a,em>,t) & cpa.dec(em) }
 |]
    ≈ Hint [Note "Store ciphertext in h map"]:
    [prog|
@@ -114,7 +114,7 @@ new (..., const cpa=new(const e=_e,h=0) {
 }|]
    ≈ Hint [Note "Ensure ciphertext in h before decryption"]:
    [prog|
-    method dec(a, c) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & cpa.h[em] & cpa.dec(em) }
+    method dec(a, c) { <em,t> = c, c & mac.verify(<a,em>,t) & cpa.h[em] & cpa.dec(em) }
 |]
    ≈ Hint [Note "Move h lookup into cpa object"]:
    [prog|
@@ -122,7 +122,7 @@ new (..., const cpa=new(const e=_e,h=0) {
         method enc(m) { c = e.enc(m) & h[c] = 1 & c }
         method dec(c) { h[c] & e.dec(c) }
     }) {...
-    method dec(a, c) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & cpa.dec(em) }
+    method dec(a, c) { <em,t> = c, c & mac.verify(<a,em>,t) & cpa.dec(em) }
     delete inv1
 }|]
    ≈ Hint [Note "Fold definition of CpaC"]:
@@ -140,7 +140,7 @@ new (..., const e=_e) { ... }|]
   ≈ Hint [Note "Look up ciphertext in map instead of calling decrypt"]:
   [prog|
     method enc(a, m) { m & em = e.enc(Z(m)) & cpa.d[em] = m & t = mac.tag(<a,em>) & <em,t> }
-    method dec(a, c) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & cpa.d[em] } |]
+    method dec(a, c) { <em,t> = c, c & mac.verify(<a,em>,t) & cpa.d[em] } |]
    ≈ Hint [Note "Introduce d"]:
    [prog|
 new (..., d=0) {...
@@ -150,11 +150,11 @@ new (..., d=0) {...
    [prog|
 new (const mac=MacI(_mac),const cpa=CpaI(Enc(_e)), const e=Enc(_e), d=0) {
     method enc(a,m) { m & em = e.enc(Z(m)) & cpa.d[em] = m & t = mac.tag(<a,em>) & d[<a,<em,t>>] = m & <em,t> }
-    method dec(a,c) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & cpa.d[em] }
+    method dec(a,c) { <em,t> = c, c & mac.verify(<a,em>,t) & cpa.d[em] }
 }|]
     ≈ Hint [Note "Look up ciphertext in new d map"]:
     [prog|
-     method dec(a:*,c:<*,*>) { em = c`0, t = c`1, c & mac.verify(<a,em>,t) & cpa.d[em] & d[<a,<em,t>>] }
+     method dec(a:*,c) { <em, t> = c, c & mac.verify(<a,em>,t) & cpa.d[em] & d[<a,<em,t>>] }
      invariant inv1(a, em, t) { d[<a, <em, t>>] == (t & (mac.tg[<a, em>] == t) & cpa.d[em]) }
      invariant inv2(a, em, t) { (!mac.tg[<a, em>]) | (cpa.d[em] & e.d[em]) }
 |]
