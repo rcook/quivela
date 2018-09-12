@@ -142,34 +142,3 @@
 
 (define-fun vintersect ((v Value) (w Value)) Value
   (VSet ((_ map and) (to-set v) (to-set w))))
-
-;; some experiments:
-;; (push)
-;; (declare-const small-vals (Array Value Bool))
-;;
-;; (assert (forall ((v Value))
-;;                 (=> (select small-vals v)
-;;                    (and (is-VInt v)
-;;                         (<= (val v) 10)))))
-;;
-;; (declare-const idx Value)
-;; (assert (and (select small-vals idx)
-;;              (= idx (VInt 11))))
-;; (check-sat)
-;; (pop)
-
-;; (declare-const simple-map (Array Value Value))
-;;
-;; (assert (forall ((k Value))
-;;                 (! (= (not (= (select simple-map k)
-;;                               (VInt 0)))
-;;                       (and (is-VInt k)
-;;                            (<= (val k) 10)
-;;                            (= (select simple-map k)
-;;                               (add k (VInt 2)))))
-;;                    :pattern (select simple-map k))))
-;;
-;; (declare-const k Value)
-;; (assert (and (not (= (select simple-map k) (VInt 0)))
-;;              (= (select simple-map k) (VInt 13))))
-;; (check-sat)
