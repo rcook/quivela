@@ -35,9 +35,9 @@ languageDef =
                                      , "in"
                                      , "set"
                                      ]
-           , Token.reservedOpNames = ["+", "-", "*", "/", "="
+           , Token.reservedOpNames = ["+", "-", "*", "/", "=", "<", "<="
                                      , "&", "|", "!", ".", "[", "]", "^"
-                                     , "∈"
+                                     , "∈", "⊆"
                                      ]
            }
 
@@ -97,7 +97,8 @@ expr = do
         [ [ prefix "!" (ECall (EConst VNil) "!" . (:[])) ]
         , [ postfix "++" (ECall (EConst VNil) "++" . (:[])) ]
         , [ binary "`" ETupleProj AssocLeft ]
-        , [ binary "∈" EIn AssocNone ]
+        , [ binary "∈" EIn AssocNone
+          , binary "⊆" ESubmap AssocNone ]
         , [ binary "*" (binCall "*") AssocLeft, binary "/" (binCall "/") AssocLeft ]
         , [ binary "+" (binCall "+") AssocLeft, binary "-" (binCall "-") AssocLeft ]
         , [ binary "<" (binCall "<") AssocNone

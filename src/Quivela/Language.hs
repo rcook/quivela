@@ -69,6 +69,7 @@ data SymValue = SymVar String Type
   | Union Value Value
   | MapUnion Value Value
   | Intersect Value Value
+  | Submap Value Value
   | SymRef String -- FIXME: check if we can remove these and use refs for everything
   | Ref Addr
   | Deref Value String
@@ -119,6 +120,7 @@ data Expr = ENop
           | ESeq Expr Expr
           | EIf Expr Expr Expr
           | EIn Expr Expr
+          | ESubmap Expr Expr
           | EUnion Expr Expr
           | EIntersect Expr Expr
           | ETypeDecl { _typedeclName :: String

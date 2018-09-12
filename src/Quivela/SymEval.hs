@@ -702,6 +702,16 @@ symEval (EIn elt set, ctx, pathCond) = do
              VSet vals -> (if velt `S.member` vals then return [(VInt 1, ctx'', pathCond'')]
                            else return [(VInt 0, ctx'', pathCond'')])
              _ -> error $ "Tried to test for set membership in concrete non-set value: " ++ show vset
+symEval (ESubmap e1 e2, ctx, pathCond) = do
+  foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
+    foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
+      if isSymbolic v1 || isSymbolic v2
+      then return [(Sym (Submap v1 v2), ctx'', pathCond'')]
+      else case (v1, v2) of
+             (VMap m1, VMap m2) -> if (S.fromList (M.keys m1) `S.isSubsetOf` S.fromList (M.keys m2))
+                                   then return [(VInt 1, ctx'', pathCond'')]
+                                   else return [(VInt 0, ctx'', pathCond'')]
+             _ -> error $ "Concrete non-map arguments for ⊆ operator: " ++ show (v1, v2)
 
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 

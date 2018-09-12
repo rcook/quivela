@@ -392,3 +392,21 @@ new(i:int=0) {
   method f(y) { !(0 == i) & i++, i }
 } |]
   : []
+
+constSubmap :: Proof
+constSubmap =
+  [prog|
+new() { method f() { m = 0, m[0] = 1, m[1] = 1, n = 0, n[0] = 1, n ⊆ m } } |]
+  ≈
+  [prog|
+new() { method f() { 1 } } |]
+  : []
+
+paramSubmap :: Proof
+paramSubmap =
+  [prog|
+new(m: map * *) { method f(x) { n = m, n[x] = 1, m ⊆ n } } |]
+  ≈
+  [prog|
+new() { method f(x) { 1 } } |]
+  : []

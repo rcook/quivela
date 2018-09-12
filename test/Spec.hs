@@ -126,6 +126,8 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "map comprehension with another map in predicate" nop mapComprTest2
   , TestCase $ assertVerified "map comprehension using another map in predicate and mapping function" nop mapComprTest3
   , TestCase $ assertVerified "map comprehension to modify existing map" nop mapComprTest4
+  , TestCase $ assertVerified "⊆ operation on concrete values" nop constSubmap
+  , TestCase $ assertVerified "⊆ operation on symbolic maps and indices" nop paramSubmap
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)

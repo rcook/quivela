@@ -60,6 +60,16 @@
 (define-fun munion ((k Value) (v Value)) Value
   (VMap ((_ map (combine-decl (Value Value) Value)) (to-map k) (to-map v))))
 
+(define-fun is-submap-internal ((m1 (Array Value Value)) (m2 (Array Value Value))) Bool
+  (forall ((k Value))
+          (=> (= (select m2 k) (VInt 0))
+              (= (select m1 k) (VInt 0)))))
+
+(define-fun is-submap ((v Value) (w Value)) Value
+  (ite (is-submap-internal (to-map v) (to-map w))
+       (VInt 1)
+       (VInt 0)))
+
 ;; Arithmetic:
 ;; Interpreting a value as an integer:
 (declare-fun to-int (Value) Int)
