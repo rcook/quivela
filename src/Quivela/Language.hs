@@ -97,6 +97,9 @@ data Field = Field { _fieldName :: String
                    }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
+data MethodKind = NormalMethod | LocalMethod | Invariant
+  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+
 data Expr = ENop
           | EAssign { _lhs :: Expr
                     , _rhs :: Expr }
@@ -111,7 +114,7 @@ data Expr = ENop
           | EMethod { _emethodName :: String
                     , _emethodArgs :: [(String, Type)]
                     , _emethodBody :: Expr
-                    , _eisInvariant :: Bool }
+                    , _emethodKind :: MethodKind }
           | ECall { _callObj :: Expr
                   , _callName :: String
                   , _callArgs :: [Expr] }
@@ -139,6 +142,7 @@ instance Serialize SymValue
 instance Serialize Value
 instance Serialize Type
 instance Serialize Field
+instance Serialize MethodKind
 instance Serialize Expr
 instance Serialize Prop
 
@@ -151,7 +155,7 @@ data Local = Local { _localValue :: Value
 data Method = Method { _methodName :: String
                      , _methodFormals :: [(String, Type)]
                      , _methodBody :: Expr
-                     , _isInvariant :: Bool
+                     , _methodKind :: MethodKind
                      }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 

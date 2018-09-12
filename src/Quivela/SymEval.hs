@@ -325,14 +325,14 @@ foreachM s act = do
   return $ concat ys
 
 -- | Add a method definition to the context
-defineMethod :: Var -> [(Var, Type)] -> Expr -> Bool -> Context -> Context
-defineMethod name formals body isInv ctx
+defineMethod :: Var -> [(Var, Type)] -> Expr -> MethodKind -> Context -> Context
+defineMethod name formals body kind ctx
   | Just obj <- ctx ^? ctxObjs . at (ctx ^. ctxThis) =
       ctxObjs . ix (ctx ^. ctxThis) . objMethods . at name ?~
         (Method { _methodName = name
                 , _methodFormals = formals
                 , _methodBody = body
-                , _isInvariant = isInv }) $ ctx
+                , _methodKind = kind }) $ ctx
   | otherwise = error "failed to define method"
 
 -- | Symbolically evaluate a list of field initializations in a given context and path condition
@@ -575,8 +575,8 @@ symEval (EIf cnd thn els, ctx, pathCond) = do
 symEval (ESeq e1 e2, ctx, pathCond) = do
   foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     symEval (e2, ctx', pathCond')
-symEval (EMethod name formals body isInv, ctx, pathCond) = do
-  return [(VNil, defineMethod name formals body isInv ctx, pathCond)]
+symEval (EMethod name formals body mtdKind, ctx, pathCond) = do
+  return [(VNil, defineMethod name formals body mtdKind ctx, pathCond)]
 symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
   foreachM (findLValue lval ctx pathCond) $ \case
     Just (place, ctx', pathCond', False)

@@ -410,3 +410,17 @@ new(m: map * *) { method f(x) { n = m, n[x] = 1, m ⊆ n } } |]
   [prog|
 new() { method f(x) { 1 } } |]
   : []
+
+localMethodExample :: Proof
+localMethodExample =
+  [prog|
+new() {
+  local f() { 5 }
+  method g() { f() }
+} |]
+  ≈
+  [prog|
+new() {
+  method g() { 5 }
+} |]
+  : []

@@ -28,6 +28,7 @@ languageDef =
                                      , "else"
                                      , "new"
                                      , "invariant"
+                                     , "local"
                                      , "method"
                                      , "type"
                                      , "map"
@@ -115,7 +116,7 @@ expr = do
     term = do
       base <- parens (withState (set pipeAsOr True . set inArgs False . set inFieldInit False . set inTuple False) expr)
          <|> try unqualifiedFunCall <|> try baseExpr <|> ifExpr <|> try setComprExpr <|> try mapComprExpr
-         <|> try newExpr <|> newConstrExpr <|> methodExpr <|> invariantExpr <|> typedecl
+         <|> try newExpr <|> newConstrExpr <|> methodExpr <|> typedecl
          <?> "basic expression"
       try (combExpr base) <|> return base
     binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
@@ -262,18 +263,15 @@ methodArg = (do
   return (id, typ)) <?> "method argument"
 
 methodExpr :: Parser Expr
-methodExpr = EMethod <$> (reserved "method" *> identifier)
-                     <*> (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")")
-                     <*> (symbol "{" *> expr <* symbol "}")
-                     <*> pure False
-           <?> "method definition"
-
-invariantExpr :: Parser Expr
-invariantExpr = EMethod <$> (reserved "invariant" *> identifier)
-                        <*> (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")")
-                        <*> (symbol "{" *> expr <* symbol "}")
-                        <*> pure True
-                <?> "invariant definition"
+methodExpr = (do
+  kind <- (reserved "method" *> pure NormalMethod)
+          <|> (reserved "invariant" *> pure Invariant)
+          <|> (reserved "local" *> pure LocalMethod)
+  EMethod <$> identifier
+    <*> (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")")
+    <*> (symbol "{" *> expr <* symbol "}")
+    <*> pure kind)
+  <?> "method definition"
 
 -- | Split field declarations into formal parameters for type declarations
 -- and constant field initializations. Fails if there is a non-constant
@@ -311,7 +309,7 @@ program :: Parser Expr
 program = foldr1 ESeq <$> many1 expr
 
 overrideMethod :: Parser Diff
-overrideMethod = OverrideMethod <$> (methodExpr <|> invariantExpr)
+overrideMethod = OverrideMethod <$> methodExpr
 
 deleteMethod :: Parser Diff
 deleteMethod = DeleteMethod <$> (reserved "delete" *> identifier)
