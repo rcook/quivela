@@ -71,12 +71,15 @@ data VC = VC { _conditionName :: String
           deriving (Read, Ord, Eq, Data, Typeable)
 makeLenses ''VC
 
+data SolverCmd = Raw String | NewVar String String | NewAssm String
+  deriving (Read, Show, Eq, Ord, Data, Typeable)
+
 -- | A monad for emitting code for external tools. In addition to state
 -- to keep track of fresh variables, this also includes a writer monad
 -- to collect all emitted lines.
-newtype Emitter a = Emitter { unEmitter :: RWST () [String] EmitterState IO a }
+newtype Emitter a = Emitter { unEmitter :: RWST () [SolverCmd] EmitterState IO a }
   deriving (Functor, Applicative, Monad, MonadState EmitterState,
-            MonadWriter [String], MonadIO)
+            MonadWriter [SolverCmd], MonadIO)
 
 data EmitterState = EmitterState { _nextEmitterVar :: M.Map String Integer
                                  , _varTranslations :: M.Map String String
@@ -466,8 +469,11 @@ freshEmitterVar prefix' typ = do
       modify (nextEmitterVar . at prefix ?~ 0)
       freshEmitterVar prefix typ
 
-emit :: String -> Emitter ()
+emit :: SolverCmd -> Emitter ()
 emit = tell . (:[])
+
+emitRaw :: String -> Emitter ()
+emitRaw = emit . Raw
 
 
 -- | Translate a variable name. Caches the result for each variable
@@ -610,34 +616,38 @@ propToDafny (Forall formals p) =
 
 asmToDafny :: Prop -> Emitter ()
 asmToDafny p =
-  emit . ("  requires "++) =<< propToDafny p
+  emitRaw . ("  requires "++) =<< propToDafny p
 
 vcToDafny :: VC -> Emitter ()
 vcToDafny vc = do
   lemName <- (`freshEmitterVar` "_unused") $ vc ^. conditionName
   lemArgs <- mapM (\(x, t) -> translateVar x "Value") $ collectSymVars vc
-  emit $ "lemma " ++ lemName ++ "(" ++ intercalate ", " (map (++ ": Value") lemArgs) ++ ")"
+  emitRaw $ "lemma " ++ lemName ++ "(" ++ intercalate ", " (map (++ ": Value") lemArgs) ++ ")"
   mapM_ asmToDafny (vc ^. assumptions)
   dafnyGoal <- propToDafny $ vc ^. goal
-  emit $ "  ensures " ++ dafnyGoal
-  emit $ "{ LookupSame(); LookupDifferent(); }"
+  emitRaw $ "  ensures " ++ dafnyGoal
+  emitRaw $ "{ LookupSame(); LookupDifferent(); }"
 
 initialEmitterState = EmitterState { _nextEmitterVar = M.empty
                                    , _usedVars = []
                                    , _varTranslations = M.empty }
 
-runEmitter :: MonadIO m => Emitter a -> m (a, [String])
+runEmitter :: MonadIO m => Emitter a -> m (a, [SolverCmd])
 runEmitter action = liftIO $ evalRWST (unEmitter action) () initialEmitterState
+
+solverCmdToDafny :: SolverCmd -> String
+solverCmdToDafny (Raw s) = s
+solverCmdToDafny cmd = error "not implemented yet: solverCmdToDafny: " ++ show cmd
 
 -- | Try to verify a list of verification conditions with dafny
 checkWithDafny :: MonadIO m => [VC] -> m Bool
 checkWithDafny [] = return True
 checkWithDafny vcs = do
   debug $ "Checking " ++ show (length vcs) ++ " VCs with Dafny"
-  (_, lines) <- runEmitter $ do
-    emit dafnyPrelude
+  (_, cmds) <- runEmitter $ do
+    emitRaw dafnyPrelude
     mapM_ vcToDafny vcs
-  tempFile <- liftIO $ writeTempFile "." "dafny-vc.dfy" (unlines lines)
+  tempFile <- liftIO $ writeTempFile "." "dafny-vc.dfy" (unlines . map solverCmdToDafny $ cmds)
   debug $ "Dafny code written to " ++ tempFile
   (code, out, err) <- liftIO $ readCreateProcessWithExitCode (proc "time"
     ["dafny", "/compile:0", tempFile]) ""
@@ -737,10 +747,10 @@ symValueToZ3 (SetCompr (Sym (SymVar xV TAny)) x pred) = do
     -- TODO: emit assumptions and newly introduced variables differently so we can handle
     -- them cleanly when occurring in a negative position
     setVar <- freshEmitterVar ("setcompr_" ++ x) "(Array Value Bool)"
-    emit $ "(declare-const " ++ setVar ++ " (Array Value Bool))"
+    -- emit $ "(declare-const " ++ setVar ++ " (Array Value Bool))"
     xCode <- translateVar xV "Value"
     predCode <- toZ3 pred
-    emit . unlines $ [ "(assert (forall ((" ++ xCode ++ " Value))"
+    emitRaw . unlines $ [ "(assert (forall ((" ++ xCode ++ " Value))"
                      , "  (= (select " ++ setVar ++ " " ++ xCode ++ ")"
                      , "      " ++ predCode ++ ")))" ]
     return $ z3Call "VSet" [setVar]
@@ -748,20 +758,20 @@ symValueToZ3 (SetCompr _ _ _) = freshEmitterVar "setCompr" "Value"
   -- set comprehensions with map not supported in z3 backend
 symValueToZ3 (MapCompr x val pred) = do
   mapVar <- freshEmitterVar ("mapcompr_" ++ x) "(Array Value Value)"
-  emit $ "(declare-const " ++ mapVar ++ " (Array Value Value))"
+  emitRaw $ "(declare-const " ++ mapVar ++ " (Array Value Value))"
   xT <- translateVar x "Value"
   predT <- toZ3 pred
   valT <-toZ3 val
   -- if the predicate is satisfied, we map x to f(x)
-  emit . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
-                   , "  (=> " ++ predT
-                   , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
-                   , "         " ++ valT ++ "))))" ]
+  emitRaw . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
+                     , "  (=> " ++ predT
+                     , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
+                     , "         " ++ valT ++ "))))" ]
   -- otherwise, x is not in the map:
-  emit . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
-                   , "  (=> (not " ++ predT ++ ")"
-                   , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
-                   , "         (VInt 0)))))" ]
+  emitRaw . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
+                      , "  (=> (not " ++ predT ++ ")"
+                      , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
+                      , "         (VInt 0)))))" ]
   return $ z3Call "VMap" [mapVar]
 symValueToZ3 (Union s1 s2) = z3CallM "vunion" [s1, s2]
 symValueToZ3 (MapUnion m1 m2) = z3CallM "munion" [m1, m2]
@@ -792,11 +802,15 @@ readLineFromZ3 = do
   (_, hout, _) <- use z3Proc
   liftIO $ hGetLine hout
 
+solverCmdToZ3 :: SolverCmd -> String
+solverCmdToZ3 (Raw s) = s
+solverCmdToZ3 e = "; unimplemented: solverCmdToZ3 (" ++ show e ++ ")"
+
 checkWithZ3 :: VC -> Verify Bool
 checkWithZ3 vc = do
   -- TODO: implement a more structured way to handle variable
   -- declarations inside a translation function
-  (_, vcLines) <- fmap (second nub) . runEmitter $ vcToZ3 vc
+  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter $ vcToZ3 vc
   sendToZ3 "(push)"
   sendToZ3 (unlines vcLines)
   sendToZ3 "(check-sat)"
@@ -812,7 +826,7 @@ instance ToZ3 SymValue where
 
 writeToZ3File :: VC -> Verify FilePath
 writeToZ3File vc = do
-  (_, vcLines) <- runEmitter $ vcToZ3 vc
+  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter $ vcToZ3 vc
   tempFile <- liftIO $ writeTempFile "." "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++ ["(check-sat)"]
   return tempFile
 
