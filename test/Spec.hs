@@ -122,6 +122,9 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "basic set literals and membership" nop setInTest
   , TestCase $ assertVerified "set membership in singleton set" nop setInTest2
   , TestCase $ assertVerified "trivial set comprehension" nop setComprTest1
+  , TestCase $ assertVerified "constant map comprehension" nop mapComprTest1
+  , TestCase $ assertVerified "map comprehension with another map in predicate" nop mapComprTest2
+  , TestCase $ assertVerified "map comprehension using another map in predicate and mapping function" nop mapComprTest3
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)

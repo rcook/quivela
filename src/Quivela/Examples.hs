@@ -365,3 +365,17 @@ mapComprTest1 =
   ≈
   [prog| new() { method f() { 1 } } |]
   : []
+
+mapComprTest2 :: Proof
+mapComprTest2 =
+  [prog| new() { method f() { (m = map, m[1] = 42), ([x ↦ 42 | m[x]])[1] } } |]
+  ≈
+  [prog| new() { method f() { 42 } } |]
+  : []
+
+mapComprTest3 :: Proof
+mapComprTest3 =
+  [prog| new() { method f() { (m = map, m[1] = 42), ([x ↦ m[x]+1 | m[x]])[1] } } |]
+  ≈
+  [prog| new() { method f() { 43 } } |]
+  : []
