@@ -424,3 +424,29 @@ new() {
   method g() { 5 }
 } |]
   : []
+
+patMatch1 :: Proof
+patMatch1 =
+  [prog|
+new() {
+  method f(x) { <a, b> = x, <b, a> }
+} |]
+  ≈
+  [prog|
+new() {
+  method f(x) { <x`1, x`0> }
+}|]
+  : []
+
+patMatch2 :: Proof
+patMatch2 =
+  [prog|
+new() {
+  method f(x) { <a, b> = x, <a, b> }
+}|]
+  ≈
+  [prog|
+new() {
+  method f(x) { x }
+} |]
+  :[]

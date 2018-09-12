@@ -510,6 +510,34 @@ isSymbolic :: Value -> Bool
 isSymbolic (Sym _) = True
 isSymbolic _ = False
 
+-- | Returns the name of the variable for variable expressions, and @Nothing@ if not.
+fromEVar :: Expr -> Maybe String
+fromEVar (EVar x) = Just x
+fromEVar _ = Nothing
+
+-- | Evaluate a pattern-match expression with list of variables on LHS and another expression
+-- on the right-hand side. This corresponds to writing @<x1, .., xn> = rhs@. Currently,
+-- this does not support nested patterns.
+symEvalPatternMatch :: [Expr] -> Expr -> Context -> PathCond -> Verify Results
+symEvalPatternMatch pat rhs ctx pathCond
+  -- check that all elements of the pattern are just simple variables
+  | [vars] <- sequence (map (maybeToList . fromEVar) pat) =
+  foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') ->
+    let (lvalues, ctx', isNew) =
+          foldr (\var (places, ctx', isNew) ->
+                    case findVar var ctx' of
+                      Just (place, ctx'', isNew') -> (place : places , ctx'', isNew || isNew')
+                      Nothing -> error $ "Not a valid l-value: " ++ show var) ([], ctx, False) vars
+        rhsVals = if isSymbolic vrhs
+                  then map (Sym . Proj vrhs . VInt . fromIntegral) [0..length pat - 1]
+                  else case vrhs of
+                        VTuple rhsVals | length rhsVals == length vars -> rhsVals
+                        _ -> error $ "Invalid concrete value for pattern-match expression: " ++ show (pat, rhs)
+        ctx''' = foldr (\(place, proj) ctx'' -> set (place ^. placeLens) proj ctx'') ctx' (zip lvalues rhsVals)
+        projEq = if isSymbolic vrhs then [vrhs :=: VTuple rhsVals] else []
+    in return [(vrhs, ctx''', projEq ++ pathCond)]
+  | otherwise = error $ "Nested patterns not supported yet: " ++ show pat ++ " = " ++ show rhs
+
 symEval :: Config -> Verify Results
 symEval (ENop, ctx, pathCond) = return [(VNil, ctx, pathCond)]
 symEval (EConst v, ctx, pathCond) = return [(v, ctx, pathCond)]
@@ -552,6 +580,7 @@ symEval (EIdx base idx, ctx, pathCond) =
                                   else return [((VInt 0), ctx'', pathCond'')]
         Sym sv -> return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
         _ -> return [((VInt 0), ctx'', pathCond'')]
+symEval (EAssign (ETuple pat) rhs, ctx, pathCond) = symEvalPatternMatch pat rhs ctx pathCond
 symEval (EAssign lhs rhs, ctx, pathCond) =
   foreachM (symEval (rhs, ctx, pathCond)) $ \(rhsVal, ctx', pathCond') ->
     foreachM (findLValue lhs ctx' pathCond') $ \case
