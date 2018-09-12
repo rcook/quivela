@@ -417,7 +417,7 @@ force e@(Sym (Lookup k m)) ctx pathCond
   (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
   -- res <- symEval fv name args ctx' ((e :=: fv) : pathCond')
   return [ (VInt 0, ctx, (e :=: VInt 0) : pathCond)
-         , (fv, ctx', (e :=: fv) : pathCond') ]
+         , (fv, ctx', (e :=: fv) : Not (e :=: VInt 0) : pathCond') ]
 force (symVal@(Sym (SymVar sv (TNamed t)))) ctx pathCond = do
   -- Allocate a new object of the required type
   (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
@@ -481,8 +481,16 @@ symEvalCall VNil name args ctx pathCond
 symEvalCall (Sym sv) name args ctx pathCond = do
   forced <- force (Sym sv) ctx pathCond
   if forced == [(Sym sv, ctx, pathCond)]
-     then error $ "Not implemented: calls on untyped symbolic objects: (" ++
-                   show sv ++ ")." ++ name ++ "(" ++ show args ++ ")"
+     then do
+       debug $ "Not implemented: calls on untyped symbolic objects: (" ++
+               show sv ++ ")." ++ name ++ "(" ++ show args ++ ")"
+       -- we return a fresh variable here to encode that we have no information
+       -- about the returned value; FIXME: we should also havoc everything
+       -- the base object may have access to.
+       -- This case can still yield a provable verification condition
+       -- if the path condition is contradictory
+       fv <- freshVar "untyped_symcall"
+       return [(Sym (SymVar fv TAny), ctx, pathCond)]
      else foreachM (return forced) $ \(val, ctx', pathCond') -> do
        -- debug $ "Forced symbolic value to: " ++ show (val, ctx', pathCond')
        symEvalCall val name args ctx' pathCond'
@@ -534,9 +542,14 @@ symEval (EIdx base idx, ctx, pathCond) =
     foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
       case baseVal of
         VInt 0 -> return [(VInt 0, ctx'', pathCond'')] -- 0 is the empty map
-        VMap vals -> case M.lookup idxVal vals of
+        VMap vals -> if isSymbolic idxVal
+                     then return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
+                     else case M.lookup idxVal vals of
                        Just val -> return [(val, ctx'', pathCond'')]
-                       Nothing -> return [((VInt 0), ctx'', pathCond'')]
+                       Nothing -> if isSymbolic idxVal
+                                  -- if we can't find the value in the map, keep the lookup symbolic:
+                                  then return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
+                                  else return [((VInt 0), ctx'', pathCond'')]
         Sym sv -> return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
         _ -> return [((VInt 0), ctx'', pathCond'')]
 symEval (EAssign lhs rhs, ctx, pathCond) =
