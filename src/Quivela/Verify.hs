@@ -401,7 +401,7 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
         let vcAdv = VC { _assumptions = applyAddressBijection addrMap $ nub $ assms ++ map simp' (nub $ pc1 ++ pc1' ++ assms)
                        , _conditionName = "advCallsEq"
                        , _goal = simp' $ Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
-                                         Sym (AdversaryCall (ctx1' ^. ctxAdvCalls)) }
+                                         applyAddressBijection addrMap (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls))) }
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
 resultsToVCs invs (v1, _, _) _ (v1', _, _) _ =
