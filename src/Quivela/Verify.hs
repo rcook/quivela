@@ -345,8 +345,11 @@ findAddressBijection (v, ctx, pathCond) (v', ctx', pathCond') =
         extendMap base (a : as) (p : ps)
           | a >= 0 = tryInsert a a (extendMap base as (p:ps))
         extendMap base (a : as) (p : ps) = tryInsert a p (extendMap base as ps)
-        extendMap base (a : as) [] = tryInsert a (nextFreeAddr base) (extendMap base as [])
-        nextFreeAddr m = maximum (M.elems m) + 1
+        extendMap base (a : as) [] = let base' = (extendMap base as [])
+                                     in tryInsert a (nextFreeAddr base') base'
+        nextFreeAddr m
+          | null (M.elems m) = 100
+          | otherwise = maximum (M.elems m) + 1
 
 -- | Remap all addresses in a piece of data with given bijection.
 applyAddressBijection :: Data p => AddrBijection -> p -> p
