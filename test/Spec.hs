@@ -136,6 +136,8 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "local method" nop localMethodExample
   , TestCase $ assertVerified "Pattern-matching behaves like tuple projection" nop patMatch1
   , TestCase $ assertVerified "Pattern-matching remembers tuple size" nop patMatch2
+  , TestCase $ assertVerified "Nested symbolic objects" nop nestedObjs
+  , TestCase $ assertVerified "Nested symbolic objects in maps" nop nestedObjMap
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)

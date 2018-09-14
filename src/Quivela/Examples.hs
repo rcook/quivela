@@ -508,3 +508,43 @@ decreaseAlloc = [prog'|
 (new() {
 method f(x) { obj = (new() { method g(m) { 1 } }), obj.g(x) & 1 }
 }).f(5)|]
+
+assignConstTypeDecl :: Expr
+assignConstTypeDecl = [prog'|
+type S = new() { method fs() { 42 } }
+type T = new(const s: S) { method ft() { s = new S(), s.fs() } }
+t = new T(s=new S()),
+t.ft()
+|]
+
+
+nestedObjs :: Proof
+nestedObjs = [prog|
+type S = new() { method fs() { 42 } }
+type T = new(const s: S) { method ft() { s.fs() } }
+new() {
+  method f() { t = new T(s=new S()), t.ft() }
+}|]
+  ≈ [prog|
+new() {
+  method f() { 42 }
+}|]
+  : []
+
+nestedObjMap :: Proof
+nestedObjMap = [prog|
+type S = new() { method fs() { 42 } }
+type T = new(const s: S) { method ft() { s.fs() } }
+new(m: map * T = 0) {
+  method ins() { k = rnd(), m[k] = new T(s=new S()), 1 }
+  method call(k) { m[k] & (x = m[k] & x.ft()) }
+}|]
+  ≈
+  [prog|
+type S = new() { method fs() { 42 } }
+type T = new(const s: S) { method ft() { s.fs() } }
+new(m: map * T = 0) {
+  method ins() { k = rnd(), m[k] = new T(s=new S()), 1 }
+  method call(k) { m[k] & 42 }
+} |]
+  : []
