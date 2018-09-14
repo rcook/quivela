@@ -861,7 +861,8 @@ checkVCs vcs = do
   if dafnyRes then return [] else return vcs'
 
 checkEqv :: Bool -> Expr -> [ProofHint] -> Expr -> Expr -> Verify [(Var, [VC])]
-checkEqv useSolvers prefix [Admit] lhs rhs = do
+checkEqv useSolvers prefix hints lhs rhs
+  | any ((== Just True) . (===Admit)) hints =
   -- debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
   return []
 checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
