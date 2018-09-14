@@ -127,7 +127,7 @@ data Expr = ENop
           | EUnion Expr Expr
           | EIntersect Expr Expr
           | ETypeDecl { _typedeclName :: String
-                      , _typedeclFormals :: [(Var, Type)]
+                      , _typedeclFormals :: [(Var, Bool, Type)]
                       , _typedeclValues :: [(Var, Value)]
                       , _typedeclBody :: Expr }
           | ESetCompr { _comprVar :: Var
@@ -290,10 +290,10 @@ varBindings (EMethod name args body isInv) =
 varBindings (ETuple elts) = varBindingsList (S.empty, S.empty) elts
 varBindings (ETupleProj base idx) = varBindings base `bindingSeq` varBindings idx
 varBindings (ETypeDecl name formals values body) =
-  varBindings (ENew (map (\(name, typ) -> Field { _fieldName = name
+  varBindings (ENew (map (\(name, immut, typ) -> Field { _fieldName = name
                                                 , _fieldType = typ
                                                 , _fieldInit = ENop
-                                                , _immutable = False }) formals ++
+                                                , _immutable = immut }) formals ++
                      map (\(name, value) -> Field { _fieldName = name
                                                   , _fieldType = TAny
                                                   , _fieldInit = EConst value

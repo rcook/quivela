@@ -117,7 +117,7 @@ expr = do
     term = do
       base <- parens (withState (set pipeAsOr True . set inArgs False . set inFieldInit False . set inTuple False) expr)
          <|> try unqualifiedFunCall <|> try baseExpr <|> ifExpr <|> try setComprExpr <|> try mapComprExpr
-         <|> try newExpr <|> newConstrExpr <|> methodExpr <|> typedecl <|> assumeExpr
+         <|> try newExpr <|> try newConstrExpr <|> methodExpr <|> typedecl <|> assumeExpr
          <?> "basic expression"
       try (combExpr base) <|> return base
     binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
@@ -281,13 +281,13 @@ methodExpr = (do
 -- and constant field initializations. Fails if there is a non-constant
 -- initialization. This function is only monadic in order to report
 -- such invalid fields as a parse error.
-splitTypeDeclFields :: [Field] -> Parser ([(Var, Type)], [(Var, Value)])
+splitTypeDeclFields :: [Field] -> Parser ([(Var, Bool, Type)], [(Var, Value)])
 splitTypeDeclFields [] = return ([], [])
 splitTypeDeclFields (fld : flds) = do
   (args, values) <- splitTypeDeclFields flds
   if fld ^. fieldInit == EVar (fld ^. fieldName)
         -- the field parser defaults to the field's name if no initialization expression is given
-  then return ((fld ^. fieldName, fld ^. fieldType) : args, values)
+  then return ((fld ^. fieldName, fld ^. immutable, fld ^. fieldType) : args, values)
   else case fld ^. fieldInit of
          EConst v -> return (args, (fld ^. fieldName, v) : values)
          e -> fail $ "Non-constant field initialization in type declaration: " ++ show e

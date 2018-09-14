@@ -391,12 +391,15 @@ typedValue name (TTuple ts) ctx = do
   return $ (VTuple vals, ctx', pathCond')
 typedValue name (TNamed t) ctx
   | Just tdecl <- ctx ^? ctxTypeDecls . ix t = do
-      (args, ctx', pathCond') <- symArgs ctx (tdecl ^. typedeclFormals)
+      (args, ctx', pathCond') <- symArgs ctx (map (\(name, immut, typ) -> (name, typ))
+                                                  (tdecl ^. typedeclFormals))
       (val, ctx'', pathCond'') <- singleResult <$>
-                          symEval (ENewConstr t (zip (map fst (tdecl ^. typedeclFormals))
+                          symEval (ENewConstr t (zip (map (\(name, _, _) -> name)
+                                                          (tdecl ^. typedeclFormals))
                                                      (map EConst args)), ctx', pathCond')
       let pathCondEqs = zipWith (\(name, typ) argVal -> Sym (Deref val name) :=: argVal)
-                                (tdecl ^. typedeclFormals) args
+                                (map (\(name, immut, typ) -> (name, typ))
+                                     (tdecl ^. typedeclFormals)) args
       return (val, ctx'', pathCondEqs ++ pathCond'')
   | otherwise = error $ "No such type: " ++ t
 typedValue name t ctx = do
@@ -680,16 +683,16 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
   | Just tdecl <- ctx ^. ctxTypeDecls . at typeName = do
       -- evaluate new expression stored for the type, then set the object's type
       -- to keep track that this was constructed with a constructor
-      unless (map fst args == map fst (tdecl ^. typedeclFormals)) $
+      unless (map fst args == map (\(name, _, _) -> name) (tdecl ^. typedeclFormals)) $
         (error $ "Mismatch between actual and expected constructor arguments: " ++ show expr)
-      let fields = zipWith (\(name, expr) (_, typ) ->
+      let fields = zipWith (\(name, expr) (_, immut, typ) ->
                               Field { _fieldName = name
                                     , _fieldInit = expr
-                                    , _immutable = False -- FIXME: support this in type decls.
+                                    , _immutable = immut
                                     , _fieldType = typ }) args (tdecl ^. typedeclFormals) ++
                    map (\(name, val) -> Field { _fieldName = name
                                               , _fieldInit = expr
-                                              , _immutable = False
+                                              , _immutable = False -- FIXME
                                               , _fieldType = typeOfValue ctx val }) (tdecl ^. typedeclValues)
 
       foreachM (symEval (ENew fields (fromJust $ tdecl ^? typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
