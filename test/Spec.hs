@@ -93,6 +93,8 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertEvalResult "Addresses can be used as symbolic values" addressesSymbolic (Sym (Add (Sym (Ref 1)) (Sym (Ref 2))))
   , TestCase $ assertEvalResult' "Decreasing allocation strategy should yield negative addresses"
                  (emptyCtx { _ctxAllocStrategy = Decrease }) (parseExpr "<new() {}, new() {}>") (VTuple [Sym {_symVal = Ref (-1)},Sym {_symVal = Ref (-2)}])
+  , TestCase $ assertEvalResult' "Decreasing allocation allows allocating objects in methods" emptyCtxRHS decreaseAlloc
+               (VInt 1)
   , TestCase $ assertVerifyError "verification should detect extraneous methods on one side" nop extraMethodsTest
   , TestCase $ doesntVerify "if expression equivalence differing on one branch" nop ifEqvFalse
   , TestCase $ assertVerified "<= works" nop leTaut
@@ -102,6 +104,8 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "addition is commutative and 0 is identity" nop addExample
   , TestCase $ assertVerified "multiplication example" nop mulExample
   , TestCase $ assertVerified "arithmetic example" nop arithExample
+  , TestCase $ assertVerified "assignment to local variable" nop assignAnd
+  , TestCase $ assertVerified "tupling never returns 0" nop tuplingAnd
   , TestCase $ assertVerified "if-else with symbolic condition" nop ifSymbolic
   , TestCase $ assertVerified "if-else with same value in both branches" nop ifSimp
   , TestCase $ assertVerified "if-else with true guard" nop ifConcreteTrue
@@ -111,6 +115,7 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "post-increment example 3" nop postIncrExample1
   , TestCase $ assertVerified "post-increment in a map index" nop postIncrementInMap
   , TestCase $ assertVerified "less-than operator example" nop leExample
+  , TestCase $ assertVerified "Z(..) is idempotent" nop zIdempotent
   , TestCase $ assertVerified "call on symbolic object" nop symcallTest
   , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
   , TestCase $ assertVerified "object maps with an invariant" nop symcallMapParam

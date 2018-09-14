@@ -450,3 +450,61 @@ new() {
   method f(x) { x }
 } |]
   :[]
+
+zIdempotent :: Proof
+zIdempotent =
+  [prog|
+new() {
+  method f(m) { Z(Z(m)) }
+}|]
+  ≈
+  [prog|
+new() {
+  method f(m) { Z(m) }
+}|]
+  : []
+
+uninitializedNestedMap :: Proof
+uninitializedNestedMap =
+  [prog|
+new() {
+  method f(x, y) { a[x][y] = 5 & a[x][y] }
+}|]
+  ≈
+  [prog|
+new() {
+  method f(x, y) { 5 }
+}|]
+  :[]
+
+tuplingAnd :: Proof
+tuplingAnd =
+  [prog|
+new() {
+  method f(m) { <m> & 5 }
+} |]
+  ≈
+  [prog|
+new() {
+  method f(m) { 5 }
+}|]
+  :[]
+
+assignAnd :: Proof
+assignAnd =
+  [prog|
+new() {
+  method f(x) { c = x & c }
+} |]
+  ≈
+  [prog|
+new() {
+  method f(x) { x }
+} |]
+  : []
+
+decreaseAlloc :: Expr
+decreaseAlloc = [prog'|
+(new() {
+method f(x) { obj = (new() { method g(m) { 1 } }), obj.g(x) & 1 }
+}).f(5)|]
