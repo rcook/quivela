@@ -390,7 +390,7 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
         -- obligations, since non-relational VCs should can not depend on concrete addresses
         -- that the allocator chose.
         -- when (not . null . allAddrs $ v1') $
-        debug ("Using address bijection: " ++ show addrMap)
+        -- debug ("Using address bijection: " ++ show addrMap)
         let vcRes = simp $ VC { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
                               , _conditionName = "resultsEq"
                               , _goal = id (v1 :=: applyBij v1') }
