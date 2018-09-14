@@ -496,7 +496,7 @@ symEvalCall (Sym sv) name args ctx pathCond = do
        symEvalCall val name args ctx' pathCond'
 symEvalCall (VInt 0) name args ctx pathCond = return [((VInt 0), ctx, pathCond)]
 symEvalCall obj name args ctx pathCond =
-  error $ "Bad method call[" ++ show obj ++ "]: " ++ name
+  error $ "Bad method call[" ++ show obj ++ "]: " ++ name ++ "\n" ++ show ctx
 
 lookupInTuple :: Value -> Value -> Value
 lookupInTuple (VTuple vs) (VInt i)
