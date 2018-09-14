@@ -286,7 +286,7 @@ varBindings (EIdx base idx) = varBindings base `bindingSeq` varBindings idx
   -- Variables bound inside a method body are not visible outside:
 varBindings (EMethod name args body isInv) =
   let (bodyFree, bodyBound) = varBindings body
-  in (bodyFree, S.empty)
+  in (bodyFree `S.difference` S.fromList (map fst args), S.empty)
 varBindings (ETuple elts) = varBindingsList (S.empty, S.empty) elts
 varBindings (ETupleProj base idx) = varBindings base `bindingSeq` varBindings idx
 varBindings (ETypeDecl name formals values body) =
