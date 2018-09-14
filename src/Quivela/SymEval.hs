@@ -190,7 +190,7 @@ findVar x ctx
   -- if we're not in a global context, we use a local variable
   -- FIXME: this should probably check if we are inside a method instead, but currently
   -- we don't store whether this is the case in the context.
-  | ctx ^. ctxThis > 0 =
+  | ctx ^. ctxThis /= 0 =
       Just $ (Place { _placeLens = ctxScope . ix x . _1
                     , _placeConst = False
                     , _placeType = TAny }
