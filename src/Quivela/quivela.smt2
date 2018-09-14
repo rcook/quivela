@@ -11,6 +11,8 @@
                     (nils (conss (hds Values) (tls Valuess)))))
 
 (declare-fun deref (Value String) Value)
+(assert (forall ((s String))
+                (= (deref (VInt 0) s) (VInt 0))))
 
 ;; Addresses can be potentially coerced to any value
 (declare-fun vref (Int) Value)
