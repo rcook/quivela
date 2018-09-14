@@ -35,6 +35,7 @@ languageDef =
                                      , "delete"
                                      , "in"
                                      , "set"
+                                     , "function"
                                      , "assume"
                                      ]
            , Token.reservedOpNames = ["+", "-", "*", "/", "=", "<", "<="
@@ -118,6 +119,7 @@ expr = do
       base <- parens (withState (set pipeAsOr True . set inArgs False . set inFieldInit False . set inTuple False) expr)
          <|> try unqualifiedFunCall <|> try baseExpr <|> ifExpr <|> try setComprExpr <|> try mapComprExpr
          <|> try newExpr <|> try newConstrExpr <|> methodExpr <|> typedecl <|> assumeExpr
+         <|> functionDecl
          <?> "basic expression"
       try (combExpr base) <|> return base
     binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
@@ -309,6 +311,11 @@ typedecl = do
   if S.null freeVars
     then return result
     else fail $ "Free variables in type declaration: " ++ show freeVars
+
+functionDecl :: Parser Expr
+functionDecl = reserved "function" *>
+  (EFunDecl <$> identifier
+            <*> (symbol "(" *> identifier `sepBy` symbol "," <* symbol ")"))
 
 program :: Parser Expr
 program = foldr1 ESeq <$> many1 expr

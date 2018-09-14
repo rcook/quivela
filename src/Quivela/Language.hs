@@ -74,6 +74,7 @@ data SymValue = SymVar String Type
   | Ref Addr
   | Deref Value String
   | Z Value
+  | Call String [Value] -- ^ Calls to declared, but not defined, functions
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 -- Since we pattern-match repeatedly on references in various places, we define
@@ -137,6 +138,8 @@ data Expr = ENop
                       , _comprValue :: Expr
                       , _comprPred :: Expr } -- map comprehensions
           | EAssume Expr Expr
+          | EFunDecl { _efunDeclName :: String
+                     , _efunDeclArgs :: [Var] } -- uninterpreted functions
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
 instance Serialize SymValue
@@ -190,9 +193,14 @@ data Context = Context { _ctxObjs :: M.Map Addr Object
                        -- map can be assumed to be of the form (ETypeDecl ...)
                        , _ctxAllocStrategy :: AllocStrategy
                        , _ctxAssumptions :: [(Expr, Expr)]
+                       , _ctxFunDecls :: M.Map String FunDecl
                        }
   deriving (Eq, Read, Show, Ord, Data, Typeable)
 
+data FunDecl = FunDecl { _funDeclName :: String
+                       , _funDeclArgs :: [Var]
+                       }
+  deriving (Eq, Read, Show, Ord, Data, Typeable)
 
 data Place =
   Place { _placeLens :: (forall f. Applicative f => ((Value -> f Value) -> Context -> f Context))
@@ -251,7 +259,7 @@ instance Show ProofPart where
   show (PDiff d) = "Diff:\n" ++ show d
   show _ = "<invariant>"
 
-concat <$> mapM makeLenses [ ''Method, ''Object, ''Context, ''Place
+concat <$> mapM makeLenses [ ''Method, ''Object, ''Context, ''Place, ''FunDecl
                            , ''Binding, ''Local, ''Field, ''Expr, ''Value ]
 
 -- | Returns a set of free variables in the expression and a set of bound identifiers
@@ -332,6 +340,7 @@ emptyCtx = Context { _ctxObjs = M.fromList [(0, Object { _objLocals = M.empty
                    , _ctxTypeDecls = M.empty
                    , _ctxAllocStrategy = Increase
                    , _ctxAssumptions = []
+                   , _ctxFunDecls = M.empty
                    }
 
 emptyCtxRHS :: Context

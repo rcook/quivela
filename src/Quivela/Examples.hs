@@ -548,3 +548,27 @@ new(m: map * T = 0) {
   method call(k) { m[k] & 42 }
 } |]
   : []
+
+
+fundeclTest1 :: (Expr, Proof)
+fundeclTest1 = ([prog'| function f(arg) |], [prog|
+new() {
+  method g() { f(5) }
+}|]
+  ≈
+  [prog|
+new() {
+   method g() { f(1 + 4) }
+}|]
+  : [])
+
+fundeclTest2 :: (Expr, Proof)
+fundeclTest2 = ([prog'| function f(arg) |], [prog|
+new() {
+  method g() { f(1) }
+}|]
+  ≈
+  [prog|
+new() {
+  method g() { f(2) }
+}|] : [])

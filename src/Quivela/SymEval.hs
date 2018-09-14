@@ -34,8 +34,7 @@ import System.IO
 import Quivela.Language
 import Quivela.Parse
 
--- | The fixed environment for symbolic evaluation. Currently this
--- only contains information about named types which are defined outside of quivela.
+-- | The fixed environment for symbolic evaluation.
 data VerifyEnv = VerifyEnv { _splitEq :: Bool
                            -- ^ Split == operator into two paths during symbolic evaluation?
                            , _useCache :: Bool
@@ -51,6 +50,7 @@ newtype Verify a = Verify { unVerify :: RWST VerifyEnv () VerifyState IO a }
 -- Right now, we only need the same environment as symbolic evaluation, so we reuse
 -- that type here.
 
+
 -- | Keeps track of fresh variables and, a z3 process, and which conditions
 -- we already verified successfully in the past.
 data VerifyState = VerifyState
@@ -62,6 +62,9 @@ data VerifyState = VerifyState
   -- ^ A cache of steps that we already verified before
   -- FIXME: Currently, we cannot serialize invariants, since they include functions as arguments
   -- in some cases
+  , _verifyPrefixCtx :: Context
+  -- ^ The context returned by the "prefix" program of a proof that defines constructors,
+  -- lists assumptions, etc.
   }
 
 -- Generate lenses for all types defined above:
@@ -480,6 +483,10 @@ symEvalCall VNil name args ctx pathCond
       callMethod (ctx ^. ctxThis) mtd args ctx pathCond
   | Just mtd <- findMethod 0 name ctx =
       callMethod 0 mtd args ctx pathCond
+  | Just funDecl <- ctx ^? ctxFunDecls . ix name = do
+      unless (length args == length (funDecl ^. funDeclArgs)) $
+        error $ "Wrong number of arguments in call to uninterpreted function: " ++ show (name, args)
+      return [(Sym (Call name args), ctx, pathCond)]
   | otherwise = error $ "Call to non-existent method: " ++ name
 symEvalCall (Sym sv) name args ctx pathCond = do
   forced <- force (Sym sv) ctx pathCond
@@ -747,6 +754,10 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
 symEval (EAssume e1 e2, ctx, pathCond) =
   return [(VNil, over ctxAssumptions ((e1, e2):) ctx, pathCond)]
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
+symEval (funDecl@EFunDecl{}, ctx, pathCond) =
+  return [( VNil, over ctxFunDecls (M.insert funName (FunDecl funName (funDecl ^. efunDeclArgs))) ctx
+          , pathCond )]
+  where funName = funDecl ^. efunDeclName
 
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv = VerifyEnv { _splitEq = False, _useCache = True }

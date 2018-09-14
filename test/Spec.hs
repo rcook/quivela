@@ -139,6 +139,8 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "Pattern-matching remembers tuple size" nop patMatch2
   , TestCase $ assertVerified "Nested symbolic objects" nop nestedObjs
   , TestCase $ assertVerified "Nested symbolic objects in maps" nop nestedObjMap
+  , TestCase $ uncurry (assertVerified "calling uninterpreted function with same arguments") fundeclTest1
+  , TestCase $ uncurry (doesntVerify "uninterpreted function called with different arguments") fundeclTest2
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)

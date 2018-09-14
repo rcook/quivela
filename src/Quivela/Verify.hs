@@ -85,6 +85,11 @@ data EmitterState = EmitterState { _nextEmitterVar :: M.Map String Integer
                                  , _varTranslations :: M.Map String String
                                  , _usedVars :: [(String, String)]
                                  -- ^ Stores generated fresh variables and their type in the solver
+                                 , _emitterPrefixCtx :: Context
+                                 -- ^ We make the context of the "prefix"
+                                 -- program of a proof available to emitters so
+                                 -- they can generate output for uninterpreted
+                                 -- functions, etc.
                                  }
   deriving (Read, Show, Eq, Ord, Data, Typeable)
 
@@ -129,6 +134,7 @@ newVerifyState = do
         Left err -> return S.empty
     else return S.empty
   return VerifyState { _nextVar = M.empty
+                     , _verifyPrefixCtx = emptyCtx
                      , _alreadyVerified = verificationCache
                      , _z3Proc = (hin, hout, procHandle) }
 
@@ -576,6 +582,7 @@ symValToDafny (SymRef s) = dafnyFunCall "VRef" <$> sequence [translateVar s "int
 symValToDafny (Deref obj field) =
   dafnyFunCall "Deref" <$> sequence [toDafny obj, pure ("\"" ++ field ++ "\"")]
 symValToDafny (Z v) = dafnyFunCall "Z" <$> sequence [toDafny v]
+symValToDafny (Call name args) = dafnyFunCall name <$> mapM toDafny args
 symValToDafny (SetCompr val name pred) = do
   predD <- toDafny pred
   valD <- valueToDafny val
@@ -633,24 +640,30 @@ vcToDafny vc = do
   emitRaw $ "  ensures " ++ dafnyGoal
   emitRaw $ "{ LookupSame(); LookupDifferent(); }"
 
-initialEmitterState = EmitterState { _nextEmitterVar = M.empty
-                                   , _usedVars = []
-                                   , _varTranslations = M.empty }
+initialEmitterState prefixCtx =
+  EmitterState { _nextEmitterVar = M.empty
+               , _usedVars = []
+               , _varTranslations = M.empty
+               , _emitterPrefixCtx = prefixCtx }
 
-runEmitter :: MonadIO m => Emitter a -> m (a, [SolverCmd])
-runEmitter action = liftIO $ evalRWST (unEmitter action) () initialEmitterState
+runEmitter :: MonadIO m => Context -> Emitter a -> m (a, [SolverCmd])
+runEmitter prefix action = liftIO $ evalRWST (unEmitter action) () (initialEmitterState prefix)
 
 solverCmdToDafny :: SolverCmd -> String
 solverCmdToDafny (Raw s) = s
 solverCmdToDafny cmd = error "not implemented yet: solverCmdToDafny: " ++ show cmd
 
 -- | Try to verify a list of verification conditions with dafny
-checkWithDafny :: MonadIO m => [VC] -> m Bool
+checkWithDafny :: (MonadState VerifyState m, MonadIO m) => [VC] -> m Bool
 checkWithDafny [] = return True
 checkWithDafny vcs = do
   debug $ "Checking " ++ show (length vcs) ++ " VCs with Dafny"
-  (_, cmds) <- runEmitter $ do
+  pctx <- use verifyPrefixCtx
+  (_, cmds) <- runEmitter pctx $ do
     emitRaw dafnyPrelude
+     -- Emit function declarations as uninterpreted functions:
+    forM (pctx ^. ctxFunDecls) $ \decl ->
+      emitRaw $ "function " ++ decl ^. funDeclName ++ "(" ++ intercalate ", " (map (++ ": Value") (decl ^. funDeclArgs)) ++ "): Value\n"
     mapM_ vcToDafny vcs
   tempFile <- liftIO $ writeTempFile "." "dafny-vc.dfy" (unlines . map solverCmdToDafny $ cmds)
   debug $ "Dafny code written to " ++ tempFile
@@ -748,6 +761,7 @@ symValueToZ3 (SymRef name) = z3Call "vref" <$> sequence [translateVar name "Int"
 symValueToZ3 (Deref obj name) = z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
 symValueToZ3 (Ref a) = z3Call "vref" <$> sequence [toZ3 a]
 symValueToZ3 (Z v) = z3CallM "Z" [v]
+symValueToZ3 (Call fun args) = z3CallM fun args
 symValueToZ3 (SetCompr (Sym (SymVar xV TAny)) x pred) = do
     -- TODO: emit assumptions and newly introduced variables differently so we can handle
     -- them cleanly when occurring in a negative position
@@ -794,6 +808,14 @@ intercept action = censor (const mempty) (listen action)
 
 vcToZ3 :: VC -> Emitter ()
 vcToZ3 vc = do
+  -- Emit declarations for uninterpreted functions:
+  decls <- use (emitterPrefixCtx . ctxFunDecls)
+  forM decls $ \decl -> do
+    emitRaw (z3Call "declare-fun" [ decl ^. funDeclName
+                                  , "(" ++
+                                    intercalate " " (replicate (length (decl ^. funDeclArgs)) "Value") ++
+                                    ")"
+                                  , "Value" ])
   emitRaw $ ";; " ++ (vc ^. conditionName)
   -- FIXME: this is a hacky way to make sure we output the variable
   -- declarations before the places where we need them.
@@ -823,9 +845,10 @@ solverCmdToZ3 e = "; unimplemented: solverCmdToZ3 (" ++ show e ++ ")"
 
 checkWithZ3 :: VC -> Verify Bool
 checkWithZ3 vc = do
+  pctx <- use verifyPrefixCtx
   -- TODO: implement a more structured way to handle variable
   -- declarations inside a translation function
-  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter $ vcToZ3 vc
+  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
   sendToZ3 "(push)"
   sendToZ3 (unlines vcLines)
   sendToZ3 "(check-sat)"
@@ -841,7 +864,8 @@ instance ToZ3 SymValue where
 
 writeToZ3File :: VC -> Verify FilePath
 writeToZ3File vc = do
-  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter $ vcToZ3 vc
+  pctx <- use verifyPrefixCtx
+  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
   tempFile <- liftIO $ writeTempFile "." "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++ ["(check-sat)"]
   return tempFile
 
@@ -888,6 +912,7 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
   else do
     (_, prefixCtx, pathCond) <- fmap singleResult .
                                 symEval $ (prefix, emptyCtx, [])
+    verifyPrefixCtx .= prefixCtx
     res1@(VRef a1, ctx1, _) <- singleResult <$> symEval (lhs, prefixCtx, pathCond)
     res1'@(VRef a1', ctx1', _) <- singleResult <$> symEval (rhs, prefixCtx, pathCond)
     -- check that invariants hold initially
