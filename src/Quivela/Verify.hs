@@ -382,26 +382,28 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
         let simp = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
             simp' = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
         -- when (not . null . allAddrs $ v1') $
-        --   debug ("Trying to find address bijection for: " ++ show (v1, v1'))
+        -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
         let addrMap = findAddressBijection res1 res1'
+            applyBij :: Data p => p -> p
+            applyBij = applyAddressBijection addrMap
         -- Note that it's fine to only use the address bijection for relational proof
         -- obligations, since non-relational VCs should can not depend on concrete addresses
         -- that the allocator chose.
-        when (not . null . allAddrs $ v1') $
-          debug ("Using address bijection: " ++ show addrMap)
-        let vcRes = simp $ VC { _assumptions = applyAddressBijection addrMap $ nub $ assms ++ pc1 ++ pc1'
+        -- when (not . null . allAddrs $ v1') $
+        debug ("Using address bijection: " ++ show addrMap)
+        let vcRes = simp $ VC { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
                               , _conditionName = "resultsEq"
-                              , _goal = simp' (v1 :=: applyAddressBijection addrMap v1') }
+                              , _goal = id (v1 :=: applyBij v1') }
         invVCs <-
           if ctx1 == ctxH && ctx1' == ctxH'
           then return []
           else concat <$> mapM (fmap (map simp) .
                                 invToVC assms addr1 res1 addr1' res1') invs
         -- Require that adversary was called with same values:
-        let vcAdv = VC { _assumptions = applyAddressBijection addrMap $ nub $ assms ++ map simp' (nub $ pc1 ++ pc1' ++ assms)
+        let vcAdv = VC { _assumptions = applyBij $ nub $ assms ++ map simp' (nub $ pc1 ++ pc1' ++ assms)
                        , _conditionName = "advCallsEq"
                        , _goal = simp' $ Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
-                                         applyAddressBijection addrMap (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls))) }
+                                         applyBij (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls))) }
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
 resultsToVCs invs (v1, _, _) _ (v1', _, _) _ =
