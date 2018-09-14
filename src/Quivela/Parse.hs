@@ -298,16 +298,17 @@ typedecl = do
   typeName <- identifier
   symbol "=" *> reserved "new"
   fields <- symbol "(" *> withState (set inFieldInit True) (field `sepBy` symbol ",") <* symbol ")"
-  body <- symbol "{" *> expr <* symbol "}"
+  body <- symbol "{" *> program <* symbol "}"
   (formals, values) <- splitTypeDeclFields fields
   let result = ETypeDecl { _typedeclName = typeName
                          , _typedeclFormals = formals
                          , _typedeclValues = values
                          , _typedeclBody = body }
+  let freeVars = fst . varBindings $ result
   -- Maybe move this check out of the parser to somewhere else:
-  if (S.null . fst . varBindings $ result)
+  if S.null freeVars
     then return result
-    else fail "Free variables in type declaration"
+    else fail $ "Free variables in type declaration: " ++ show freeVars
 
 program :: Parser Expr
 program = foldr1 ESeq <$> many1 expr
