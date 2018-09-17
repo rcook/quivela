@@ -300,7 +300,7 @@ typedecl = do
   typeName <- identifier
   symbol "=" *> reserved "new"
   fields <- symbol "(" *> withState (set inFieldInit True) (field `sepBy` symbol ",") <* symbol ")"
-  body <- symbol "{" *> program <* symbol "}"
+  body <- symbol "{" *> (foldr ESeq ENop <$> many expr)  <* symbol "}"
   (formals, values) <- splitTypeDeclFields fields
   let result = ETypeDecl { _typedeclName = typeName
                          , _typedeclFormals = formals
