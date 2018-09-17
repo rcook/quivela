@@ -115,7 +115,10 @@
 (assert (forall ((v Value)) (>= (length v) 0)))
 (assert (forall ((v Value))
                 (=> (not (= v (VInt 0)))
-                   (> (length v) 0))))
+                    (> (length v) 0))))
+(assert (forall ((a Int) (b Int))
+                (= (length (vref a))
+                   (length (vref b)))))
 
 (define-fun Z ((v Value)) Value
   (zeroes (length v)))
