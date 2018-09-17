@@ -236,6 +236,8 @@ data ProofHint = EqualInv (Addr -> Context -> Value) (Addr -> Context -> Value)
   | IgnoreCache -- ^ Don't use verification cache when checking this step
   | Admit
   -- ^ Don't check this step
+  | NoAddressBijection -- ^ Don't try to remap addresses and instead hope that they get allocated in the same order
+  | UseAddressBijection (M.Map Addr Addr) -- ^ Start from explicit bijection of addresses
   | Note String
   deriving Generic
 

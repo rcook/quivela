@@ -9,7 +9,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 module Quivela.Verify where
 
-import Control.Applicative ((<$>))
+import Control.Applicative ((<$>), (<|>))
 import Control.Arrow (second)
 import Control.Monad
 import Control.Lens hiding (Context(..), rewrite)
@@ -62,6 +62,10 @@ instance PartialEq ProofHint where
   IgnoreCache === _ = Just False
   Note s === Note s' = Just (s == s')
   Note _ === _ = Just False
+  NoAddressBijection === NoAddressBijection = Just True
+  NoAddressBijection === _ = Just False
+  UseAddressBijection m === UseAddressBijection m' = Just (m == m')
+  UseAddressBijection _ === _ = Just False
 
 -- | Verification conditions
 data VC = VC { _conditionName :: String
@@ -304,16 +308,18 @@ universalInvariantAssms addr ctx pathCond =
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = M.Map Addr Addr
 
-tryInsert :: (Show k, Show v, Ord k, Eq k, Eq v) => k -> v -> M.Map k v -> M.Map k v
-tryInsert k v m
-  | Just v' <- M.lookup k m = if v == v' then m
-                              else error "Duplicate conflicting mapping"
+maybeInsert :: (Show k, Show v, Ord k, Eq k, Eq v) => k -> v -> M.Map k v -> Maybe (M.Map k v)
+maybeInsert k v m
+  | Just v' <- M.lookup k m = if v == v' then Just m
+                              else Nothing
   | otherwise =
     case M.keys $ M.filterWithKey (\k' v' -> v' == v) m of
-      ks' | not (all (== k) ks') ->
-            error $ "Error when trying to remap address: " ++ show k ++ ": "
-                  ++ show ks' ++ " are also mapped to: " ++  show v
-      _ -> M.insert k v m
+      ks' | not (all (== k) ks') -> Nothing
+      _ -> Just (M.insert k v m)
+tryInsert :: (Show k, Show v, Ord k, Eq k, Eq v) => k -> v -> M.Map k v -> M.Map k v
+tryInsert k v m = case maybeInsert k v m of
+  Just m' -> m'
+  Nothing -> error $ "Key " ++ show k ++ " already remapped in " ++ show m
 
 -- | Try to find a mapping for addresses that may make the two values equal.
 unifyAddrs :: Value -> Value -> AddrBijection -> AddrBijection
@@ -328,7 +334,67 @@ unifyAddrs (VRef a1) (VRef a2) bij
   | a2 >= 0 = tryInsert a2 a2 bij -- we only want to remap RHS addresses, which are always negative
   | M.lookup a2 bij == Just a1 || M.lookup a2 bij == Nothing =
     M.insert a2 a1 bij
+unifyAddrs (Sym s1) (Sym s2) bij
+  | Just bij' <- unifyAddrsExactSym s1 s2 bij = bij'
 unifyAddrs _ _ bij = bij
+
+unifyAddrsExact :: Value -> Value -> AddrBijection -> Maybe AddrBijection
+unifyAddrsExact (VInt i1) (VInt i2) bij
+  | i1 == i2 = Just bij
+  | otherwise = Nothing
+unifyAddrsExact (VMap vs1) (VMap vs2) bij
+  | S.fromList (M.keys vs1) == S.fromList (M.keys vs2) =
+    foldM (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij') bij
+          (M.elems $ M.merge M.dropMissing M.dropMissing
+                             (M.zipWithMatched (\k v1 v2 -> (v1, v2))) vs1 vs2)
+unifyAddrsExact (VTuple vs1) (VTuple vs2) bij
+  | length vs1 == length vs2 = foldM (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij') bij (zip vs1 vs2)
+  | otherwise = Nothing
+unifyAddrsExact VNil VNil bij = Just bij
+unifyAddrsExact (Sym sL) (Sym sR) bij = unifyAddrsExactSym sL sR bij
+unifyAddrsExact _ _ _ = Nothing
+
+unifyAddrsExactSym :: SymValue -> SymValue -> AddrBijection -> Maybe AddrBijection
+unifyAddrsExactSym (Ref aL) (Ref aR) bij
+  | aR >= 0 = if aL == aR then Just bij else Nothing
+  | otherwise = maybeInsert aR aL bij
+unifyAddrsExactSym (Lookup kL mL) (Lookup kR mR) bij =
+  unifyAddrsExact kL kR bij >>= unifyAddrsExact mL mR
+unifyAddrsExactSym (Insert kL vL mL) (Insert kR vR mR) bij =
+  unifyAddrsExact kL kR bij >>= unifyAddrsExact vL vR >>= unifyAddrsExact mL mR
+unifyAddrsExactSym (Proj tupL idxL) (Proj tupR idxR) bij =
+  unifyAddrsExact tupL tupR bij >>= unifyAddrsExact idxL idxR
+unifyAddrsExactSym (AdversaryCall valssL) (AdversaryCall valssR) bij
+  | length valssL == length valssR
+  , and (zipWith ((==) `on` length) valssL valssR) =
+    foldM (\bij' (valsL, valsR) -> foldM (\bij'' (valL, valR) -> unifyAddrsExact valL valR bij'') bij' (zip valsL valsR))
+          bij (zip valssL valssR)
+  | otherwise = Nothing
+unifyAddrsExactSym (ITE condL thnL elsL) (ITE condR thnR elsR) bij =
+  unifyAddrsExactProp condL condR bij >>=
+  unifyAddrsExact thnL thnR >>=
+  unifyAddrsExact elsL elsR
+unifyAddrsExactSym (Z vL) (Z vR) bij = unifyAddrsExact vL vR bij
+unifyAddrsExactSym (Call funL argsL) (Call funR argsR) bij
+  | funL == funR && length argsL == length argsR =
+      foldM (\bij' (argL, argR) -> unifyAddrsExact argL argR bij') bij (zip argsL argsR)
+unifyAddrsExactSym sL sR bij
+  | sL == sR = Just bij
+  | otherwise = Nothing
+
+unifyAddrsExactProp :: Prop -> Prop -> AddrBijection -> Maybe AddrBijection
+unifyAddrsExactProp (Not pL) (Not pR) bij = unifyAddrsExactProp pL pR bij
+unifyAddrsExactProp (v1L :=: v2L) (v1R :=: v2R) bij =
+  unifyAddrsExact v1L v1R bij >>= unifyAddrsExact v2L v2R
+unifyAddrsExactProp PTrue PTrue bij = Just bij
+unifyAddrsExactProp PFalse PFalse bij = Just bij
+unifyAddrsExactProp (asmL :=>: conseqL) (asmR :=>: conseqR) bij =
+  unifyAddrsExactProp asmL asmR bij >>= unifyAddrsExactProp conseqL conseqR
+unifyAddrsExactProp (p1L :&: p2L) (p1R :&: p2R) bij =
+  unifyAddrsExactProp p1L p1R bij >>= unifyAddrsExactProp p2L p2R
+unifyAddrsExactProp pL pR bij
+  | pL == pR = Just bij
+  | otherwise = Nothing
 
 allAddrs :: Data p => p -> [Addr]
 allAddrs = nub . map fromRef . listify isAddr
@@ -341,9 +407,9 @@ allAddrs = nub . map fromRef . listify isAddr
 -- side to make both sides possible to be proven equal. This is a best-effort
 -- process and may not return a mapping that actually makes them equal, and may
 -- not be complete.
-findAddressBijection :: Result -> Result -> AddrBijection
-findAddressBijection (v, ctx, pathCond) (v', ctx', pathCond') =
-  let baseMap = unifyAddrs v v' M.empty
+findAddressBijection :: AddrBijection -> Result -> Result -> AddrBijection
+findAddressBijection inMap (v, ctx, pathCond) (v', ctx', pathCond') =
+  let baseMap = unifyAddrs v v' inMap
       remainingLHSRefs = allAddrs (v, pathCond) \\ M.elems baseMap
       remainingRHSRefs = allAddrs (v', pathCond') \\ M.keys baseMap
   in extendMap baseMap remainingRHSRefs remainingLHSRefs
@@ -364,8 +430,25 @@ applyAddressBijection addrMap = everywhere (mkT replaceAddress)
         replaceAddress (Ref addr)
           | addr >= 0 = Ref addr -- new RHS addresses are always negative
           | Just newAddr <- M.lookup addr addrMap = Ref newAddr
-          | otherwise = error $ "No mapping for address: " ++ show addr ++ " in " ++ show addrMap
+          | otherwise = Ref addr -- error $ "No mapping for address: " ++ show addr ++ " in " ++ show addrMap
         replaceAddress v = v
+
+findContradictingBijection :: PathCond -> PathCond -> Maybe AddrBijection
+findContradictingBijection [] pcR = Nothing
+findContradictingBijection (Not propL : pcL') pcR =
+  -- FIXME: duplication
+  case pcR of
+    [] -> Nothing
+    propR : pcR' -> unifyAddrsExactProp propL propR M.empty <|> findContradictingBijection (Not propL : pcL') pcR'
+findContradictingBijection (propL : pcL') pcR =
+  case pcR of
+    [] -> Nothing
+    Not propR : pcR' -> unifyAddrsExactProp propL propR M.empty <|> findContradictingBijection (propL : pcL') pcR'
+    propR : pcR' -> findContradictingBijection (propL : pcL') pcR'
+
+fallback :: Maybe a -> a -> a
+fallback (Just x) y = x
+fallback Nothing y = y
 
 -- | Generate the verification conditions for two sets of results (i.e.
 -- configurations returned by evaluating a method call with symbolic arguments
@@ -385,13 +468,25 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
   relationalVCs <-
     foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
       foreachM (return ress1') $ \res1'@(v1', ctx1', pc1') -> do
-        let simp = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
-            simp' = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
+        let simp :: Data p => p -> p
+            simp = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
-        let addrMap = findAddressBijection res1 res1'
+        -- if we are able to find a trivial bijection resulting in a
+        -- a trivial contradiction in the path conditions, then we are done:
+        let negRefs = filter (< 0) $ allAddrs (v1', pc1')
+        let baseMap = case catMaybes $ map (\hint -> case hint of
+                                               UseAddressBijection m -> Just m
+                                               _ -> Nothing) invs of
+                        [m] -> trace ("Using user-supplied address map: " ++ show m) $ m
+                        [] -> M.empty
+                        _ -> error "More than one address bijection hint"
+        let addrMap = findContradictingBijection (simp pc1) (simp pc1') `fallback`
+                      findAddressBijection baseMap res1 res1'
             applyBij :: Data p => p -> p
-            applyBij = applyAddressBijection addrMap
+            applyBij = if NoAddressBijection `inPartial` invs
+                       then id
+                       else applyAddressBijection addrMap
         -- Note that it's fine to only use the address bijection for relational proof
         -- obligations, since non-relational VCs should can not depend on concrete addresses
         -- that the allocator chose.
@@ -406,15 +501,17 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
           else concat <$> mapM (fmap (map simp) .
                                 invToVC assms addr1 res1 addr1' res1') invs
         -- Require that adversary was called with same values:
-        let vcAdv = VC { _assumptions = applyBij $ nub $ assms ++ map simp' (nub $ pc1 ++ pc1' ++ assms)
+        let vcAdv = VC { _assumptions = applyBij $ nub $ assms ++ map simp (nub $ pc1 ++ pc1' ++ assms)
                        , _conditionName = "advCallsEq"
-                       , _goal = simp' $ Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
+                       , _goal = simp $ Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
                                          applyBij (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls))) }
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
 resultsToVCs invs (v1, _, _) _ (v1', _, _) _ =
   error $ "resultsToVCs called with non-address values" ++ show (v1, v1')
 
+inPartial :: PartialEq a => a -> [a] -> Bool
+inPartial x ys = any ((== Just True) . (=== x)) ys
 
 -- | Collect non-trivial verification conditions for a given method, invariants and arguments
 methodEquivalenceVCs :: Method -> [ProofHint] -> [Value] -> Result -> Result -> Verify [VC]
@@ -425,7 +522,9 @@ methodEquivalenceVCs mtd invs args
   ctxH1' <- havocContext ctx1'
   results <- symEval (ECall (EConst (VRef a1)) (mtd ^. methodName) (map EConst  args), ctxH1, pathCond1)
   results' <- symEval ( ECall (EConst (VRef a1')) (mtd ^. methodName) (map EConst  args)
-                      , set ctxAllocStrategy Decrease ctxH1'
+                      , if NoAddressBijection `inPartial` invs
+                        then ctxH1'
+                        else set ctxAllocStrategy Decrease ctxH1'
                       , pathCond1')
   vcs <- resultsToVCs invs (VRef a1, ctxH1, pathCond1) results (VRef a1', ctxH1', pathCond1') results'
   -- debug $ "VCs before pruning: " ++ show (length vcs)
