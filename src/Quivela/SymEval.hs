@@ -119,6 +119,7 @@ typeOfSymValue ctx (Ref a)
   -- object and that typed object instead on the type level.
   | Just obj <- ctx ^. ctxObjs . at a = obj ^. objType
   | otherwise = TAny
+typeOfSymValue ctx (Call _ _) = TAny
 typeOfSymValue ctx v = error $ "Not implemented: typeOfSymValue: " ++ show v
 
 -- | Infer the type of a value. 'TAny' is returned when the inference can't
@@ -698,10 +699,9 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
                                     , _immutable = immut
                                     , _fieldType = typ }) args (tdecl ^. typedeclFormals) ++
                    map (\(name, val) -> Field { _fieldName = name
-                                              , _fieldInit = expr
+                                              , _fieldInit = EConst val
                                               , _immutable = False -- FIXME
                                               , _fieldType = typeOfValue ctx val }) (tdecl ^. typedeclValues)
-
       foreachM (symEval (ENew fields (fromJust $ tdecl ^? typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
         case val of
           VRef addr ->
