@@ -423,7 +423,7 @@ force e@(Sym (Lookup k m)) ctx pathCond
   (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
   -- res <- symEval fv name args ctx' ((e :=: fv) : pathCond')
   return [ (VInt 0, ctx, (e :=: VInt 0) : pathCond)
-         , (fv, ctx', (e :=: fv) : Not (e :=: VInt 0) : pathCond') ]
+         , (fv, ctx', (e :=: fv) : Not (e :=: VInt 0) : pathCond' ++ pathCond) ]
 force (symVal@(Sym (SymVar sv (TNamed t)))) ctx pathCond = do
   -- Allocate a new object of the required type
   (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
