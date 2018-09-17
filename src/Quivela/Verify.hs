@@ -915,6 +915,12 @@ vcToZ3 vc = do
                                     intercalate " " (replicate (length (decl ^. funDeclArgs)) "Value") ++
                                     ")"
                                   , "Value" ])
+    -- FIXME: For debugging the envelope encryption proof, we emit an assumption that skenc never fails to encrypt
+    -- to do this properly, we'd allow specifying such assumptions in the surface syntax
+    when (decl ^. funDeclName == "skenc") $
+      emitRaw (z3Call "assert" [ z3Call "forall" [ "(" ++ intercalate " " (map (\arg -> "(" ++ arg ++ " Value)") (decl ^. funDeclArgs)) ++ ")"
+                                                 , z3Call "not" [z3Call "=" [ z3Call (decl ^. funDeclName) (decl ^. funDeclArgs)
+                                                                            , "(VInt 0)" ] ] ] ])
   emitRaw $ ";; " ++ (vc ^. conditionName)
   -- FIXME: this is a hacky way to make sure we output the variable
   -- declarations before the places where we need them.
