@@ -141,6 +141,10 @@ tests = TestList $ parserTests ++ invalidCases ++
   , TestCase $ assertVerified "Nested symbolic objects in maps" nop nestedObjMap
   , TestCase $ uncurry (assertVerified "calling uninterpreted function with same arguments") fundeclTest1
   , TestCase $ uncurry (doesntVerify "uninterpreted function called with different arguments") fundeclTest2
+  , TestCase $ assertVerified "Type declaration with constant initializer" nop typedeclConstField
+  , TestCase $ uncurry (assertVerified "Placing object and its parameter in different maps") objectInTwoMaps
+  , TestCase $ uncurry (assertVerified "Placing object and its parameter in different maps (2)") objectInTwoMaps'
+  , TestCase $ assertVerified "Dropping a call to rnd()" nop dropRandom
   ]
   where invalidCases = map (TestCase . uncurry (`doesntVerify` nop))
           [ ("trivial contradiction", incorrectVerify1)

@@ -572,3 +572,61 @@ new() {
 new() {
   method g() { f(2) }
 }|] : [])
+
+typedeclConstField :: Proof
+typedeclConstField = [prog|
+type EncT = new (const d=42) { 1 }
+new () {
+  method f() { (new EncT()).d }
+}|]
+  ≈
+  [prog|
+new() {
+  method f() { 42 }
+} |]
+  : []
+
+objectInTwoMaps :: (Expr, Proof)
+objectInTwoMaps = ([prog'|function uf(x)
+type T = new(p) { 1 } |],
+  [prog|
+new (m: map * T, d = 0) {
+  method ins(u) {
+    k = u & d[k] = k & f = new T(p=k) & m[k] = f & 1
+  }
+}|]
+  ≈ Hint []:
+  [prog|
+  invariant i1(ek) { !ek | !m[ek] | (m[ek].p == d[ek]) }
+  |]
+  :[])
+
+objectInTwoMaps' :: (Expr, Proof)
+objectInTwoMaps' = ([prog'|
+function uf(x) // : forall y. !!uf(y)
+type T = new(p) { 1 } |],
+  [prog|
+new (m: map * T, d = 0) {
+  method ins() {
+    k = rnd() & uk = uf(k) & d[uk] = k & f = new T(p=k) & m[uk] = f & 1
+  }
+}|]
+  ≈ Hint [NoAddressBijection]:
+  [prog|
+  invariant i1(ek) { !ek | !m[ek] | (m[ek].p == d[ek]) }
+  |]
+  :[])
+
+
+dropRandom :: Proof
+dropRandom =
+  [prog|
+new() {
+  x = rnd(), rnd()
+}|]
+  ≈
+  [prog|
+new() {
+  rnd()
+}|]
+  : []
