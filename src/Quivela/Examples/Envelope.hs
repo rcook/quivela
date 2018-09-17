@@ -144,13 +144,6 @@ new (const e = EncL(e),fs:map * ET=0) {
     method enc(a,m)    { f = new ET(k=rnd()) & ek = e.enc(0,f.k) & em = f.enc(a,m) & fs[ek]=f & <ek,em> }
     method dec(a,c)    { <ek,em> = c & fs[ek].dec(a,em) }
 }|]
-  ≈ Hint [Note "add inv1"]:
-  [prog|
-new (const e = EncL(e),fs:map * ET=0) {
-    method enc(a,m)    { f = new ET(k=rnd()) & ek = e.enc(0,f.k) & em = f.enc(a,m) & fs[ek]=f & <ek,em> }
-    method dec(a,c)    { <ek,em> = c & fs[ek].dec(a,em) }
-    invariant i1(ek)   { !fs[ek]  | fs[ek].k == e.d[0][ek] } // type of fs
-}|]
   ≈ Hint [Note "Move from fs[..].dec to using e and skdec"]:
   [prog|
 new (const e = Enc(e),fs:map * ET=0) {
