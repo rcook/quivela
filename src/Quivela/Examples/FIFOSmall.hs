@@ -25,11 +25,7 @@ prove (set useCache False emptyVerifyEnv)
 
    n = adversary(),
    e = adversary()
-|] $ let directEqs = map (fieldEqual . (:[])) ["s", "r", "h"]
-         channelFields = [ ["n", "s"], ["n", "r"]
-                          , ["n", "e", "d"] ]
-         eqs = directEqs ++
-               map (fieldEqual) channelFields in [prog|
+|] $ [prog|
    Fifo(ChC(n, AEAD(e)))|]
    ≈ Hint ([Note "Unfold Fifo"]):
    [prog|
