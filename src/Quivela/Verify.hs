@@ -466,8 +466,6 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
   relationalVCs <-
     foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
       foreachM (return ress1') $ \res1'@(v1', ctx1', pc1') -> do
-        let simp :: Data p => p -> p
-            simp = id -- Thsi rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
         -- if we are able to find a trivial bijection resulting in a
@@ -490,19 +488,19 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
         -- that the allocator chose.
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Using address bijection: " ++ show addrMap)
-        let vcRes = simp $ VC { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
-                              , _conditionName = "resultsEq"
-                              , _goal = id (v1 :=: applyBij v1') }
+        let vcRes = VC { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
+                       , _conditionName = "resultsEq"
+                       , _goal = id (v1 :=: applyBij v1') }
         invVCs <-
           if ctx1 == ctxH && ctx1' == ctxH'
           then return []
           else concat <$> mapM (fmap applyBij .
                                 invToVC assms addr1 res1 addr1' res1') invs
         -- Require that adversary was called with same values:
-        let vcAdv = VC { _assumptions = applyBij $ nub $ assms ++ map simp (nub $ pc1 ++ pc1' ++ assms)
+        let vcAdv = VC { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
                        , _conditionName = "advCallsEq"
-                       , _goal = simp $ Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
-                                         applyBij (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls))) }
+                       , _goal = Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
+                                 applyBij (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls))) }
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
 resultsToVCs invs (v1, _, _) _ (v1', _, _) _ =
