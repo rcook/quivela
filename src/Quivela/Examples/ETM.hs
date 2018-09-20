@@ -61,8 +61,7 @@ method EtM(e,mac) {
             <em,t>
         }
         method dec(a,c) {
-            em = c`0,
-            t = c`1,
+            <em, t> = c &
             c &
             mac.verify(<a,em>,t) &
             e.dec(em)

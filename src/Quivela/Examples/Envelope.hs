@@ -126,7 +126,7 @@ new (const e = EncLI(e),fs:map * ET=0) {
     method enc(a,m)    { zk = Z(rnd()), f = new ET(k=rnd()) & ek = e.enc(0,zk) & em = f.enc(a,m) & fs[ek]=f & <ek,em> }
     method dec(a,c)    { <ek,em> = c & fs[ek].dec(a,em) }
 }|]
-  ≈ Hint [Note "move from zk to f.k"]:
+  ≈ Hint [Note "move from zk to f.k", NoAddressBijection]:
   [prog|
 new (const e = EncLI(e),fs:map * ET=0) {
     method enc(a,m)    { zk = Z(rnd()), f = new ET(k=rnd()) & ek = e.enc(0,f.k) & em = f.enc(a,m) & fs[ek]=f & <ek,em> }

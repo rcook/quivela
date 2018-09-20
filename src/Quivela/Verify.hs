@@ -461,15 +461,13 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
   assms <- (invAssms++) . concat <$> mapM (invToAsm old old') invs
   -- Invariant methods aren't relational and hence we don't need to check them for each pair of
   -- of paths:
-  lhsInvVCs <- foreachM (return ress1) $ \res1 -> do
-    concat <$> mapM (invToVCnonRelational assms addr1 res1) invs
-  rhsInvVCs <- foreachM (return ress1') $ \res1' -> do
-    concat <$> mapM (invToVCnonRelational assms addr1' res1') invs
+  lhsInvVCs <- foreachM (return ress1) $ invToVCnonRelational assms addr1
+  rhsInvVCs <- foreachM (return ress1') $ invToVCnonRelational assms addr1'
   relationalVCs <-
     foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
       foreachM (return ress1') $ \res1'@(v1', ctx1', pc1') -> do
         let simp :: Data p => p -> p
-            simp = rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
+            simp = id -- Thsi rewriteEqInvs addr1 ctx1 addr1' ctx1' invs
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
         -- if we are able to find a trivial bijection resulting in a
@@ -1021,8 +1019,8 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
     res1@(VRef a1, ctx1, _) <- singleResult <$> symEval (lhs, prefixCtx, pathCond)
     res1'@(VRef a1', ctx1', _) <- singleResult <$> symEval (rhs, prefixCtx, pathCond)
     -- check that invariants hold initially
-    invLHS <- concat <$> mapM (invToVCnonRelational [] a1 res1) hints
-    invRHS <- concat <$> mapM (invToVCnonRelational [] a1' res1') hints
+    invLHS <- invToVCnonRelational [] a1 res1
+    invRHS <- invToVCnonRelational [] a1' res1'
     invsRel <- concat <$> mapM (invToVC [] a1 res1 a1' res1') hints
     remainingInvVCs <- checkVCs (invLHS ++ invRHS ++ invsRel)
     let mtds = sharedMethods a1 ctx1 a1' ctx1'
@@ -1173,3 +1171,6 @@ infixr 5 ≈
 
 nop :: Expr
 nop = ENop
+
+noCache :: VerifyEnv
+noCache = set useCache False emptyVerifyEnv
