@@ -100,7 +100,7 @@ postIncrementInMap :: Proof
 postIncrementInMap =
   [prog| new (m=0) { method f() { x = 0, m = 0, m[x++] = 42, m[0] } } |]
   ≈
-  [prog| new (m=0) { method f() { 42 } } |]
+  [prog| new () { method f() { 42 } } |]
   : []
 
 leExample :: Proof
@@ -384,12 +384,12 @@ mapComprTest4 :: Proof
 mapComprTest4 =
   [prog|
 new(i:int=0) {
-  method f(y) { m = 0, m[y] = i, m = [x ↦ m[x]+1 | m[x]], m[y] }
+  method f(y) { m = 0, m[y] = i, i++, m = [x ↦ m[x]+1 | m[x]], m[y] }
 }|]
   ≈ Hint [NoInfer, fieldEqual ["i"]]:
   [prog|
 new(i:int=0) {
-  method f(y) { !(0 == i) & i++, i }
+  method f(y) { if (!(0 == i)) { i++ } else { i++, 0 } }
 } |]
   : []
 
@@ -539,13 +539,13 @@ new(m: map * T = 0) {
   method ins() { k = rnd(), m[k] = new T(s=new S()), 1 }
   method call(k) { m[k] & (x = m[k] & x.ft()) }
 }|]
-  ≈
+  ≈ Hint [NoAddressBijection]:
   [prog|
 type S = new() { method fs() { 42 } }
 type T = new(const s: S) { method ft() { s.fs() } }
 new(m: map * T = 0) {
   method ins() { k = rnd(), m[k] = new T(s=new S()), 1 }
-  method call(k) { m[k] & 42 }
+  method call(k) { m[k] & (x = m[k] & 42) }
 } |]
   : []
 
