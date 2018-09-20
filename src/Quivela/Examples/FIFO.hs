@@ -70,8 +70,7 @@ new (const n=ChC(n,AEAD(e)), h=0, elts=0) {
     invariant le()   { n.r <= n.s }
     invariant iED(a, c) { !n.e.d[a][c] | a < n.s }
     invariant iH2(a, c) { !h[a] | a < n.s }
-    invariant iElts(a, c) { !elts[a][c] | n.e.d[a][c] }
-    invariant iElts2(a, c) { !n.e.d[a][c] | elts[a][c] }
+    invariant iElts(a, c) { !elts[a][c] == !n.e.d[a][c] }
 }|]
    ≈ Hint ([Note "drop Z", NoInfer] ++ map fieldEqual [["h"], ["elts"], ["n", "r"], ["n", "s"]]):
    [prog|
@@ -81,8 +80,7 @@ new (const n=ChC(n,AEAD(e)), h=0, elts=0) {
     invariant le()   { n.r <= n.s }
     invariant iED(a, c) { !n.e.d[a][c] | a < n.s }
     invariant iH2(a, c) { !h[a] | a < n.s }
-    invariant iElts(a, c) { !elts[a][c] | n.e.d[a][c] }
-    invariant iElts2(a, c) { !n.e.d[a][c] | elts[a][c] }
+    invariant iElts(a, c) { !elts[a][c] == !n.e.d[a][c] }
 }|]
    ≈ Hint [Note "Drop elts"]:
    [prog|

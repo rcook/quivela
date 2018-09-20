@@ -477,7 +477,7 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
                         [m] -> trace ("Using user-supplied address map: " ++ show m) $ m
                         [] -> M.empty
                         _ -> error "More than one address bijection hint"
-        let addrMap = findContradictingBijection (simp pc1) (simp pc1') `fallback`
+        let addrMap = findContradictingBijection pc1 pc1' `fallback`
                       findAddressBijection baseMap res1 res1'
             applyBij :: Data p => p -> p
             applyBij = if NoAddressBijection `inPartial` invs
