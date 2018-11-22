@@ -1,83 +1,113 @@
 {-# LANGUAGE TemplateHaskell #-}
-module Quivela.Parse (parseExpr, parseFile, parseProofPart) where
+
+module Quivela.Parse
+  ( parseExpr
+  , parseFile
+  , parseProofPart
+  ) where
 
 import Control.Lens
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Function
-import Data.Maybe
 import Data.List
-import qualified Data.Set as S
 import qualified Data.Map as M
+import Data.Maybe
+import qualified Data.Set as S
 import System.IO
 import Text.Parsec hiding (parse)
 import Text.Parsec.Expr
-import qualified Text.Parsec.Token as Token
 import Text.Parsec.Language
+import qualified Text.Parsec.Token as Token
 
 import Quivela.Language
 
 languageDef =
-  emptyDef { Token.commentStart    = "/*"
-           , Token.commentEnd      = "*/"
-           , Token.commentLine     = "//"
-           , Token.identStart      = letter <|> char '_'
-           , Token.identLetter     = alphaNum <|> char '_'
-           , Token.reservedNames   = [ "if"
-                                     , "then"
-                                     , "else"
-                                     , "new"
-                                     , "invariant"
-                                     , "local"
-                                     , "method"
-                                     , "type"
-                                     , "map"
-                                     , "delete"
-                                     , "in"
-                                     , "set"
-                                     , "function"
-                                     , "assume"
-                                     ]
-           , Token.reservedOpNames = ["+", "-", "*", "/", "=", "<", "<="
-                                     , "&", "|", "!", ".", "[", "]", "^"
-                                     , "∈", "⊆"
-                                     ]
-           }
+  emptyDef
+    { Token.commentStart = "/*"
+    , Token.commentEnd = "*/"
+    , Token.commentLine = "//"
+    , Token.identStart = letter <|> char '_'
+    , Token.identLetter = alphaNum <|> char '_'
+    , Token.reservedNames =
+        [ "if"
+        , "then"
+        , "else"
+        , "new"
+        , "invariant"
+        , "local"
+        , "method"
+        , "type"
+        , "map"
+        , "delete"
+        , "in"
+        , "set"
+        , "function"
+        , "assume"
+        ]
+    , Token.reservedOpNames =
+        [ "+"
+        , "-"
+        , "*"
+        , "/"
+        , "="
+        , "<"
+        , "<="
+        , "&"
+        , "|"
+        , "!"
+        , "."
+        , "["
+        , "]"
+        , "^"
+        , "∈"
+        , "⊆"
+        ]
+    }
 
 lexer = Token.makeTokenParser languageDef
+
 identifier = Token.identifier lexer -- parses an identifier
-reserved   = Token.reserved   lexer -- parses a reserved name
+
+reserved = Token.reserved lexer -- parses a reserved name
+
 reservedOp = Token.reservedOp lexer -- parses an operator
-parens     = Token.parens     lexer -- parses surrounding parenthesis:
+
+parens = Token.parens lexer -- parses surrounding parenthesis:
                                     --   parens p
                                     -- takes care of the parenthesis and
                                     -- uses p to parse what's inside them
-integer    = Token.integer    lexer -- parses an integer
-semi       = Token.semi       lexer -- parses a semicolon
+
+integer = Token.integer lexer -- parses an integer
+
+semi = Token.semi lexer -- parses a semicolon
+
 whiteSpace = Token.whiteSpace lexer -- parses whitespace
+
 symbol = Token.symbol lexer
 
-data ParserState =
-  ParserState { _inTuple :: Bool
+data ParserState = ParserState
+  { _inTuple :: Bool
               -- ^ keeps track if we are currently parsing a tuple, in which case
               -- we resolve the ambiguity of > as a closing bracket for the tuple.
               -- Comparisons inside tuples can be written with explicit parentheses
               -- as in <1, (2 > 3)>
-              , _inFieldInit :: Bool
-              , _inArgs :: Bool
-              , _pipeAsOr :: Bool
-              }
-  deriving (Eq, Read, Show, Ord)
+  , _inFieldInit :: Bool
+  , _inArgs :: Bool
+  , _pipeAsOr :: Bool
+  } deriving (Eq, Read, Show, Ord)
 
 makeLenses ''ParserState
 
 type Parser = Parsec String ParserState
 
 value :: Parser Value
-value = VInt <$> integer
-    <|> (reserved "map" *> pure (VMap M.empty))
-    <|> try (VSet . S.fromList <$>
-              (symbol "{" *> withState (set inTuple True) (value `sepBy` symbol ",") <* symbol "}"))
+value =
+  VInt <$> integer <|> (reserved "map" *> pure (VMap M.empty)) <|>
+  try
+    (VSet . S.fromList <$>
+     (symbol "{" *> withState (set inTuple True) (value `sepBy` symbol ",") <*
+      symbol "}"))
 
 binCall :: String -> Expr -> Expr -> Expr
 binCall fun e1 e2 = ECall (EConst VNil) fun [e1, e2]
@@ -97,35 +127,66 @@ expr = do
   inArg <- (^. inArgs) <$> getState
   pipeOr <- (^. pipeAsOr) <$> getState
   let table =
-        [ [ prefix "!" (ECall (EConst VNil) "!" . (:[])) ]
-        , [ postfix "++" (ECall (EConst VNil) "++" . (:[])) ]
-        , [ binary "`" ETupleProj AssocLeft ]
-        , [ binary "∈" EIn AssocNone
-          , binary "⊆" ESubmap AssocNone ]
-        , [ binary "*" (binCall "*") AssocLeft, binary "/" (binCall "/") AssocLeft ]
-        , [ binary "+" (binCall "+") AssocLeft, binary "-" (binCall "-") AssocLeft ]
+        [ [prefix "!" (ECall (EConst VNil) "!" . (: []))]
+        , [postfix "++" (ECall (EConst VNil) "++" . (: []))]
+        , [binary "`" ETupleProj AssocLeft]
+        , [binary "∈" EIn AssocNone, binary "⊆" ESubmap AssocNone]
+        , [ binary "*" (binCall "*") AssocLeft
+          , binary "/" (binCall "/") AssocLeft
+          ]
+        , [ binary "+" (binCall "+") AssocLeft
+          , binary "-" (binCall "-") AssocLeft
+          ]
         , [ binary "<" (binCall "<") AssocNone
           , binary "==" (binCall "==") AssocNone
-          , binary "<=" (binCall "<=") AssocNone ]
-          ++ (if inTup then [] else [binary ">" (binCall ">") AssocNone])
-        , [ binary "=" EAssign AssocNone ]
-        , [ binary "&" (binCall "&") AssocRight ] ++
-          (if pipeOr then [ binary "|" (binCall "|") AssocRight ] else []) ++
-          (if inField || inTup || inArg then [] else [binary "," ESeq AssocRight])
+          , binary "<=" (binCall "<=") AssocNone
+          ] ++
+          (if inTup
+             then []
+             else [binary ">" (binCall ">") AssocNone])
+        , [binary "=" EAssign AssocNone]
+        , [binary "&" (binCall "&") AssocRight] ++
+          (if pipeOr
+             then [binary "|" (binCall "|") AssocRight]
+             else []) ++
+          (if inField || inTup || inArg
+             then []
+             else [binary "," ESeq AssocRight])
         ]
   buildExpressionParser table term
   where
     term = do
-      base <- parens (withState (set pipeAsOr True . set inArgs False . set inFieldInit False . set inTuple False) expr)
-         <|> try unqualifiedFunCall <|> try baseExpr <|> ifExpr <|> try setComprExpr <|> try mapComprExpr
-         <|> try newExpr <|> try newConstrExpr <|> methodExpr <|> typedecl <|> assumeExpr
-         <|> functionDecl
-         <?> "basic expression"
+      base <-
+        parens
+          (withState
+             (set pipeAsOr True .
+              set inArgs False . set inFieldInit False . set inTuple False)
+             expr) <|>
+        try unqualifiedFunCall <|>
+        try baseExpr <|>
+        ifExpr <|>
+        try setComprExpr <|>
+        try mapComprExpr <|>
+        try newExpr <|>
+        try newConstrExpr <|>
+        methodExpr <|>
+        typedecl <|>
+        assumeExpr <|>
+        functionDecl <?> "basic expression"
       try (combExpr base) <|> return base
-    binary  name fun assoc = Infix (do{ reservedOp name; return fun }) assoc
-    prefix  name fun       = Prefix (do{ reservedOp name; return fun })
-    postfix name fun       = Postfix (do{ reservedOp name; return fun })
-
+    binary name fun assoc =
+      Infix
+        (do reservedOp name
+            return fun)
+        assoc
+    prefix name fun =
+      Prefix
+        (do reservedOp name
+            return fun)
+    postfix name fun =
+      Postfix
+        (do reservedOp name
+            return fun)
 
 comprSuffix :: Parser (Var, Expr, Expr)
 comprSuffix = do
@@ -134,7 +195,8 @@ comprSuffix = do
   (reserved "in" <|> (symbol "∈" *> pure ()))
   -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
   base <- withState (set inTuple True) expr
-  pred <- (symbol "," *> withState (set inTuple True) expr) <|> pure (EConst (VInt 1))
+  pred <-
+    (symbol "," *> withState (set inTuple True) expr) <|> pure (EConst (VInt 1))
   return (name, base, pred)
 
 assumeExpr :: Parser Expr
@@ -146,11 +208,13 @@ setComprExpr = do
   fun <- withState (set pipeAsOr False) expr
   (name, base, pred) <- comprSuffix
   symbol "}"
-  return $ ESetCompr { _comprVar = name
+  return $
+    ESetCompr
+      { _comprVar = name
                      -- , _comprBase = base
-                     , _comprPred = ECall (EConst VNil) "&" [EIn (EVar name) base, pred]
-                     , _comprValue = fun }
-
+      , _comprPred = ECall (EConst VNil) "&" [EIn (EVar name) base, pred]
+      , _comprValue = fun
+      }
 
 mapComprExpr :: Parser Expr
 mapComprExpr = do
@@ -163,20 +227,18 @@ mapComprExpr = do
   -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
   pred <- withState (set inTuple True) expr
   symbol "]"
-  return $ EMapCompr { _comprVar = name
-                     , _comprValue = val
-                     , _comprPred = pred
-                     }
-
+  return $ EMapCompr {_comprVar = name, _comprValue = val, _comprPred = pred}
 
 combExpr :: Expr -> Parser Expr
 combExpr prefix = do
-  next <- try (ECall prefix <$> (symbol "." *> identifier)
-                            <*> callParams)
-      <|> try (EIdx prefix <$> (symbol "[" *> expr <* symbol "]"))
-      <|> try (EProj prefix <$> (symbol "." *> identifier))
-      <|> pure ENop
-  if next == ENop then return prefix else combExpr next
+  next <-
+    try (ECall prefix <$> (symbol "." *> identifier) <*> callParams) <|>
+    try (EIdx prefix <$> (symbol "[" *> expr <* symbol "]")) <|>
+    try (EProj prefix <$> (symbol "." *> identifier)) <|>
+    pure ENop
+  if next == ENop
+    then return prefix
+    else combExpr next
 
 tuple :: Parser Expr
 tuple = do
@@ -185,11 +247,10 @@ tuple = do
   symbol ">"
   return $ ETuple elts
 
-
 baseExpr :: Parser Expr
-baseExpr = EVar <$> identifier <|> EConst <$> value
-       <|> tuple
-       <?> "number, variable, or tuple"
+baseExpr =
+  EVar <$> identifier <|> EConst <$> value <|>
+  tuple <?> "number, variable, or tuple"
 
 projExpr :: Parser Expr
 projExpr = EProj <$> baseExpr <*> (symbol "." *> identifier)
@@ -198,31 +259,35 @@ projExpr' :: Expr -> Parser Expr
 projExpr' expr = EProj expr <$> (symbol "." *> identifier)
 
 ifExpr :: Parser Expr
-ifExpr = EIf <$> (reserved "if" *> symbol "(" *> expr <* symbol ")")
-             <*> ifArm
-             <*> (reserved "else" *> ifArm)
-         <?> "conditional"
-  where ifArm = do
-          inBraces <- (symbol "{" *> pure True) <|> pure False
-          e <- expr
-          if inBraces then symbol "}" else pure ""
-          return e
+ifExpr =
+  EIf <$> (reserved "if" *> symbol "(" *> expr <* symbol ")") <*> ifArm <*>
+  (reserved "else" *> ifArm) <?> "conditional"
+  where
+    ifArm = do
+      inBraces <- (symbol "{" *> pure True) <|> pure False
+      e <- expr
+      if inBraces
+        then symbol "}"
+        else pure ""
+      return e
 
 unqualifiedFunCall :: Parser Expr
-unqualifiedFunCall = ECall (EConst VNil) <$> identifier <*> callParams
-                     <?> "unqualified function call"
+unqualifiedFunCall =
+  ECall (EConst VNil) <$> identifier <*>
+  callParams <?> "unqualified function call"
 
 callParams :: Parser [Expr]
-callParams = (symbol "(" *> withState (set inArgs True) (expr `sepBy` symbol ",") <* symbol ")")
-             <?> "method call arguments"
+callParams =
+  (symbol "(" *> withState (set inArgs True) (expr `sepBy` symbol ",") <*
+   symbol ")") <?>
+  "method call arguments"
 
 typ :: Parser Type
-typ = (reserved "int" *> pure TInt)
-  <|> (symbol "*" *> pure TAny)
-  <|> (TTuple <$> (symbol "<" *> typ `sepBy` symbol "," <* symbol ">"))
-  <|> (TMap <$> (reserved "map" *> typ) <*> typ)
-  <|> (TNamed <$> identifier)
-  <?> "type"
+typ =
+  (reserved "int" *> pure TInt) <|> (symbol "*" *> pure TAny) <|>
+  (TTuple <$> (symbol "<" *> typ `sepBy` symbol "," <* symbol ">")) <|>
+  (TMap <$> (reserved "map" *> typ) <*> typ) <|>
+  (TNamed <$> identifier) <?> "type"
 
 field :: Parser Field
 field = do
@@ -230,54 +295,65 @@ field = do
   id <- identifier
   typ <- try (symbol ":" *> typ) <|> pure TAny
   init <- try (symbol "=" *> expr) <|> pure (EVar id)
-  return $ Field { _fieldName = id
-                 , _fieldInit = init
-                 , _fieldType = typ
-                 , _immutable = isConst }
+  return $
+    Field
+      { _fieldName = id
+      , _fieldInit = init
+      , _fieldType = typ
+      , _immutable = isConst
+      }
 
 -- | Fails if list elements are not unique under given function; returns its argument unchanged otherwise
 uniqueBy :: (Show a, Eq b) => (a -> b) -> [a] -> Parser [a]
-uniqueBy f lst | length (nubBy ((==) `on` f) lst) == length lst = return lst
-               | otherwise = fail $ "List elements not unique: " ++ show lst
-
+uniqueBy f lst
+  | length (nubBy ((==) `on` f) lst) == length lst = return lst
+  | otherwise = fail $ "List elements not unique: " ++ show lst
 
 uniqueFields :: [Field] -> Parser [Field]
 uniqueFields = uniqueBy (^. fieldName)
 
 newExpr :: Parser Expr
-newExpr = ENew <$> (reserved "new" *> symbol "(" *>
-                    withState (set inFieldInit True) (uniqueFields =<< field `sepBy` symbol ",") <* symbol ")")
-               <*> (symbol "{" *> (foldr ESeq ENop <$> many expr) <* symbol "}")
-  <?> "new(){} expression"
+newExpr =
+  ENew <$>
+  (reserved "new" *> symbol "(" *>
+   withState (set inFieldInit True) (uniqueFields =<< field `sepBy` symbol ",") <*
+   symbol ")") <*>
+  (symbol "{" *> (foldr ESeq ENop <$> many expr) <* symbol "}") <?>
+  "new(){} expression"
 
 constrArg :: Parser (Var, Expr)
-constrArg = (,) <$> (identifier <?> "constructor parameter name") <*> (symbol "=" *> expr)
-        <?> "constructor argument (x = e)"
+constrArg =
+  (,) <$> (identifier <?> "constructor parameter name") <*>
+  (symbol "=" *> expr) <?> "constructor argument (x = e)"
 
 newConstrExpr :: Parser Expr
-newConstrExpr = ENewConstr <$> (reserved "new" *> identifier)
-                           <*> (symbol "(" *>
-                                withState (set inFieldInit True)
-                                          ((uniqueBy fst =<< constrArg `sepBy` symbol ",")
-                                           <?> "constructor keyword arguments") <*
-                                symbol ")")
+newConstrExpr =
+  ENewConstr <$> (reserved "new" *> identifier) <*>
+  (symbol "(" *>
+   withState
+     (set inFieldInit True)
+     ((uniqueBy fst =<< constrArg `sepBy` symbol ",") <?>
+      "constructor keyword arguments") <*
+   symbol ")")
 
 methodArg :: Parser (String, Type)
-methodArg = (do
-  id <- identifier
-  typ <- try (symbol ":" *> typ) <|> pure TAny
-  return (id, typ)) <?> "method argument"
+methodArg =
+  (do id <- identifier
+      typ <- try (symbol ":" *> typ) <|> pure TAny
+      return (id, typ)) <?>
+  "method argument"
 
 methodExpr :: Parser Expr
-methodExpr = (do
-  kind <- (reserved "method" *> pure NormalMethod)
-          <|> (reserved "invariant" *> pure Invariant)
-          <|> (reserved "local" *> pure LocalMethod)
-  EMethod <$> identifier
-    <*> (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")")
-    <*> (symbol "{" *> expr <* symbol "}")
-    <*> pure kind)
-  <?> "method definition"
+methodExpr =
+  (do kind <-
+        (reserved "method" *> pure NormalMethod) <|>
+        (reserved "invariant" *> pure Invariant) <|>
+        (reserved "local" *> pure LocalMethod)
+      EMethod <$> identifier <*>
+        (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")") <*>
+        (symbol "{" *> expr <* symbol "}") <*>
+        pure kind) <?>
+  "method definition"
 
 -- | Split field declarations into formal parameters for type declarations
 -- and constant field initializations. Fails if there is a non-constant
@@ -285,27 +361,36 @@ methodExpr = (do
 -- such invalid fields as a parse error.
 splitTypeDeclFields :: [Field] -> Parser ([(Var, Bool, Type)], [(Var, Value)])
 splitTypeDeclFields [] = return ([], [])
-splitTypeDeclFields (fld : flds) = do
+splitTypeDeclFields (fld:flds) = do
   (args, values) <- splitTypeDeclFields flds
   if fld ^. fieldInit == EVar (fld ^. fieldName)
         -- the field parser defaults to the field's name if no initialization expression is given
-  then return ((fld ^. fieldName, fld ^. immutable, fld ^. fieldType) : args, values)
-  else case fld ^. fieldInit of
-         EConst v -> return (args, (fld ^. fieldName, v) : values)
-         e -> fail $ "Non-constant field initialization in type declaration: " ++ show e
+    then return
+           ( (fld ^. fieldName, fld ^. immutable, fld ^. fieldType) : args
+           , values)
+    else case fld ^. fieldInit of
+           EConst v -> return (args, (fld ^. fieldName, v) : values)
+           e ->
+             fail $
+             "Non-constant field initialization in type declaration: " ++ show e
 
 typedecl :: Parser Expr
 typedecl = do
   reserved "type"
   typeName <- identifier
   symbol "=" *> reserved "new"
-  fields <- symbol "(" *> withState (set inFieldInit True) (field `sepBy` symbol ",") <* symbol ")"
-  body <- symbol "{" *> (foldr ESeq ENop <$> many expr)  <* symbol "}"
+  fields <-
+    symbol "(" *> withState (set inFieldInit True) (field `sepBy` symbol ",") <*
+    symbol ")"
+  body <- symbol "{" *> (foldr ESeq ENop <$> many expr) <* symbol "}"
   (formals, values) <- splitTypeDeclFields fields
-  let result = ETypeDecl { _typedeclName = typeName
-                         , _typedeclFormals = formals
-                         , _typedeclValues = values
-                         , _typedeclBody = body }
+  let result =
+        ETypeDecl
+          { _typedeclName = typeName
+          , _typedeclFormals = formals
+          , _typedeclValues = values
+          , _typedeclBody = body
+          }
   let freeVars = fst . varBindings $ result
   -- Maybe move this check out of the parser to somewhere else:
   if S.null freeVars
@@ -313,9 +398,10 @@ typedecl = do
     else fail $ "Free variables in type declaration: " ++ show freeVars
 
 functionDecl :: Parser Expr
-functionDecl = reserved "function" *>
-  (EFunDecl <$> identifier
-            <*> (symbol "(" *> identifier `sepBy` symbol "," <* symbol ")"))
+functionDecl =
+  reserved "function" *>
+  (EFunDecl <$> identifier <*>
+   (symbol "(" *> identifier `sepBy` symbol "," <* symbol ")"))
 
 program :: Parser Expr
 program = foldr1 ESeq <$> many1 expr
@@ -334,9 +420,10 @@ methodDiff = deleteMethod <|> overrideMethod
 
 modField :: Parser [Diff]
 modField = do
-  reserved "new" *> symbol "(" *> symbol "..."  *> symbol ","
-  fieldOp <- try (NewField <$> field) <|> (reserved "delete" *>
-                                           (DeleteField <$> identifier))
+  reserved "new" *> symbol "(" *> symbol "..." *> symbol ","
+  fieldOp <-
+    try (NewField <$> field) <|>
+    (reserved "delete" *> (DeleteField <$> identifier))
   symbol ")"
   symbol "{" *> symbol "..."
   rest <- many methodDiff
@@ -344,17 +431,15 @@ modField = do
   return $ fieldOp : rest
 
 initialParserState :: ParserState
-initialParserState = ParserState { _inTuple = False
-                                 , _inFieldInit = False
-                                 , _pipeAsOr = True
-                                 , _inArgs = False }
+initialParserState =
+  ParserState
+    {_inTuple = False, _inFieldInit = False, _pipeAsOr = True, _inArgs = False}
 
 diffOrProg :: Parser ProofPart
 diffOrProg =
-  try ((PDiff <$> modField) <* whiteSpace <* lookAhead eof)
-  <|>
-  try (PDiff <$> (many1 methodDiff <* whiteSpace <* lookAhead eof))
-  <|> (Prog <$> program)
+  try ((PDiff <$> modField) <* whiteSpace <* lookAhead eof) <|>
+  try (PDiff <$> (many1 methodDiff <* whiteSpace <* lookAhead eof)) <|>
+  (Prog <$> program)
 
 parse :: Parser a -> String -> a
 parse p s =

@@ -1,9 +1,9 @@
 module Main where
 
+import Control.Monad
+import Data.List
 import Quivela
 import System.Microtimer
-import Data.List
-import Control.Monad
 
 main :: IO ()
 main = return ()

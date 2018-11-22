@@ -1,9 +1,12 @@
 {-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
+
 module Quivela.Examples.FIFOSmall where
+
 import Control.Lens
 import Quivela
 
-prove (set useCache False emptyVerifyEnv)
+prove
+  (set useCache False emptyVerifyEnv)
   [prog'|
    method Fifo(n) {
      new (const n=n, s:int=0, r:int=0, h=0) {
@@ -25,28 +28,29 @@ prove (set useCache False emptyVerifyEnv)
 
    n = adversary(),
    e = adversary()
-|] $ [prog|
-   Fifo(ChC(n, AEAD(e)))|]
-   ≈ Hint ([Note "Unfold Fifo"]):
-   [prog|
+|] $
+  [prog|
+   Fifo(ChC(n, AEAD(e)))|] ≈
+  Hint ([Note "Unfold Fifo"]) :
+  [prog|
 new (const n=ChC(n,AEAD(e)),s:int=0,r:int=0, h=0) {
     method snd(m)    { (c = n.e.enc(n.s, Z(m)) & n.n.snd(c) , n.s++), c & h[s] = <m>, s++, 1 }
     method rcv()     { n.rcv() & r < s & h[r++] }
     invariant iR()   { n.r == r & n.s == s }
     invariant le()   { r <= s }
     invariant iED(a, c) { !n.e.d[a][c] | a < n.s }
-}|]
-   ≈ Hint [Note "Switch to n.r and n.s"]:
-   [prog|
+}|] ≈
+  Hint [Note "Switch to n.r and n.s"] :
+  [prog|
 new (const n=ChC(n,AEAD(e)), h=0) {
     method snd(m)    { c = n.e.e.enc(n.s, Z(m)) & n.e.d[n.s][c] = <Z(m)> & n.n.snd(c) , n.s++, h[n.s-1] = <m>, 1 }
     method rcv()     { n.rcv() & h[n.r-1] }
     invariant le()   { n.r <= n.s }
     invariant iED(a, c) { !n.e.d[a][c] | a < n.s }
     invariant iH2(a, c) { !h[a] | a < n.s }
-}|]
-   ≈ Hint [Note "introduce elts"]:
-   [prog|
+}|] ≈
+  Hint [Note "introduce elts"] :
+  [prog|
 // Since we want to change the contents of n.e.d in this step, but retain which elements
 // are non-zero, we introduce elts as a helper map that records this information and can
 // be used by an equality hint to connect n.e.d on both sides
@@ -57,9 +61,11 @@ new (const n=ChC(n,AEAD(e)), h=0, elts=0) {
     invariant iED(a, c) { !n.e.d[a][c] | a < n.s }
     invariant iH2(a, c) { !h[a] | a < n.s }
     invariant iElts(a, c) { !elts[a][c] == !n.e.d[a][c] }
-}|]
-   ≈ Hint ([Note "drop Z", NoInfer] ++ map fieldEqual [["h"], ["elts"], ["n", "r"], ["n", "s"]]):
-   [prog|
+}|] ≈
+  Hint
+    ([Note "drop Z", NoInfer] ++
+     map fieldEqual [["h"], ["elts"], ["n", "r"], ["n", "s"]]) :
+  [prog|
 new (const n=ChC(n,AEAD(e)), h=0, elts=0) {
     method snd(m)    { c = n.e.e.enc(n.s, Z(m)) & elts[n.s][c] = 1 & n.e.d[n.s][c] = <m> & n.n.snd(c) , n.s++, h[n.s-1] = <m>, 1 }
     method rcv()     { n.rcv() & h[n.r-1] }
@@ -67,9 +73,9 @@ new (const n=ChC(n,AEAD(e)), h=0, elts=0) {
     invariant iED(a, c) { !n.e.d[a][c] | a < n.s }
     invariant iH2(a, c) { !h[a] | a < n.s }
     invariant iElts(a, c) { !elts[a][c] == !n.e.d[a][c] }
-}|]
-   ≈ Hint [Note "Drop elts"]:
-   [prog|
+}|] ≈
+  Hint [Note "Drop elts"] :
+  [prog|
 new (const n=ChC(n,AEAD(e)), h=0) {
     method snd(m)    { c = n.e.e.enc(n.s, Z(m)) & n.e.d[n.s][c] = <m> & n.n.snd(c) , n.s++, h[n.s-1] = <m>, 1 }
     method rcv()     { n.rcv() & h[n.r-1] }
@@ -77,8 +83,10 @@ new (const n=ChC(n,AEAD(e)), h=0) {
     invariant iED(a, c) { !n.e.d[a][c] | a < n.s }
     invariant iH2(a, c) { !h[a] | a < n.s }
     invariant iH(a, c) { !n.e.d[a][c] | h[a] == n.e.d[a][c] }
-}|]
-   ≈ Hint (zipWith fieldsEqual [ ["n", "r"], ["n", "s"], ["n", "e", "d"] ]
-                               [ ["r"],      ["s"],      ["e", "d"] ]):
-   [prog| ChC(n, AEAD(e)) |]
-   : []
+}|] ≈
+  Hint
+    (zipWith
+       fieldsEqual
+       [["n", "r"], ["n", "s"], ["n", "e", "d"]]
+       [["r"], ["s"], ["e", "d"]]) :
+  [prog| ChC(n, AEAD(e)) |] : []

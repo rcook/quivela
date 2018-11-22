@@ -7,39 +7,40 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PatternSynonyms #-}
+
 module Quivela.Verify where
 
 import Control.Applicative ((<$>), (<|>))
 import Control.Arrow (second)
-import Control.Monad
 import Control.Lens hiding (Context(..), rewrite)
 import Control.Lens.At
-import Control.Monad.RWS.Strict
+import Control.Monad
 import Control.Monad.List
+import Control.Monad.RWS.Strict
 import qualified Data.ByteString as BS
+import Data.Data
+import Data.Function
 import Data.Generics hiding (Generic)
 import Data.List
-import Data.Function
-import Data.Data
-import Data.Maybe
-import Data.Serialize (get, put, Serialize(..), encode, decode)
-import Data.Typeable
-import Debug.Trace
 import qualified Data.Map as M
 import qualified Data.Map.Merge.Lazy as M
+import Data.Maybe
+import Data.Serialize (Serialize(..), decode, encode, get, put)
 import qualified Data.Set as S
+import Data.Typeable
+import Debug.Trace
 import GHC.Generics (Generic)
 import System.Directory
 import System.Exit
-import System.Microtimer
 import System.IO
 import System.IO.Temp
+import System.Microtimer
 import System.Process
 
-import Quivela.Language
 import Quivela.Diff
-import Quivela.SymEval
+import Quivela.Language
 import Quivela.Parse
+import Quivela.SymEval
 import Quivela.VerifyPreludes
 
 -- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
@@ -68,34 +69,46 @@ instance PartialEq ProofHint where
   UseAddressBijection _ === _ = Just False
 
 -- | Verification conditions
-data VC = VC { _conditionName :: String
+data VC = VC
+  { _conditionName :: String
              -- ^ Purely for readability purposes when generating code for other solvers
-             , _assumptions :: [Prop]
-             , _goal :: Prop }
-          deriving (Read, Ord, Eq, Data, Typeable)
+  , _assumptions :: [Prop]
+  , _goal :: Prop
+  } deriving (Read, Ord, Eq, Data, Typeable)
+
 makeLenses ''VC
 
-data SolverCmd = Raw String | NewVar String String | NewAssm String
+data SolverCmd
+  = Raw String
+  | NewVar String
+           String
+  | NewAssm String
   deriving (Read, Show, Eq, Ord, Data, Typeable)
 
 -- | A monad for emitting code for external tools. In addition to state
 -- to keep track of fresh variables, this also includes a writer monad
 -- to collect all emitted lines.
-newtype Emitter a = Emitter { unEmitter :: RWST () [SolverCmd] EmitterState IO a }
-  deriving (Functor, Applicative, Monad, MonadState EmitterState,
-            MonadWriter [SolverCmd], MonadIO)
+newtype Emitter a = Emitter
+  { unEmitter :: RWST () [SolverCmd] EmitterState IO a
+  } deriving ( Functor
+             , Applicative
+             , Monad
+             , MonadState EmitterState
+             , MonadWriter [SolverCmd]
+             , MonadIO
+             )
 
-data EmitterState = EmitterState { _nextEmitterVar :: M.Map String Integer
-                                 , _varTranslations :: M.Map String String
-                                 , _usedVars :: [(String, String)]
+data EmitterState = EmitterState
+  { _nextEmitterVar :: M.Map String Integer
+  , _varTranslations :: M.Map String String
+  , _usedVars :: [(String, String)]
                                  -- ^ Stores generated fresh variables and their type in the solver
-                                 , _emitterPrefixCtx :: Context
+  , _emitterPrefixCtx :: Context
                                  -- ^ We make the context of the "prefix"
                                  -- program of a proof available to emitters so
                                  -- they can generate output for uninterpreted
                                  -- functions, etc.
-                                 }
-  deriving (Read, Show, Eq, Ord, Data, Typeable)
+  } deriving (Read, Show, Eq, Ord, Data, Typeable)
 
 makeLenses ''EmitterState
 
@@ -103,8 +116,8 @@ makeLenses ''EmitterState
 havocLocal :: Var -> Local -> Verify Local
 havocLocal name l
   | not (view localImmutable l) = do
-      fv <- freshVar name
-      return $ set (localValue) (Sym (SymVar fv (l ^. localType))) l
+    fv <- freshVar name
+    return $ set (localValue) (Sym (SymVar fv (l ^. localType))) l
   | otherwise = return l
 
 -- | Havoc all non-immutable locals of an object
@@ -113,8 +126,10 @@ havocObj obj
   | obj ^. objAdversary = return obj -- this is a hack, since we currently don't
   -- support const annotations on global variables
   | otherwise = do
-    newLocals <- mapM (\(name, loc) -> (name,) <$> havocLocal name loc)
-      (M.toList (obj ^. objLocals))
+    newLocals <-
+      mapM
+        (\(name, loc) -> (name, ) <$> havocLocal name loc)
+        (M.toList (obj ^. objLocals))
     return (set objLocals (M.fromList newLocals) obj)
 
 -- | Havoc all objects in a context
@@ -124,23 +139,29 @@ havocContext = everywhereM (mkM havocObj)
 -- | Return an initial state for the verifier monad
 newVerifyState :: IO VerifyState
 newVerifyState = do
-  (Just hin, Just hout, _, procHandle) <- createProcess $ (proc "z3" ["-in"]){ std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe }
+  (Just hin, Just hout, _, procHandle) <-
+    createProcess $
+    (proc "z3" ["-in"])
+      {std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe}
   hSetBuffering hin NoBuffering
   hSetBuffering hout NoBuffering
   hPutStrLn hin z3Prelude
-  verificationCache <- do
-    exists <- doesFileExist "cache.bin"
-    if exists
-    then do
-      maybeCache <- decode <$> liftIO (BS.readFile "cache.bin")
-      case maybeCache of
-        Right cache -> return cache
-        Left err -> return S.empty
-    else return S.empty
-  return VerifyState { _nextVar = M.empty
-                     , _verifyPrefixCtx = emptyCtx
-                     , _alreadyVerified = verificationCache
-                     , _z3Proc = (hin, hout, procHandle) }
+  verificationCache <-
+    do exists <- doesFileExist "cache.bin"
+       if exists
+         then do
+           maybeCache <- decode <$> liftIO (BS.readFile "cache.bin")
+           case maybeCache of
+             Right cache -> return cache
+             Left err -> return S.empty
+         else return S.empty
+  return
+    VerifyState
+      { _nextVar = M.empty
+      , _verifyPrefixCtx = emptyCtx
+      , _alreadyVerified = verificationCache
+      , _z3Proc = (hin, hout, procHandle)
+      }
 
 -- | Run a Verify action
 runVerify :: VerifyEnv -> Verify a -> IO a
@@ -149,60 +170,70 @@ runVerify env action = do
   (res, state, _) <- runRWST (unVerify action) env initState
   return res
 
-emptyVC = VC { _conditionName = "vc"
-             , _assumptions = []
-             , _goal = PTrue }
+emptyVC = VC {_conditionName = "vc", _assumptions = [], _goal = PTrue}
 
 -- Not technically a correct show instance, since it's not an inverse of `read`
 instance Show VC where
   show (VC name assms goal) =
-    unlines [ "\nName: " ++ name
-            , "\nAssumptions: "
-            , intercalate "\n" (map show assms)
-            , "Goal: "
-            , show goal ]
+    unlines
+      [ "\nName: " ++ name
+      , "\nAssumptions: "
+      , intercalate "\n" (map show assms)
+      , "Goal: "
+      , show goal
+      ]
 
 -- | Check if the assumptions are trivially contradictory
 assumptionsContradictory :: [Prop] -> Bool
 assumptionsContradictory assms =
-  any (\asm -> case asm of
-          Not p -> any (\asm' -> asm' == p) assms -- FIXME: this probably shouldn't be quadratic
-          _ -> False) assms
+  any
+    (\asm ->
+       case asm of
+         Not p -> any (\asm' -> asm' == p) assms -- FIXME: this probably shouldn't be quadratic
+         _ -> False)
+    assms
 
 -- | Check if the goal is trivial (equalities like x = x, a goal occurring as an assumption,
 -- and having both P and (not P) as an assumption)
 triviallyTrue :: VC -> Verify Bool
 triviallyTrue vc
   | v1 :=: v1' <- vc ^. goal =
-      return $ (v1 == v1') ||
-      assumptionsContradictory (vc ^. assumptions)
+    return $ (v1 == v1') || assumptionsContradictory (vc ^. assumptions)
   | (vc ^. goal) `elem` (vc ^. assumptions) = return True
   | otherwise = return False
 
 -- | Rewrite all values that match the LHS of an equality invariant by its RHS.
-rewriteInv :: Data p => Addr -> Context -> Addr -> Context -> ProofHint -> p -> p
+rewriteInv ::
+     Data p => Addr -> Context -> Addr -> Context -> ProofHint -> p -> p
 rewriteInv addrL ctxL addrR ctxR (EqualInv f g) x = everywhere (mkT replace) x
-  where lhs = f addrL ctxL
-        rhs = g addrR ctxR
-        replace :: Value -> Value
-        replace v | v == lhs = rhs
-                  | otherwise= v
+  where
+    lhs = f addrL ctxL
+    rhs = g addrR ctxR
+    replace :: Value -> Value
+    replace v
+      | v == lhs = rhs
+      | otherwise = v
 rewriteInv _ ctxL _ ctxR _ x = x
 
 -- | Rewrite with a list of invariants. This ignores all non-equality invariants
-rewriteEqInvs :: Data p => Addr -> Context -> Addr -> Context -> [ProofHint] -> p -> p
+rewriteEqInvs ::
+     Data p => Addr -> Context -> Addr -> Context -> [ProofHint] -> p -> p
 rewriteEqInvs addrL ctxL addrR ctxR invs vc =
   foldr (rewriteInv addrL ctxL addrR ctxR) vc invs
 
-
 -- | Compute all relational proof obligations generated by an invariant
-invToVC :: [Prop] -> Addr -> Result -> Addr -> Result -> ProofHint -> Verify [VC]
+invToVC ::
+     [Prop] -> Addr -> Result -> Addr -> Result -> ProofHint -> Verify [VC]
 invToVC assms addrL (_, ctxL, pathCondL) addrR (_, ctxR, pathCondR) inv =
   case inv of
-    EqualInv f g -> return $
-                    [emptyVC { _assumptions = nub $ pathCondL ++ pathCondR ++ assms
-                             , _conditionName = "equalInvPreserved"
-                             , _goal = f addrL ctxL :=: g addrR ctxR }]
+    EqualInv f g ->
+      return $
+      [ emptyVC
+          { _assumptions = nub $ pathCondL ++ pathCondR ++ assms
+          , _conditionName = "equalInvPreserved"
+          , _goal = f addrL ctxL :=: g addrR ctxR
+          }
+      ]
     _ -> return []
 
 -- | Convert an invariant into assumptions. Note that for universal
@@ -212,12 +243,15 @@ invToAsm (VRef addrL, ctxL, pathCondL) (VRef addrR, ctxR, pathCondR) inv =
   case inv of
     EqualInv f g -> return [f addrL ctxL :=: g addrR ctxR]
     _ -> return []
-invToAsm (v1, _, _) (v1', _ ,_) _ = error "invToAsm called with non-address arguments"
+invToAsm (v1, _, _) (v1', _, _) _ =
+  error "invToAsm called with non-address arguments"
 
 -- | Return all invariant methods in given context
 collectInvariants :: Addr -> Context -> [Method]
 collectInvariants addr ctx =
-  filter (\mtd -> mtd ^. methodKind == Invariant) . M.elems $ ctx ^. ctxObjs . ix addr . objMethods
+  filter (\mtd -> mtd ^. methodKind == Invariant) . M.elems $ ctx ^. ctxObjs .
+  ix addr .
+  objMethods
 
 -- | Return all non-relational proof obligations generated by invariants
 invToVCnonRelational :: [Prop] -> Addr -> Result -> Verify [VC]
@@ -226,52 +260,79 @@ invToVCnonRelational assms addr res@(v, ctx, pathCond) = do
   fmap concat . forM univInvs $ \univInv -> do
     let formals = univInv ^. methodFormals
     (args, ctx', pathCond') <- symArgs ctx formals
-    let scope = M.fromList (zip (map fst formals)
-                                (zip args (map snd formals)))
-    paths <- symEval ( univInv ^. methodBody, set ctxThis addr (set ctxScope scope ctx')
-                     , pathCond' ++ pathCond)
+    let scope = M.fromList (zip (map fst formals) (zip args (map snd formals)))
+    paths <-
+      symEval
+        ( univInv ^. methodBody
+        , set ctxThis addr (set ctxScope scope ctx')
+        , pathCond' ++ pathCond)
     foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
-      return $ [VC { _assumptions = nub $ pathCondI ++ assms
-                   , _conditionName = "univInvPreserved_" ++ (univInv ^. methodName)
-                   , _goal = Not (res :=: VInt 0) }]
+      return $
+      [ VC
+          { _assumptions = nub $ pathCondI ++ assms
+          , _conditionName = "univInvPreserved_" ++ (univInv ^. methodName)
+          , _goal = Not (res :=: VInt 0)
+          }
+      ]
 
 onlySimpleTypes :: Data p => p -> Verify ()
-onlySimpleTypes foo = when (not . null . listify isNamed $ foo)
-        (error $ "Symbolic objects as method arguments not yet supported")
-  where isNamed :: Type -> Bool
-        isNamed (TNamed _) = True
-        isNamed _ = False
+onlySimpleTypes foo =
+  when
+    (not . null . listify isNamed $ foo)
+    (error $ "Symbolic objects as method arguments not yet supported")
+  where
+    isNamed :: Type -> Bool
+    isNamed (TNamed _) = True
+    isNamed _ = False
 
 -- | Return a list of all reference values occurring in some data
 collectRefs :: Data p => p -> [Value]
 collectRefs = listify isRef
-  where isRef (VRef _) = True
-        isRef _ = False
-
+  where
+    isRef (VRef _) = True
+    isRef _ = False
 
 -- | Substitute x by v in p
 substSymVar :: Var -> Value -> Prop -> Prop
 substSymVar x v p = everywhereBut (mkQ False binds) (mkT replace) p
-  where binds (Forall vs e) = x `elem` map fst vs
-        binds _ = False
-        replace (Sym (SymVar y t)) | x == y = v
-        replace e = e
+  where
+    binds (Forall vs e) = x `elem` map fst vs
+    binds _ = False
+    replace (Sym (SymVar y t))
+      | x == y = v
+    replace e = e
 
 -- To make Z3 cope with forall quantifications better, make sure there are no forall-quantified
 -- variables x occurring in one assumption of the form (x = E) by replacing x by E in the
 -- rest of the formula.
-onePointTransform :: [(Var, Type)] -> [Prop] -> Prop -> ([(Var, Type)], [Prop], Prop)
-onePointTransform vs assms conseq = foldr removeVar (vs, assms, conseq) spuriousAssms
-  where spuriousAssms = catMaybes $
-          map (\x -> listToMaybe . catMaybes $
-           map (\assm -> case assm of
-                           Sym (SymVar y t) :=: e -> if y == x then Just (x, e, assm) else Nothing
-                           e :=: Sym (SymVar y t) -> if y == x then Just (x, e, assm) else Nothing
-                           _ -> Nothing) assms) (map fst vs)
-        removeVar (spurVar, spurExpr, origAssm) (vs', assms', conseq') =
-          ( filter ((/= spurVar) . fst) vs'
-          , map (substSymVar spurVar spurExpr) . filter (/= origAssm) $ assms'
-          , substSymVar spurVar spurExpr conseq' )
+onePointTransform ::
+     [(Var, Type)] -> [Prop] -> Prop -> ([(Var, Type)], [Prop], Prop)
+onePointTransform vs assms conseq =
+  foldr removeVar (vs, assms, conseq) spuriousAssms
+  where
+    spuriousAssms =
+      catMaybes $
+      map
+        (\x ->
+           listToMaybe . catMaybes $
+           map
+             (\assm ->
+                case assm of
+                  Sym (SymVar y t) :=: e ->
+                    if y == x
+                      then Just (x, e, assm)
+                      else Nothing
+                  e :=: Sym (SymVar y t) ->
+                    if y == x
+                      then Just (x, e, assm)
+                      else Nothing
+                  _ -> Nothing)
+             assms)
+        (map fst vs)
+    removeVar (spurVar, spurExpr, origAssm) (vs', assms', conseq') =
+      ( filter ((/= spurVar) . fst) vs'
+      , map (substSymVar spurVar spurExpr) . filter (/= origAssm) $ assms'
+      , substSymVar spurVar spurExpr conseq')
 
 universalInvariantAssms :: Addr -> Context -> PathCond -> Verify [Prop]
 universalInvariantAssms addr ctx pathCond =
@@ -279,55 +340,86 @@ universalInvariantAssms addr ctx pathCond =
     let formals = invariantMethod ^. methodFormals
     onlySimpleTypes formals
     (args, ctx', pathCond') <- symArgs ctx formals
-    let scope = M.fromList (zip (map fst formals)
-                                (zip args (map snd formals)))
+    let scope = M.fromList (zip (map fst formals) (zip args (map snd formals)))
     let oldRefs = collectRefs ctx'
     let oldSymVars = collectSymVars ctx'
-    paths <- symEval (invariantMethod ^. methodBody, set ctxThis addr (set ctxScope scope ctx), pathCond' ++ pathCond)
+    paths <-
+      symEval
+        ( invariantMethod ^. methodBody
+        , set ctxThis addr (set ctxScope scope ctx)
+        , pathCond' ++ pathCond)
     let argNames = map (\(Sym (SymVar name t)) -> (name, t)) args
-    foreachM (return paths) $ \(res, ctxI, pathCondI) -> do
+    foreachM (return paths) $ \(res, ctxI, pathCondI)
       -- If there were symbolic objects created on demand, we may now have a bunch
       -- of extra symbolic variables that were introduced. Since these are going
       -- to be arbitrary parameters, we have to quantify over them as well here:
       -- TODO: check for duplicate symvars of different types
+     -> do
       let newSymVars = collectSymVars (res, ctxI, pathCondI) \\ oldSymVars
-      let newRefs = map (\(VRef a) -> a) $ collectRefs (res, ctxI, pathCondI) \\ oldRefs
+      let newRefs =
+            map (\(VRef a) -> a) $ collectRefs (res, ctxI, pathCondI) \\ oldRefs
       refVars <- mapM (freshVar . ("symref" ++) . show) newRefs
       let replaceRef :: Data p => Addr -> Value -> p -> p
           replaceRef a v = everywhere (mkT replace)
-            where replace (VRef a') | a == a' = v
-                                    | otherwise = VRef a'
-                  replace x = x
+            where
+              replace (VRef a')
+                | a == a' = v
+                | otherwise = VRef a'
+              replace x = x
           replaceAllRefs :: Data p => p -> p
-          replaceAllRefs x = foldr (\(ref, symref) p -> replaceRef ref symref p) x
-                                   (zip newRefs (map (Sym . SymRef) refVars))
-          (vs, assms, conseq) = onePointTransform (nub $ argNames ++ map ((, TInt)) refVars ++ newSymVars)
-                                                  pathCondI (Not (res :=: VInt 0))
+          replaceAllRefs x =
+            foldr
+              (\(ref, symref) p -> replaceRef ref symref p)
+              x
+              (zip newRefs (map (Sym . SymRef) refVars))
+          (vs, assms, conseq) =
+            onePointTransform
+              (nub $ argNames ++ map ((, TInt)) refVars ++ newSymVars)
+              pathCondI
+              (Not (res :=: VInt 0))
       return $ replaceAllRefs [Forall vs (conjunction assms :=>: conseq)]
 
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = M.Map Addr Addr
 
-maybeInsert :: (Show k, Show v, Ord k, Eq k, Eq v) => k -> v -> M.Map k v -> Maybe (M.Map k v)
+maybeInsert ::
+     (Show k, Show v, Ord k, Eq k, Eq v)
+  => k
+  -> v
+  -> M.Map k v
+  -> Maybe (M.Map k v)
 maybeInsert k v m
-  | Just v' <- M.lookup k m = if v == v' then Just m
-                              else Nothing
+  | Just v' <- M.lookup k m =
+    if v == v'
+      then Just m
+      else Nothing
   | otherwise =
     case M.keys $ M.filterWithKey (\k' v' -> v' == v) m of
-      ks' | not (all (== k) ks') -> Nothing
+      ks'
+        | not (all (== k) ks') -> Nothing
       _ -> Just (M.insert k v m)
-tryInsert :: (Show k, Show v, Ord k, Eq k, Eq v) => k -> v -> M.Map k v -> M.Map k v
-tryInsert k v m = case maybeInsert k v m of
-  Just m' -> m'
-  Nothing -> error $ "Key " ++ show k ++ " already remapped in " ++ show m
+
+tryInsert ::
+     (Show k, Show v, Ord k, Eq k, Eq v) => k -> v -> M.Map k v -> M.Map k v
+tryInsert k v m =
+  case maybeInsert k v m of
+    Just m' -> m'
+    Nothing -> error $ "Key " ++ show k ++ " already remapped in " ++ show m
 
 -- | Try to find a mapping for addresses that may make the two values equal.
 unifyAddrs :: Value -> Value -> AddrBijection -> AddrBijection
 unifyAddrs (VInt i1) (VInt i2) bij = bij
 unifyAddrs (VMap vs1) (VMap vs2) bij =
-  foldr (\(v1, v2) bij' -> unifyAddrs v1 v2 bij') bij
-          (M.elems $ M.merge M.dropMissing M.dropMissing
-                             (M.zipWithMatched (\k v1 v2 -> (v1, v2))) vs1 vs2)
+  foldr
+    (\(v1, v2) bij' -> unifyAddrs v1 v2 bij')
+    bij
+    (M.elems $
+     M.merge
+       M.dropMissing
+       M.dropMissing
+       (M.zipWithMatched (\k v1 v2 -> (v1, v2)))
+       vs1
+       vs2)
 unifyAddrs (VTuple vs1) (VTuple vs2) bij =
   foldr (\(v1, v2) bij' -> unifyAddrs v1 v2 bij') bij (zip vs1 vs2)
 unifyAddrs (VRef a1) (VRef a2) bij
@@ -344,19 +436,31 @@ unifyAddrsExact (VInt i1) (VInt i2) bij
   | otherwise = Nothing
 unifyAddrsExact (VMap vs1) (VMap vs2) bij
   | S.fromList (M.keys vs1) == S.fromList (M.keys vs2) =
-    foldM (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij') bij
-          (M.elems $ M.merge M.dropMissing M.dropMissing
-                             (M.zipWithMatched (\k v1 v2 -> (v1, v2))) vs1 vs2)
+    foldM
+      (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij')
+      bij
+      (M.elems $
+       M.merge
+         M.dropMissing
+         M.dropMissing
+         (M.zipWithMatched (\k v1 v2 -> (v1, v2)))
+         vs1
+         vs2)
 unifyAddrsExact (VTuple vs1) (VTuple vs2) bij
-  | length vs1 == length vs2 = foldM (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij') bij (zip vs1 vs2)
+  | length vs1 == length vs2 =
+    foldM (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij') bij (zip vs1 vs2)
   | otherwise = Nothing
 unifyAddrsExact VNil VNil bij = Just bij
 unifyAddrsExact (Sym sL) (Sym sR) bij = unifyAddrsExactSym sL sR bij
 unifyAddrsExact _ _ _ = Nothing
 
-unifyAddrsExactSym :: SymValue -> SymValue -> AddrBijection -> Maybe AddrBijection
+unifyAddrsExactSym ::
+     SymValue -> SymValue -> AddrBijection -> Maybe AddrBijection
 unifyAddrsExactSym (Ref aL) (Ref aR) bij
-  | aR >= 0 = if aL == aR then Just bij else Nothing
+  | aR >= 0 =
+    if aL == aR
+      then Just bij
+      else Nothing
   | otherwise = maybeInsert aR aL bij
 unifyAddrsExactSym (Lookup kL mL) (Lookup kR mR) bij =
   unifyAddrsExact kL kR bij >>= unifyAddrsExact mL mR
@@ -367,17 +471,25 @@ unifyAddrsExactSym (Proj tupL idxL) (Proj tupR idxR) bij =
 unifyAddrsExactSym (AdversaryCall valssL) (AdversaryCall valssR) bij
   | length valssL == length valssR
   , and (zipWith ((==) `on` length) valssL valssR) =
-    foldM (\bij' (valsL, valsR) -> foldM (\bij'' (valL, valR) -> unifyAddrsExact valL valR bij'') bij' (zip valsL valsR))
-          bij (zip valssL valssR)
+    foldM
+      (\bij' (valsL, valsR) ->
+         foldM
+           (\bij'' (valL, valR) -> unifyAddrsExact valL valR bij'')
+           bij'
+           (zip valsL valsR))
+      bij
+      (zip valssL valssR)
   | otherwise = Nothing
 unifyAddrsExactSym (ITE condL thnL elsL) (ITE condR thnR elsR) bij =
-  unifyAddrsExactProp condL condR bij >>=
-  unifyAddrsExact thnL thnR >>=
+  unifyAddrsExactProp condL condR bij >>= unifyAddrsExact thnL thnR >>=
   unifyAddrsExact elsL elsR
 unifyAddrsExactSym (Z vL) (Z vR) bij = unifyAddrsExact vL vR bij
 unifyAddrsExactSym (Call funL argsL) (Call funR argsR) bij
   | funL == funR && length argsL == length argsR =
-      foldM (\bij' (argL, argR) -> unifyAddrsExact argL argR bij') bij (zip argsL argsR)
+    foldM
+      (\bij' (argL, argR) -> unifyAddrsExact argL argR bij')
+      bij
+      (zip argsL argsR)
 unifyAddrsExactSym sL sR bij
   | sL == sR = Just bij
   | otherwise = Nothing
@@ -398,10 +510,11 @@ unifyAddrsExactProp pL pR bij
 
 allAddrs :: Data p => p -> [Addr]
 allAddrs = nub . map fromRef . listify isAddr
-  where isAddr (Ref a) = True
-        isAddr _ = False
-        fromRef (Ref a) = a
-        fromRef x = error "fromRef called with non-Ref argument"
+  where
+    isAddr (Ref a) = True
+    isAddr _ = False
+    fromRef (Ref a) = a
+    fromRef x = error "fromRef called with non-Ref argument"
 
 -- | Try to find a bijection between addresses to be applied to the right-hand
 -- side to make both sides possible to be proven equal. This is a best-effort
@@ -412,39 +525,47 @@ findAddressBijection inMap (v, ctx, pathCond) (v', ctx', pathCond') =
   let baseMap = unifyAddrs v v' inMap
       remainingLHSRefs = allAddrs (v, pathCond) \\ M.elems baseMap
       remainingRHSRefs = allAddrs (v', pathCond') \\ M.keys baseMap
-  in extendMap baseMap remainingRHSRefs remainingLHSRefs
-  where extendMap base [] addrPool = base
-        extendMap base (a : as) (p : ps)
-          | a >= 0 = tryInsert a a (extendMap base as (p:ps))
-        extendMap base (a : as) (p : ps) = tryInsert a p (extendMap base as ps)
-        extendMap base (a : as) [] = let base' = (extendMap base as [])
-                                     in tryInsert a (nextFreeAddr base') base'
-        nextFreeAddr m
-          | null (M.elems m) = 100
-          | otherwise = maximum (M.elems m) + 1
+   in extendMap baseMap remainingRHSRefs remainingLHSRefs
+  where
+    extendMap base [] addrPool = base
+    extendMap base (a:as) (p:ps)
+      | a >= 0 = tryInsert a a (extendMap base as (p : ps))
+    extendMap base (a:as) (p:ps) = tryInsert a p (extendMap base as ps)
+    extendMap base (a:as) [] =
+      let base' = (extendMap base as [])
+       in tryInsert a (nextFreeAddr base') base'
+    nextFreeAddr m
+      | null (M.elems m) = 100
+      | otherwise = maximum (M.elems m) + 1
 
 -- | Remap all addresses in a piece of data with given bijection.
 applyAddressBijection :: Data p => AddrBijection -> p -> p
 applyAddressBijection addrMap = everywhere (mkT replaceAddress)
-  where replaceAddress :: SymValue -> SymValue
-        replaceAddress (Ref addr)
-          | addr >= 0 = Ref addr -- new RHS addresses are always negative
-          | Just newAddr <- M.lookup addr addrMap = Ref newAddr
-          | otherwise = Ref addr -- error $ "No mapping for address: " ++ show addr ++ " in " ++ show addrMap
-        replaceAddress v = v
+  where
+    replaceAddress :: SymValue -> SymValue
+    replaceAddress (Ref addr)
+      | addr >= 0 = Ref addr -- new RHS addresses are always negative
+      | Just newAddr <- M.lookup addr addrMap = Ref newAddr
+      | otherwise = Ref addr -- error $ "No mapping for address: " ++ show addr ++ " in " ++ show addrMap
+    replaceAddress v = v
 
 findContradictingBijection :: PathCond -> PathCond -> Maybe AddrBijection
 findContradictingBijection [] pcR = Nothing
-findContradictingBijection (Not propL : pcL') pcR =
+findContradictingBijection (Not propL:pcL') pcR
   -- FIXME: duplication
+ =
   case pcR of
     [] -> Nothing
-    propR : pcR' -> unifyAddrsExactProp propL propR M.empty <|> findContradictingBijection (Not propL : pcL') pcR'
-findContradictingBijection (propL : pcL') pcR =
+    propR:pcR' ->
+      unifyAddrsExactProp propL propR M.empty <|>
+      findContradictingBijection (Not propL : pcL') pcR'
+findContradictingBijection (propL:pcL') pcR =
   case pcR of
     [] -> Nothing
-    Not propR : pcR' -> unifyAddrsExactProp propL propR M.empty <|> findContradictingBijection (propL : pcL') pcR'
-    propR : pcR' -> findContradictingBijection (propL : pcL') pcR'
+    Not propR:pcR' ->
+      unifyAddrsExactProp propL propR M.empty <|>
+      findContradictingBijection (propL : pcL') pcR'
+    propR:pcR' -> findContradictingBijection (propL : pcL') pcR'
 
 fallback :: Maybe a -> a -> a
 fallback (Just x) y = x
@@ -454,53 +575,72 @@ fallback Nothing y = y
 -- configurations returned by evaluating a method call with symbolic arguments
 -- in a havoced context). Also takes the old havoced environments as arguments
 -- to turn invariants into assumptions.
-resultsToVCs :: [ProofHint] -> Result -> Results -> Result -> Results -> Verify [VC]
+resultsToVCs ::
+     [ProofHint] -> Result -> Results -> Result -> Results -> Verify [VC]
 resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctxH', pathCondH') ress1' = do
-  invAssms <- (++) <$> universalInvariantAssms addr1 ctxH pathCondH
-                   <*> universalInvariantAssms addr1' ctxH' pathCondH'
-  assms <- (invAssms++) . concat <$> mapM (invToAsm old old') invs
+  invAssms <-
+    (++) <$> universalInvariantAssms addr1 ctxH pathCondH <*>
+    universalInvariantAssms addr1' ctxH' pathCondH'
+  assms <- (invAssms ++) . concat <$> mapM (invToAsm old old') invs
   -- Invariant methods aren't relational and hence we don't need to check them for each pair of
   -- of paths:
   lhsInvVCs <- foreachM (return ress1) $ invToVCnonRelational assms addr1
   rhsInvVCs <- foreachM (return ress1') $ invToVCnonRelational assms addr1'
   relationalVCs <-
     foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
-      foreachM (return ress1') $ \res1'@(v1', ctx1', pc1') -> do
+      foreachM (return ress1') $ \res1'@(v1', ctx1', pc1')
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
         -- if we are able to find a trivial bijection resulting in a
         -- a trivial contradiction in the path conditions, then we are done:
+       -> do
         let negRefs = filter (< 0) $ allAddrs (v1', pc1')
-        let baseMap = case catMaybes $ map (\hint -> case hint of
-                                               UseAddressBijection m -> Just m
-                                               _ -> Nothing) invs of
-                        [m] -> trace ("Using user-supplied address map: " ++ show m) $ m
-                        [] -> M.empty
-                        _ -> error "More than one address bijection hint"
-        let addrMap = findContradictingBijection pc1 pc1' `fallback`
-                      findAddressBijection baseMap res1 res1'
+        let baseMap =
+              case catMaybes $
+                   map
+                     (\hint ->
+                        case hint of
+                          UseAddressBijection m -> Just m
+                          _ -> Nothing)
+                     invs of
+                [m] -> trace ("Using user-supplied address map: " ++ show m) $ m
+                [] -> M.empty
+                _ -> error "More than one address bijection hint"
+        let addrMap =
+              findContradictingBijection pc1 pc1' `fallback`
+              findAddressBijection baseMap res1 res1'
             applyBij :: Data p => p -> p
-            applyBij = if NoAddressBijection `inPartial` invs
-                       then id
-                       else applyAddressBijection addrMap
+            applyBij =
+              if NoAddressBijection `inPartial` invs
+                then id
+                else applyAddressBijection addrMap
         -- Note that it's fine to only use the address bijection for relational proof
         -- obligations, since non-relational VCs should can not depend on concrete addresses
         -- that the allocator chose.
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Using address bijection: " ++ show addrMap)
-        let vcRes = VC { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
-                       , _conditionName = "resultsEq"
-                       , _goal = id (v1 :=: applyBij v1') }
+        let vcRes =
+              VC
+                { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
+                , _conditionName = "resultsEq"
+                , _goal = id (v1 :=: applyBij v1')
+                }
         invVCs <-
           if ctx1 == ctxH && ctx1' == ctxH'
-          then return []
-          else concat <$> mapM (fmap applyBij .
-                                invToVC assms addr1 res1 addr1' res1') invs
+            then return []
+            else concat <$>
+                 mapM
+                   (fmap applyBij . invToVC assms addr1 res1 addr1' res1')
+                   invs
         -- Require that adversary was called with same values:
-        let vcAdv = VC { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
-                       , _conditionName = "advCallsEq"
-                       , _goal = Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
-                                 applyBij (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls))) }
+        let vcAdv =
+              VC
+                { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
+                , _conditionName = "advCallsEq"
+                , _goal =
+                    Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
+                    applyBij (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls)))
+                }
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
 resultsToVCs invs (v1, _, _) _ (v1', _, _) _ =
@@ -510,30 +650,43 @@ inPartial :: PartialEq a => a -> [a] -> Bool
 inPartial x ys = any ((== Just True) . (=== x)) ys
 
 -- | Collect non-trivial verification conditions for a given method, invariants and arguments
-methodEquivalenceVCs :: Method -> [ProofHint] -> [Value] -> Result -> Result -> Verify [VC]
-methodEquivalenceVCs mtd invs args
-                     (VRef a1, ctx1, pathCond1)
-                     (VRef a1', ctx1', pathCond1') = do
+methodEquivalenceVCs ::
+     Method -> [ProofHint] -> [Value] -> Result -> Result -> Verify [VC]
+methodEquivalenceVCs mtd invs args (VRef a1, ctx1, pathCond1) (VRef a1', ctx1', pathCond1') = do
   ctxH1 <- havocContext ctx1
   ctxH1' <- havocContext ctx1'
-  results <- symEval (ECall (EConst (VRef a1)) (mtd ^. methodName) (map EConst  args), ctxH1, pathCond1)
-  results' <- symEval ( ECall (EConst (VRef a1')) (mtd ^. methodName) (map EConst  args)
-                      , if NoAddressBijection `inPartial` invs
-                        then ctxH1'
-                        else set ctxAllocStrategy Decrease ctxH1'
-                      , pathCond1')
-  vcs <- resultsToVCs invs (VRef a1, ctxH1, pathCond1) results (VRef a1', ctxH1', pathCond1') results'
+  results <-
+    symEval
+      ( ECall (EConst (VRef a1)) (mtd ^. methodName) (map EConst args)
+      , ctxH1
+      , pathCond1)
+  results' <-
+    symEval
+      ( ECall (EConst (VRef a1')) (mtd ^. methodName) (map EConst args)
+      , if NoAddressBijection `inPartial` invs
+          then ctxH1'
+          else set ctxAllocStrategy Decrease ctxH1'
+      , pathCond1')
+  vcs <-
+    resultsToVCs
+      invs
+      (VRef a1, ctxH1, pathCond1)
+      results
+      (VRef a1', ctxH1', pathCond1')
+      results'
   -- debug $ "VCs before pruning: " ++ show (length vcs)
-  filterM (\vc -> do
-                   trivial <- triviallyTrue vc
-                   if trivial
-                     then do
+  filterM
+    (\vc -> do
+       trivial <- triviallyTrue vc
+       if trivial
                      -- debug $ "Discarding VC as trivial: " ++ show vc
-                     return False
-                     else return True) vcs
+         then do
+           return False
+         else return True)
+    vcs
 methodEquivalenceVCs mtd invs args (v1, _, _) (v1', _, _) =
-  error $ "methodEquivalenceVCs called with non-reference values: " ++ show (v1, v1')
-
+  error $ "methodEquivalenceVCs called with non-reference values: " ++
+  show (v1, v1')
 
 -- | Helper function for writing equality invariants. Produces an exception
 -- if the chain of fields doesn't exist in the given context.
@@ -542,22 +695,25 @@ getField [] _ _ = error "Empty list of fields"
 getField [x] addr ctx
   | Just v <- ctx ^? ctxObjs . ix addr . objLocals . ix x . localValue = v
   | otherwise = error $ "getField: No such field: " ++ x
-getField (x : xs) addr ctx
-  | Just (VRef addr') <- ctx ^? ctxObjs . ix addr . objLocals . ix x . localValue =
-      getField xs addr' ctx
+getField (x:xs) addr ctx
+  | Just (VRef addr') <-
+     ctx ^? ctxObjs . ix addr . objLocals . ix x . localValue =
+    getField xs addr' ctx
   | otherwise = error $ "Non-reference in field lookup"
 
 -- | Find the shared methods between two objects in their respective contexts
 sharedMethods :: Addr -> Context -> Addr -> Context -> [Method]
 sharedMethods addrL ctxL addrR ctxR
-  | Just objL <- ctxL ^? ctxObjs . ix addrL,
-    Just objR <- ctxR ^? ctxObjs . ix addrR =
-  let mtdsL = objL ^. objMethods
-      mtdsR = objR ^. objMethods
-      sharedNames = M.keys mtdsL `intersect` M.keys mtdsR
+  | Just objL <- ctxL ^? ctxObjs . ix addrL
+  , Just objR <- ctxR ^? ctxObjs . ix addrR =
+    let mtdsL = objL ^. objMethods
+        mtdsR = objR ^. objMethods
+        sharedNames = M.keys mtdsL `intersect` M.keys mtdsR
   -- TODO: check that there are no extraneous methods and that they
   -- take the same number (and type) of arguments
-  in filter ((==NormalMethod) . (^. methodKind)) . map (fromJust . (`M.lookup` mtdsL)) $ sharedNames
+     in filter ((== NormalMethod) . (^. methodKind)) .
+        map (fromJust . (`M.lookup` mtdsL)) $
+        sharedNames
   | otherwise = error "Invalid addresses passed to sharedMethods"
 
 -- TODO: merge with previous implementation
@@ -567,7 +723,7 @@ freshEmitterVar prefix' typ = do
   last <- use (nextEmitterVar . at prefix)
   case last of
     Just n -> do
-      nextEmitterVar . ix prefix %= (+1)
+      nextEmitterVar . ix prefix %= (+ 1)
       let varName = prefix ++ show n
       usedVars %= ((varName, typ) :)
       return varName
@@ -576,11 +732,10 @@ freshEmitterVar prefix' typ = do
       freshEmitterVar prefix typ
 
 emit :: SolverCmd -> Emitter ()
-emit = tell . (:[])
+emit = tell . (: [])
 
 emitRaw :: String -> Emitter ()
 emitRaw = emit . Raw
-
 
 -- | Translate a variable name. Caches the result for each variable
 -- name so when called with the same variable name again, it will return the same result
@@ -601,15 +756,17 @@ translateVar v typ = do
 -- Only forall statements are considered as variable binders.
 collectSymVars :: Data p => p -> [(Var, Type)]
 collectSymVars vc =
-  nubBy ((==) `on` fst) . map toTup $ everythingWithContext [] (++) (mkQ ((,) []) collect `extQ` propBind) vc
-  where collect (SymVar x t) bound
-          | x `notElem` bound = ([SymVar x t], bound)
-          | otherwise = ([], bound)
-        collect _ bound = ([], bound)
-        propBind (Forall formals x) bound = ([], bound ++ map fst formals)
-        propBind _ bound = ([], bound)
-        toTup (SymVar x t) = (x, t)
-        toTup _ = undefined
+  nubBy ((==) `on` fst) . map toTup $
+  everythingWithContext [] (++) (mkQ ((,) []) collect `extQ` propBind) vc
+  where
+    collect (SymVar x t) bound
+      | x `notElem` bound = ([SymVar x t], bound)
+      | otherwise = ([], bound)
+    collect _ bound = ([], bound)
+    propBind (Forall formals x) bound = ([], bound ++ map fst formals)
+    propBind _ bound = ([], bound)
+    toTup (SymVar x t) = (x, t)
+    toTup _ = undefined
 
 symVarName :: SymValue -> Var
 symVarName (SymVar n t) = n
@@ -621,7 +778,7 @@ class ToDafny a where
 
 listToDafny :: ToDafny a => [a] -> Emitter String
 listToDafny [] = return "LNil()"
-listToDafny (v : vs) = do
+listToDafny (v:vs) = do
   car <- toDafny v
   cdr <- listToDafny vs
   return $ "Cons(" ++ car ++ ", " ++ cdr ++ ")"
@@ -648,32 +805,25 @@ dafnyFunCall f args = f ++ "(" ++ intercalate ", " args ++ ")"
 
 symValToDafny :: SymValue -> Emitter String
 symValToDafny (SymVar s t) = translateVar s "Value"
-symValToDafny (Insert k v m) =
-  dafnyFunCall "Insert" <$> mapM toDafny [k, v, m]
-symValToDafny (Lookup k m) =
-  dafnyFunCall "Lookup" <$> mapM toDafny [k, m]
-symValToDafny (Proj tup idx) =
-  dafnyFunCall "Proj" <$> mapM toDafny [tup, idx]
+symValToDafny (Insert k v m) = dafnyFunCall "Insert" <$> mapM toDafny [k, v, m]
+symValToDafny (Lookup k m) = dafnyFunCall "Lookup" <$> mapM toDafny [k, m]
+symValToDafny (Proj tup idx) = dafnyFunCall "Proj" <$> mapM toDafny [tup, idx]
 symValToDafny (AdversaryCall advCalls) =
-  dafnyFunCall "Adversary" . (:[]) <$> toDafny advCalls
-symValToDafny (Add e1 e2) =
-  dafnyFunCall "Add" <$> mapM toDafny [e1, e2]
-symValToDafny (Mul e1 e2) =
-  dafnyFunCall "Mul" <$> mapM toDafny [e1, e2]
-symValToDafny (Sub e1 e2) =
-  dafnyFunCall "Sub" <$> mapM toDafny [e1, e2]
-symValToDafny (Div e1 e2) =
-  dafnyFunCall "Div" <$> mapM toDafny [e1, e2]
-symValToDafny (Lt e1 e2) =
-  dafnyFunCall "Lt" <$> mapM toDafny [e1, e2]
-symValToDafny (Le e1 e2) =
-  dafnyFunCall "Le" <$> mapM toDafny [e1, e2]
+  dafnyFunCall "Adversary" . (: []) <$> toDafny advCalls
+symValToDafny (Add e1 e2) = dafnyFunCall "Add" <$> mapM toDafny [e1, e2]
+symValToDafny (Mul e1 e2) = dafnyFunCall "Mul" <$> mapM toDafny [e1, e2]
+symValToDafny (Sub e1 e2) = dafnyFunCall "Sub" <$> mapM toDafny [e1, e2]
+symValToDafny (Div e1 e2) = dafnyFunCall "Div" <$> mapM toDafny [e1, e2]
+symValToDafny (Lt e1 e2) = dafnyFunCall "Lt" <$> mapM toDafny [e1, e2]
+symValToDafny (Le e1 e2) = dafnyFunCall "Le" <$> mapM toDafny [e1, e2]
 symValToDafny (ITE tst thn els) = do
   tstDafny <- toDafny tst
   [thnDafny, elsDafny] <- mapM toDafny [thn, els]
-  return $ "(if " ++ tstDafny ++ " then " ++ thnDafny ++ " else " ++ elsDafny ++ ")"
+  return $ "(if " ++ tstDafny ++ " then " ++ thnDafny ++ " else " ++ elsDafny ++
+    ")"
 symValToDafny (Ref a) = return $ "VRef(" ++ show a ++ ")"
-symValToDafny (SymRef s) = dafnyFunCall "VRef" <$> sequence [translateVar s "int"]
+symValToDafny (SymRef s) =
+  dafnyFunCall "VRef" <$> sequence [translateVar s "int"]
 symValToDafny (Deref obj field) =
   dafnyFunCall "Deref" <$> sequence [toDafny obj, pure ("\"" ++ field ++ "\"")]
 symValToDafny (Z v) = dafnyFunCall "Z" <$> sequence [toDafny v]
@@ -683,8 +833,10 @@ symValToDafny (SetCompr val name pred) = do
   valD <- valueToDafny val
   nameD <- translateVar name "Value"
   return $ "Set(set " ++ nameD ++ ":Value | " ++ predD ++ " :: " ++ valD ++ ")"
-symValToDafny (Union s1 s2) = dafnyFunCall "Union" <$> sequence [toDafny s1, toDafny s2]
-symValToDafny (In elt set) = dafnyFunCall "In" <$> sequence [toDafny elt, toDafny set]
+symValToDafny (Union s1 s2) =
+  dafnyFunCall "Union" <$> sequence [toDafny s1, toDafny s2]
+symValToDafny (In elt set) =
+  dafnyFunCall "In" <$> sequence [toDafny elt, toDafny set]
 
 valueToDafny :: Value -> Emitter String
 valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
@@ -705,48 +857,51 @@ propToDafny (Not (x :=: y)) = concatM [toDafny x, pure " != ", toDafny y]
 propToDafny (Not p) = concatM [pure "!", pure "(", propToDafny p, pure ")"]
 propToDafny PTrue = return "true"
 propToDafny PFalse = return "false"
-propToDafny (p1 :&: p2) = concatM [ pure "("
-                                  , toDafny p1
-                                  , pure ") && ("
-                                  , toDafny p2
-                                  , pure ")" ]
-propToDafny (p1 :=>: p2) = concatM [ pure "(", toDafny p1
-                                   , pure ") ==> ("
-                                   , toDafny p2
-                                   , pure ")" ]
+propToDafny (p1 :&: p2) =
+  concatM [pure "(", toDafny p1, pure ") && (", toDafny p2, pure ")"]
+propToDafny (p1 :=>: p2) =
+  concatM [pure "(", toDafny p1, pure ") ==> (", toDafny p2, pure ")"]
 propToDafny (Forall [] p) = toDafny p
 propToDafny (Forall formals p) =
-  concatM [ pure "forall "
-          , intercalate ", " . map ((++ ": Value")) <$> mapM (\(x, t) -> translateVar x "Value") formals
-          , pure " :: "
-          , toDafny p ]
+  concatM
+    [ pure "forall "
+    , intercalate ", " . map ((++ ": Value")) <$>
+      mapM (\(x, t) -> translateVar x "Value") formals
+    , pure " :: "
+    , toDafny p
+    ]
 
 asmToDafny :: Prop -> Emitter ()
-asmToDafny p =
-  emitRaw . ("  requires "++) =<< propToDafny p
+asmToDafny p = emitRaw . ("  requires " ++) =<< propToDafny p
 
 vcToDafny :: VC -> Emitter ()
 vcToDafny vc = do
   lemName <- (`freshEmitterVar` "_unused") $ vc ^. conditionName
   lemArgs <- mapM (\(x, t) -> translateVar x "Value") $ collectSymVars vc
-  emitRaw $ "lemma " ++ lemName ++ "(" ++ intercalate ", " (map (++ ": Value") lemArgs) ++ ")"
+  emitRaw $ "lemma " ++ lemName ++ "(" ++
+    intercalate ", " (map (++ ": Value") lemArgs) ++
+    ")"
   mapM_ asmToDafny (vc ^. assumptions)
   dafnyGoal <- propToDafny $ vc ^. goal
   emitRaw $ "  ensures " ++ dafnyGoal
   emitRaw $ "{ LookupSame(); LookupDifferent(); }"
 
 initialEmitterState prefixCtx =
-  EmitterState { _nextEmitterVar = M.empty
-               , _usedVars = []
-               , _varTranslations = M.empty
-               , _emitterPrefixCtx = prefixCtx }
+  EmitterState
+    { _nextEmitterVar = M.empty
+    , _usedVars = []
+    , _varTranslations = M.empty
+    , _emitterPrefixCtx = prefixCtx
+    }
 
 runEmitter :: MonadIO m => Context -> Emitter a -> m (a, [SolverCmd])
-runEmitter prefix action = liftIO $ evalRWST (unEmitter action) () (initialEmitterState prefix)
+runEmitter prefix action =
+  liftIO $ evalRWST (unEmitter action) () (initialEmitterState prefix)
 
 solverCmdToDafny :: SolverCmd -> String
 solverCmdToDafny (Raw s) = s
-solverCmdToDafny cmd = error "not implemented yet: solverCmdToDafny: " ++ show cmd
+solverCmdToDafny cmd =
+  error "not implemented yet: solverCmdToDafny: " ++ show cmd
 
 -- | Try to verify a list of verification conditions with dafny
 checkWithDafny :: (MonadState VerifyState m, MonadIO m) => [VC] -> m Bool
@@ -754,16 +909,24 @@ checkWithDafny [] = return True
 checkWithDafny vcs = do
   debug $ "Checking " ++ show (length vcs) ++ " VCs with Dafny"
   pctx <- use verifyPrefixCtx
-  (_, cmds) <- runEmitter pctx $ do
-    emitRaw dafnyPrelude
+  (_, cmds) <-
+    runEmitter pctx $ do
+      emitRaw dafnyPrelude
      -- Emit function declarations as uninterpreted functions:
-    forM (pctx ^. ctxFunDecls) $ \decl ->
-      emitRaw $ "function " ++ decl ^. funDeclName ++ "(" ++ intercalate ", " (map (++ ": Value") (decl ^. funDeclArgs)) ++ "): Value\n"
-    mapM_ vcToDafny vcs
-  tempFile <- liftIO $ writeTempFile "." "dafny-vc.dfy" (unlines . map solverCmdToDafny $ cmds)
+      forM (pctx ^. ctxFunDecls) $ \decl ->
+        emitRaw $ "function " ++ decl ^. funDeclName ++ "(" ++
+        intercalate ", " (map (++ ": Value") (decl ^. funDeclArgs)) ++
+        "): Value\n"
+      mapM_ vcToDafny vcs
+  tempFile <-
+    liftIO $
+    writeTempFile "." "dafny-vc.dfy" (unlines . map solverCmdToDafny $ cmds)
   debug $ "Dafny code written to " ++ tempFile
-  (code, out, err) <- liftIO $ readCreateProcessWithExitCode (proc "time"
-    ["dafny", "/compile:0", tempFile]) ""
+  (code, out, err) <-
+    liftIO $
+    readCreateProcessWithExitCode
+      (proc "time" ["dafny", "/compile:0", tempFile])
+      ""
   if code == ExitSuccess
     then do
       debug "Verification succeeded"
@@ -794,19 +957,25 @@ propToZ3 :: Prop -> Emitter String
 propToZ3 PTrue = return "true"
 propToZ3 PFalse = return "false"
 propToZ3 (Not p) = z3CallM "not" [p]
-propToZ3 (x :=: y) = z3CallM "="  [x, y]
+propToZ3 (x :=: y) = z3CallM "=" [x, y]
 propToZ3 (x :=>: y) = z3CallM "=>" [x, y]
 propToZ3 (x :&: y) = z3CallM "and" [x, y]
 propToZ3 (Forall [] p) = toZ3 p
 propToZ3 (Forall formals p) = do
-  argNames <- mapM (\(x, t) -> (,) <$> (translateVar x =<< typeToZ3 t) <*> pure t) formals
-  concatM [ pure "(forall ("
-          , intercalate " " <$> mapM (\(n, t) -> do
-                                         typ <- typeToZ3 t
-                                         return $ "(" ++ n ++ " " ++ typ ++ ")") argNames
-          , pure ") "
-          , toZ3 p
-          , pure ")" ]
+  argNames <-
+    mapM (\(x, t) -> (,) <$> (translateVar x =<< typeToZ3 t) <*> pure t) formals
+  concatM
+    [ pure "(forall ("
+    , intercalate " " <$>
+      mapM
+        (\(n, t) -> do
+           typ <- typeToZ3 t
+           return $ "(" ++ n ++ " " ++ typ ++ ")")
+        argNames
+    , pure ") "
+    , toZ3 p
+    , pure ")"
+    ]
 
 instance ToZ3 Prop where
   toZ3 = propToZ3
@@ -815,26 +984,36 @@ instance ToZ3 Prop where
 -- so we have separate types in Z3 for values, lists of values, and lists of lists of values:
 valuesToZ3 :: [Value] -> Emitter String
 valuesToZ3 [] = return "nil"
-valuesToZ3 (v : vs) = z3Call "cons" <$> sequence [toZ3 v, valuesToZ3 vs]
+valuesToZ3 (v:vs) = z3Call "cons" <$> sequence [toZ3 v, valuesToZ3 vs]
 
 valuessToZ3 :: [[Value]] -> Emitter String
 valuessToZ3 [] = return "nils"
-valuessToZ3 (vs : vss) = z3Call "conss" <$> sequence [valuesToZ3 vs, valuessToZ3 vss]
+valuessToZ3 (vs:vss) =
+  z3Call "conss" <$> sequence [valuesToZ3 vs, valuessToZ3 vss]
 
 valueToZ3 :: Value -> Emitter String
 valueToZ3 (VInt i) = return $ z3Call "VInt" [show i]
 valueToZ3 (VTuple vs) = z3Call "VTuple" <$> sequence [valuesToZ3 vs]
 -- valueToZ3 (VMap map) = freshEmitterVar "map" "Value" -- TODO: map same maps to same variable
 valueToZ3 (VMap mp) = do
-  elts <- foldM (\m (k, v) -> z3Call "store" <$> sequence [pure m, toZ3 k, toZ3 v])
-                "empty-map" (M.toList mp)
+  elts <-
+    foldM
+      (\m (k, v) -> z3Call "store" <$> sequence [pure m, toZ3 k, toZ3 v])
+      "empty-map"
+      (M.toList mp)
   return $ z3Call "VMap" [elts]
 valueToZ3 VNil = return "VNil"
 valueToZ3 (Sym (Ref addr)) =
   return $ z3Call "vref" [show addr] -- vref is an uninterpreted function instead of a constructor
 valueToZ3 (Sym sv) = symValueToZ3 sv
-valueToZ3 (VSet vs) = z3Call "VSet" <$> sequence
-  [foldM (\set v -> z3Call "store" <$> sequence [pure set, toZ3 v, pure "true"]) "empty-set" (S.toList vs)]
+valueToZ3 (VSet vs) =
+  z3Call "VSet" <$>
+  sequence
+    [ foldM
+        (\set v -> z3Call "store" <$> sequence [pure set, toZ3 v, pure "true"])
+        "empty-set"
+        (S.toList vs)
+    ]
 
 symValueToZ3 :: SymValue -> Emitter String
 symValueToZ3 (SymVar x t) =
@@ -843,7 +1022,8 @@ symValueToZ3 (SymVar x t) =
     _ -> translateVar x "Value"
 symValueToZ3 (Insert k v m) = z3CallM "insert" [k, v, m]
 symValueToZ3 (Lookup k m) = z3CallM "lookup" [k, m]
-symValueToZ3 (AdversaryCall vss) = z3Call "adversary" <$> sequence [valuessToZ3 vss]
+symValueToZ3 (AdversaryCall vss) =
+  z3Call "adversary" <$> sequence [valuessToZ3 vss]
 symValueToZ3 (Proj tup idx) = z3CallM "proj" [tup, idx]
 symValueToZ3 (Add v1 v2) = z3CallM "add" [v1, v2]
 symValueToZ3 (Sub v1 v2) = z3CallM "sub" [v1, v2]
@@ -851,23 +1031,29 @@ symValueToZ3 (Mul v1 v2) = z3CallM "mul" [v1, v2]
 symValueToZ3 (Div v1 v2) = z3CallM "divi" [v1, v2]
 symValueToZ3 (Le v1 v2) = z3CallM "le" [v1, v2]
 symValueToZ3 (Lt v1 v2) = z3CallM "lt" [v1, v2]
-symValueToZ3 (ITE tst thn els) = z3Call "ite" <$> sequence [toZ3 tst, toZ3 thn, toZ3 els]
-symValueToZ3 (SymRef name) = z3Call "vref" <$> sequence [translateVar name "Int"]
-symValueToZ3 (Deref obj name) = z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
+symValueToZ3 (ITE tst thn els) =
+  z3Call "ite" <$> sequence [toZ3 tst, toZ3 thn, toZ3 els]
+symValueToZ3 (SymRef name) =
+  z3Call "vref" <$> sequence [translateVar name "Int"]
+symValueToZ3 (Deref obj name) =
+  z3Call "deref" <$> sequence [toZ3 obj, pure ("\"" ++ name ++ "\"")]
 symValueToZ3 (Ref a) = z3Call "vref" <$> sequence [toZ3 a]
 symValueToZ3 (Z v) = z3CallM "Z" [v]
 symValueToZ3 (Call fun args) = z3CallM fun args
-symValueToZ3 (SetCompr (Sym (SymVar xV TAny)) x pred) = do
+symValueToZ3 (SetCompr (Sym (SymVar xV TAny)) x pred)
     -- TODO: emit assumptions and newly introduced variables differently so we can handle
     -- them cleanly when occurring in a negative position
-    setVar <- freshEmitterVar ("setcompr_" ++ x) "(Array Value Bool)"
+ = do
+  setVar <- freshEmitterVar ("setcompr_" ++ x) "(Array Value Bool)"
     -- emit $ "(declare-const " ++ setVar ++ " (Array Value Bool))"
-    xCode <- translateVar xV "Value"
-    predCode <- toZ3 pred
-    emitRaw . unlines $ [ "(assert (forall ((" ++ xCode ++ " Value))"
-                     , "  (= (select " ++ setVar ++ " " ++ xCode ++ ")"
-                     , "      " ++ predCode ++ ")))" ]
-    return $ z3Call "VSet" [setVar]
+  xCode <- translateVar xV "Value"
+  predCode <- toZ3 pred
+  emitRaw . unlines $
+    [ "(assert (forall ((" ++ xCode ++ " Value))"
+    , "  (= (select " ++ setVar ++ " " ++ xCode ++ ")"
+    , "      " ++ predCode ++ ")))"
+    ]
+  return $ z3Call "VSet" [setVar]
 symValueToZ3 (SetCompr _ _ _) = freshEmitterVar "setCompr" "Value"
   -- set comprehensions with map not supported in z3 backend
 symValueToZ3 (MapCompr x val pred) = do
@@ -875,24 +1061,28 @@ symValueToZ3 (MapCompr x val pred) = do
   emitRaw $ "(declare-const " ++ mapVar ++ " (Array Value Value))"
   xT <- translateVar x "Value"
   predT <- toZ3 pred
-  valT <-toZ3 val
+  valT <- toZ3 val
   -- if the predicate is satisfied, we map x to f(x)
-  emitRaw . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
-                     , "  (=> " ++ predT
-                     , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
-                     , "         " ++ valT ++ "))))" ]
+  emitRaw . unlines $
+    [ "(assert (forall ((" ++ xT ++ " Value))"
+    , "  (=> " ++ predT
+    , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
+    , "         " ++ valT ++ "))))"
+    ]
   -- otherwise, x is not in the map:
-  emitRaw . unlines $ [ "(assert (forall ((" ++ xT ++ " Value))"
-                      , "  (=> (not " ++ predT ++ ")"
-                      , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
-                      , "         (VInt 0)))))" ]
+  emitRaw . unlines $
+    [ "(assert (forall ((" ++ xT ++ " Value))"
+    , "  (=> (not " ++ predT ++ ")"
+    , "      (= (select " ++ mapVar ++ " " ++ xT ++ ")"
+    , "         (VInt 0)))))"
+    ]
   return $ z3Call "VMap" [mapVar]
 symValueToZ3 (Union s1 s2) = z3CallM "vunion" [s1, s2]
 symValueToZ3 (MapUnion m1 m2) = z3CallM "munion" [m1, m2]
 symValueToZ3 (In elt set) = z3CallM "vmember" [elt, set]
 symValueToZ3 (Submap v1 v2) = z3CallM "is-submap" [v1, v2]
--- symValueToZ3 x = error $ "symValueToZ3: unhandled value: " ++ show x
 
+-- symValueToZ3 x = error $ "symValueToZ3: unhandled value: " ++ show x
 instance ToZ3 Integer where
   toZ3 = return . show
 
@@ -902,21 +1092,43 @@ intercept :: MonadWriter w m => m a -> m (a, w)
 intercept action = censor (const mempty) (listen action)
 
 vcToZ3 :: VC -> Emitter ()
-vcToZ3 vc = do
+vcToZ3 vc
   -- Emit declarations for uninterpreted functions:
+ = do
   decls <- use (emitterPrefixCtx . ctxFunDecls)
   forM decls $ \decl -> do
-    emitRaw (z3Call "declare-fun" [ decl ^. funDeclName
-                                  , "(" ++
-                                    intercalate " " (replicate (length (decl ^. funDeclArgs)) "Value") ++
-                                    ")"
-                                  , "Value" ])
+    emitRaw
+      (z3Call
+         "declare-fun"
+         [ decl ^. funDeclName
+         , "(" ++
+           intercalate " " (replicate (length (decl ^. funDeclArgs)) "Value") ++
+           ")"
+         , "Value"
+         ])
     -- FIXME: For debugging the envelope encryption proof, we emit an assumption that skenc never fails to encrypt
     -- to do this properly, we'd allow specifying such assumptions in the surface syntax
     when (decl ^. funDeclName == "skenc") $
-      emitRaw (z3Call "assert" [ z3Call "forall" [ "(" ++ intercalate " " (map (\arg -> "(" ++ arg ++ " Value)") (decl ^. funDeclArgs)) ++ ")"
-                                                 , z3Call "not" [z3Call "=" [ z3Call (decl ^. funDeclName) (decl ^. funDeclArgs)
-                                                                            , "(VInt 0)" ] ] ] ])
+      emitRaw
+        (z3Call
+           "assert"
+           [ z3Call
+               "forall"
+               [ "(" ++
+                 intercalate
+                   " "
+                   (map (\arg -> "(" ++ arg ++ " Value)") (decl ^. funDeclArgs)) ++
+                 ")"
+               , z3Call
+                   "not"
+                   [ z3Call
+                       "="
+                       [ z3Call (decl ^. funDeclName) (decl ^. funDeclArgs)
+                       , "(VInt 0)"
+                       ]
+                   ]
+               ]
+           ])
   emitRaw $ ";; " ++ (vc ^. conditionName)
   -- FIXME: this is a hacky way to make sure we output the variable
   -- declarations before the places where we need them.
@@ -924,8 +1136,7 @@ vcToZ3 vc = do
   (translatedAssms, assmOutput) <- intercept $ mapM toZ3 (vc ^. assumptions)
   (goalProp, goalOutput) <- intercept $ toZ3 (vc ^. goal)
   vars <- use usedVars
-  forM vars $ \(var, typ) ->
-    emitRaw $ z3Call "declare-const" [var, typ]
+  forM vars $ \(var, typ) -> emitRaw $ z3Call "declare-const" [var, typ]
   mapM_ emit (assmOutput ++ goalOutput)
   mapM_ (\asm -> emitRaw (z3Call "assert" [asm])) translatedAssms
   emitRaw $ z3Call "assert" [z3Call "not" [goalProp]]
@@ -949,7 +1160,8 @@ checkWithZ3 vc = do
   pctx <- use verifyPrefixCtx
   -- TODO: implement a more structured way to handle variable
   -- declarations inside a translation function
-  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
+  (_, vcLines) <-
+    fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
   sendToZ3 "(push)"
   sendToZ3 (unlines vcLines)
   sendToZ3 "(check-sat)"
@@ -966,8 +1178,11 @@ instance ToZ3 SymValue where
 writeToZ3File :: VC -> Verify FilePath
 writeToZ3File vc = do
   pctx <- use verifyPrefixCtx
-  (_, vcLines) <- fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
-  tempFile <- liftIO $ writeTempFile "." "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++ ["(check-sat)"]
+  (_, vcLines) <-
+    fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
+  tempFile <-
+    liftIO $ writeTempFile "." "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++
+    ["(check-sat)"]
   return tempFile
 
 -- | Verify conditions with external solvers and return unverified conditions
@@ -979,78 +1194,108 @@ checkVCs vcs = do
   when (not . null $ vcs') $ do
     debug $ "Remaining VCs in Z3 files: "
     mapM_ (\vc -> writeToZ3File vc >>= \f -> liftIO (debug f)) vcs'
-  debug $ show (length vcs') ++ " VCs left after checking with Z3 (" ++ formatSeconds t ++ ")"
+  debug $ show (length vcs') ++ " VCs left after checking with Z3 (" ++
+    formatSeconds t ++
+    ")"
   dafnyRes <- checkWithDafny vcs'
   -- currently we don't have a way to efficiently check just one VC with Dafny, so this
   -- is all or nothing:
-  if dafnyRes then return [] else return vcs'
+  if dafnyRes
+    then return []
+    else return vcs'
 
 checkEqv :: Bool -> Expr -> [ProofHint] -> Expr -> Expr -> Verify [(Var, [VC])]
 checkEqv useSolvers prefix hints lhs rhs
-  | any ((== Just True) . (===Admit)) hints =
+  | any ((== Just True) . (=== Admit)) hints
   -- debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
-  return []
+   = return []
 checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
   (_, prefixCtx, _) <- fmap singleResult . symEval $ (prefix, emptyCtx, [])
-  unless ((from, to) `elem` (prefixCtx ^. ctxAssumptions) ||
-          (to, from) `elem` (prefixCtx ^. ctxAssumptions)) $
-    fail $ "No such assumption: " ++ show from ++ " ≈ " ++ show to
-  if lhs' == rhs then return []
-  else error $ "Invalid rewrite step:\n" ++ show lhs' ++ "\n/=\n" ++ show rhs
-  where lhs' = rewriteExpr from to lhs
+  unless
+    ((from, to) `elem` (prefixCtx ^. ctxAssumptions) || (to, from) `elem`
+     (prefixCtx ^. ctxAssumptions)) $
+    fail $
+    "No such assumption: " ++
+    show from ++
+    " ≈ " ++
+    show to
+  if lhs' == rhs
+    then return []
+    else error $ "Invalid rewrite step:\n" ++ show lhs' ++ "\n/=\n" ++ show rhs
+  where
+    lhs' = rewriteExpr from to lhs
 checkEqv useSolvers prefix hintsIn lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use alreadyVerified
   (_, hints, _) <- inferInvariants prefix (lhs, hintsIn, rhs)
   withCache <- view useCache
-  let noteText = concatMap (\hint -> case hint of
-                           Note n -> n
-                           _ -> "") hints
-      note = if noteText == "" then "" else noteText ++ ": "
-  if cached && not (any ((== Just True) . (===IgnoreCache)) hints) && withCache
-  then do
-    debug $ note ++ "Skipping cached verification step"
-    return []
-  else do
-    (_, prefixCtx, pathCond) <- fmap singleResult .
-                                symEval $ (prefix, emptyCtx, [])
-    verifyPrefixCtx .= prefixCtx
-    res1@(VRef a1, ctx1, _) <- singleResult <$> symEval (lhs, prefixCtx, pathCond)
-    res1'@(VRef a1', ctx1', _) <- singleResult <$> symEval (rhs, prefixCtx, pathCond)
-    -- check that invariants hold initially
-    invLHS <- invToVCnonRelational [] a1 res1
-    invRHS <- invToVCnonRelational [] a1' res1'
-    invsRel <- concat <$> mapM (invToVC [] a1 res1 a1' res1') hints
-    remainingInvVCs <- checkVCs (invLHS ++ invRHS ++ invsRel)
-    let mtds = sharedMethods a1 ctx1 a1' ctx1'
-    -- check that there are no other methods except invariants:
-    let allMethods :: Addr -> Context -> S.Set String
-        allMethods addr ctx = S.fromList . map (^. methodName)
-                            . filter ((==NormalMethod) . (^. methodKind))
-                            . M.elems $ (ctx ^. ctxObjs . ix addr . objMethods)
-        lhsMethods = allMethods a1 ctx1
-        rhsMethods = allMethods a1' ctx1'
-    when (lhsMethods /= rhsMethods) $ do
-      -- FIXME: output which methods are the extra ones
-      let extraMtds = (lhsMethods `S.difference` rhsMethods) `S.union`
-                      (rhsMethods `S.difference` lhsMethods)
-      error $ note ++ "LHS and RHS do not have the same non-invariant methods; extra methods: " ++ show extraMtds
-    (t, remainingVCs) <- fmap (second ([("_invsInit", remainingInvVCs)] ++)) . time $ forM mtds $ \mtd -> do
-      debug $ note ++ "Checking method: " ++ mtd ^. methodName
-      onlySimpleTypes (mtd ^. methodFormals)
-      (args, _, _) <- symArgs ctx1 (mtd ^. methodFormals)
-      -- TODO: double-check that we don't need path condition here.
-      vcs <- methodEquivalenceVCs mtd hints args res1 res1'
-      verificationResult <- if useSolvers then checkVCs vcs else return vcs
-
-      return (mtd ^. methodName, verificationResult)
-    if (not . all (null . snd) $ remainingVCs)
+  let noteText =
+        concatMap
+          (\hint ->
+             case hint of
+               Note n -> n
+               _ -> "")
+          hints
+      note =
+        if noteText == ""
+          then ""
+          else noteText ++ ": "
+  if cached && not (any ((== Just True) . (=== IgnoreCache)) hints) && withCache
     then do
-      liftIO . putStrLn $ note ++ "Verification failed for step: "
-      liftIO $ print remainingVCs
+      debug $ note ++ "Skipping cached verification step"
+      return []
     else do
-      cacheVerified lhs rhs
-      liftIO . putStrLn $ note ++ "Verification succeeded in " ++ formatSeconds t
-    return remainingVCs
+      (_, prefixCtx, pathCond) <-
+        fmap singleResult . symEval $ (prefix, emptyCtx, [])
+      verifyPrefixCtx .= prefixCtx
+      res1@(VRef a1, ctx1, _) <-
+        singleResult <$> symEval (lhs, prefixCtx, pathCond)
+      res1'@(VRef a1', ctx1', _) <-
+        singleResult <$> symEval (rhs, prefixCtx, pathCond)
+    -- check that invariants hold initially
+      invLHS <- invToVCnonRelational [] a1 res1
+      invRHS <- invToVCnonRelational [] a1' res1'
+      invsRel <- concat <$> mapM (invToVC [] a1 res1 a1' res1') hints
+      remainingInvVCs <- checkVCs (invLHS ++ invRHS ++ invsRel)
+      let mtds = sharedMethods a1 ctx1 a1' ctx1'
+    -- check that there are no other methods except invariants:
+      let allMethods :: Addr -> Context -> S.Set String
+          allMethods addr ctx =
+            S.fromList . map (^. methodName) .
+            filter ((== NormalMethod) . (^. methodKind)) .
+            M.elems $
+            (ctx ^. ctxObjs . ix addr . objMethods)
+          lhsMethods = allMethods a1 ctx1
+          rhsMethods = allMethods a1' ctx1'
+      when (lhsMethods /= rhsMethods) $
+      -- FIXME: output which methods are the extra ones
+       do
+        let extraMtds =
+              (lhsMethods `S.difference` rhsMethods) `S.union`
+              (rhsMethods `S.difference` lhsMethods)
+        error $ note ++
+          "LHS and RHS do not have the same non-invariant methods; extra methods: " ++
+          show extraMtds
+      (t, remainingVCs) <-
+        fmap (second ([("_invsInit", remainingInvVCs)] ++)) . time $ forM mtds $ \mtd -> do
+          debug $ note ++ "Checking method: " ++ mtd ^. methodName
+          onlySimpleTypes (mtd ^. methodFormals)
+          (args, _, _) <- symArgs ctx1 (mtd ^. methodFormals)
+      -- TODO: double-check that we don't need path condition here.
+          vcs <- methodEquivalenceVCs mtd hints args res1 res1'
+          verificationResult <-
+            if useSolvers
+              then checkVCs vcs
+              else return vcs
+          return (mtd ^. methodName, verificationResult)
+      if (not . all (null . snd) $ remainingVCs)
+        then do
+          liftIO . putStrLn $ note ++ "Verification failed for step: "
+          liftIO $ print remainingVCs
+        else do
+          cacheVerified lhs rhs
+          liftIO . putStrLn $ note ++ "Verification succeeded in " ++
+            formatSeconds t
+      return remainingVCs
 
 -- | Mark a pair of expressions as successfully verified in the cache
 cacheVerified :: Expr -> Expr -> Verify ()
@@ -1064,8 +1309,13 @@ cacheVerified lhs rhs = do
 -- (The other two programs are evaluated in the context resulting from
 -- evaluating the prefix file). If the first argument is False, external solvers
 -- will not be used.
-checkEqvFile :: Bool -> FilePath -> [ProofHint] -> FilePath -> FilePath
-         -> Verify [(Var, [VC])]
+checkEqvFile ::
+     Bool
+  -> FilePath
+  -> [ProofHint]
+  -> FilePath
+  -> FilePath
+  -> Verify [(Var, [VC])]
 checkEqvFile verify prefixFile invs lhsFile rhsFile = do
   prefix <- parseFile prefixFile
   lhs <- parseFile lhsFile
@@ -1078,15 +1328,18 @@ type Step = (Expr, [ProofHint], Expr)
 
 -- | Check given list of steps and return a list of unverified VCs for each step
 checkSteps :: Expr -> [Step] -> Verify [[(Var, [VC])]]
-checkSteps prefix = mapM (\(lhs, invs, rhs) -> checkEqv True prefix invs lhs rhs)
+checkSteps prefix =
+  mapM (\(lhs, invs, rhs) -> checkEqv True prefix invs lhs rhs)
 
 -- | @'rewriteExpr' from to e@ rewrites all occurrences of @from@ in @e@ by @to@
 -- TODO: take bound variables into account
 rewriteExpr :: Expr -> Expr -> Expr -> Expr
 rewriteExpr from to e = everywhere (mkT replace) e
-  where replace :: Expr -> Expr
-        replace e' | e' == from = to
-                   | otherwise = e'
+  where
+    replace :: Expr -> Expr
+    replace e'
+      | e' == from = to
+      | otherwise = e'
 
 -- | Convenience function for expression that both sides agree on looking
 -- up a series of fields. @[a, b, c]@ represents looking up field @a.b.c@.
@@ -1107,46 +1360,60 @@ commonVars :: [Var] -> Addr -> Context -> Addr -> Context -> [[Var]]
 commonVars prefixFields addrL ctxL addrR ctxR
   | Just objL <- ctxL ^. ctxObjs . at addrL
   , Just objR <- ctxR ^. ctxObjs . at addrR =
-      let common = M.filterWithKey (\field locL -> case objR ^. objLocals . at field of
-                                                      Just locR ->
-                                                        locL ^. localType == locR ^. localType &&
-                                                        not (locL ^. localImmutable) &&
-                                                        not (locR ^. localImmutable) &&
-                                                        locL ^. localValue == locR ^. localValue
-                                                      _ -> False)
-                                   (objL ^. objLocals)
-          commonObjs = M.mapWithKey (\field locL ->
-                                       case ( locL ^. localValue
-                                            , objR ^? objLocals . ix field . localValue) of
-                                         (VRef aL, Just (VRef aR)) -> Just (field, aL, aR)
-                                         _ -> Nothing) (objL ^. objLocals)
-      in map (\field -> prefixFields ++ [field]) (M.keys common) ++
-         (concatMap (\(field, aL, aR) -> commonVars (prefixFields ++ [field]) aL ctxL aR ctxR)
-                    . catMaybes . M.elems $ commonObjs)
+    let common =
+          M.filterWithKey
+            (\field locL ->
+               case objR ^. objLocals . at field of
+                 Just locR ->
+                   locL ^. localType == locR ^. localType &&
+                   not (locL ^. localImmutable) &&
+                   not (locR ^. localImmutable) &&
+                   locL ^.
+                   localValue ==
+                   locR ^.
+                   localValue
+                 _ -> False)
+            (objL ^. objLocals)
+        commonObjs =
+          M.mapWithKey
+            (\field locL ->
+               case ( locL ^. localValue
+                    , objR ^? objLocals . ix field . localValue) of
+                 (VRef aL, Just (VRef aR)) -> Just (field, aL, aR)
+                 _ -> Nothing)
+            (objL ^. objLocals)
+     in map (\field -> prefixFields ++ [field]) (M.keys common) ++
+        (concatMap
+           (\(field, aL, aR) ->
+              commonVars (prefixFields ++ [field]) aL ctxL aR ctxR) .
+         catMaybes .
+         M.elems $
+         commonObjs)
   | otherwise = error "commonVars called with invalid addresses"
-
 
 inferInvariants :: Expr -> Step -> Verify Step
 inferInvariants prefix step@(lhs, invs, rhs)
   | any (\x -> (x === NoInfer) == Just True) invs = return step
   | otherwise = do
-  (_, prefixCtx, _) <- singleResult <$> symEval (prefix, emptyCtx, [])
-  (VRef addrL, ctxL, _) <- singleResult <$> symEval (lhs, prefixCtx, [])
-  (VRef addrR, ctxR, _) <- singleResult <$> symEval (rhs, prefixCtx, [])
-  let comVars = commonVars [] addrL ctxL addrR ctxR
-  debug $ "Inferred equality invariants on fields: " ++ show comVars
-  return (lhs, invs ++ map fieldEqual comVars, rhs)
+    (_, prefixCtx, _) <- singleResult <$> symEval (prefix, emptyCtx, [])
+    (VRef addrL, ctxL, _) <- singleResult <$> symEval (lhs, prefixCtx, [])
+    (VRef addrR, ctxR, _) <- singleResult <$> symEval (rhs, prefixCtx, [])
+    let comVars = commonVars [] addrL ctxL addrR ctxR
+    debug $ "Inferred equality invariants on fields: " ++ show comVars
+    return (lhs, invs ++ map fieldEqual comVars, rhs)
 
 -- | Convert a series of proof parts into a sequence of steps
 toSteps :: [ProofPart] -> [Step]
 toSteps [] = []
 toSteps [_] = []
-toSteps (Prog lhs : PDiff diffs : steps') =
+toSteps (Prog lhs:PDiff diffs:steps') =
   toSteps (Prog lhs : Prog (applyDiffs diffs lhs) : steps')
-toSteps (Prog lhs : Hint h : PDiff diffs : steps') =
+toSteps (Prog lhs:Hint h:PDiff diffs:steps') =
   toSteps (Prog lhs : Hint h : Prog (applyDiffs diffs lhs) : steps')
-toSteps (Prog lhs : Prog rhs : steps') = (lhs, [], rhs) : toSteps (Prog rhs : steps')
-toSteps (Prog lhs : Hint invs : Prog rhs : steps') = (lhs, invs, rhs) : toSteps (Prog rhs : steps')
+toSteps (Prog lhs:Prog rhs:steps') =
+  (lhs, [], rhs) : toSteps (Prog rhs : steps')
+toSteps (Prog lhs:Hint invs:Prog rhs:steps') =
+  (lhs, invs, rhs) : toSteps (Prog rhs : steps')
 toSteps _ = error "Invalid sequence of steps"
 
 proveStep :: Expr -> Step -> Verify Int

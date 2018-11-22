@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+
 module Quivela.QuasiQuote where
 
 import Control.Arrow
@@ -8,19 +9,19 @@ import Language.Haskell.TH as TH hiding (Type)
 import Language.Haskell.TH.Quote
 import System.Microtimer
 
-import Quivela.Parse
 import Quivela.Language
+import Quivela.Parse
 import Quivela.SymEval
 import Quivela.Verify
 
 -- | Construct a term that parses the given string as a quivela expression
 -- and return it as a 'ProofPart'.
 quivelaParse :: String -> TH.ExpQ
-quivelaParse s = [| parseProofPart $ $(litE $ TH.StringL s) |]
+quivelaParse s = [|parseProofPart $ $(litE $ TH.StringL s)|]
 
 -- | Same as 'quivelaParse' but without the 'ProofPart' wrapper.
 quivelaParse' :: String -> TH.ExpQ
-quivelaParse' s = [| parseExpr $(litE $ TH.StringL s) |]
+quivelaParse' s = [|parseExpr $(litE $ TH.StringL s)|]
 
 -- | A quasiquoter for expressions as proof steps.
 prog :: QuasiQuoter
@@ -45,16 +46,15 @@ prove' env prefix steps = do
   (t, results) <- time $ mapM doCheck (toSteps steps)
   debug $ "Total verification time: " ++ formatSeconds t
   return $ sum results
-  where doCheck = runVerify env . proveStep prefix
-
+  where
+    doCheck = runVerify env . proveStep prefix
 
 -- | A shorthand for rewriting using quivela terms written in concrete syntax.
 rewrite :: String -> String -> ProofHint
 rewrite e1 e2 = Rewrite (parseExpr e1) (parseExpr e2)
 
-
 heredocExpr :: String -> TH.ExpQ
-heredocExpr s = [| $(litE $ TH.StringL s) |]
+heredocExpr s = [|$(litE $ TH.StringL s)|]
 
 -- | QuasiQuoter for multi-line string literals
 heredoc :: QuasiQuoter
