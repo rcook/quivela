@@ -1,39 +1,86 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 
-module Quivela.SymEval where
+module Quivela.SymEval
+  ( Result
+  , Results
+  , Verify(..)
+  , VerifyEnv(..)
+  , VerifyState(..)
+  , alreadyVerified
+  , conjunction
+  , emptyVerifyEnv
+  , freshVar
+  , foreachM
+  , singleResult
+  , symArgs
+  , symEval
+  , useCache
+  , verifyPrefixCtx
+  , z3Proc
+  ) where
 
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
-import Control.Lens hiding (Context(..))
-import Control.Lens.At
-import Control.Monad
-import Control.Monad.List
+import qualified Control.Lens as L
+import Control.Lens
+  ( (%=)
+  , (.~)
+  , (<&>)
+  , (?~)
+  , (^.)
+  , (^?)
+  , _1
+  , at
+  , over
+  , set
+  , use
+  , view
+  )
+import Control.Lens.At (Index, IxValue, Ixed, ix)
 import Control.Monad.RWS.Strict
-import Data.Data
-import Data.List
+  ( MonadIO
+  , MonadReader
+  , MonadState
+  , RWST
+  , foldM
+  , modify
+  , unless
+  , when
+  )
+import Data.List (intercalate, nub)
 import qualified Data.Map as M
-import Data.Maybe
+import Data.Maybe (fromJust, maybeToList)
 import Data.Serialize (Serialize, get, put)
 import qualified Data.Set as S
-import Data.Typeable
-import GHC.Generics
-import System.IO
-import System.Process
-
+import Data.Typeable (Typeable)
+import qualified Quivela.Language as L
 import Quivela.Language
-import Quivela.Parse
+  ( Addr
+  , AllocStrategy(..)
+  , Context
+  , Expr(..)
+  , Field(..)
+  , FunDecl(..)
+  , Local(..)
+  , Method(..)
+  , MethodKind(..)
+  , Object(..)
+  , PathCond
+  , Place(..)
+  , Prop(..)
+  , SymValue(..)
+  , Type(..)
+  , pattern VRef
+  , Value(..)
+  , Var
+  )
+import Quivela.Util (debug)
+import System.IO (Handle)
+import System.Process (ProcessHandle)
 
 -- | The fixed environment for symbolic evaluation.
 data VerifyEnv = VerifyEnv
@@ -74,7 +121,7 @@ data VerifyState = VerifyState
   }
 
 -- Generate lenses for all types defined above:
-concat <$> mapM makeLenses [''VerifyEnv, ''VerifyState]
+concat <$> mapM L.makeLenses [''VerifyEnv, ''VerifyState]
 
 -- | Generate a fresh variable starting with a given prefix
 freshVar :: String -> Verify String
@@ -102,7 +149,7 @@ singleResult ress = error $ "Multiple results: " ++ show ress
 
 -- | Infer type of a symbolic value. Will return 'TAny' for most operations
 -- except plain variables and inserting into a well-typed map.
-typeOfSymValue :: Context -> SymValue -> Type
+typeOfSymValue :: Context -> L.SymValue -> L.Type
 typeOfSymValue ctx (SymVar x t) = t
 typeOfSymValue ctx (Proj tup idx) = TAny
 -- we could have more precise type information here if the idx was constant
@@ -117,7 +164,7 @@ typeOfSymValue ctx (Insert key val map)
             then tv
             else TAny
      in TMap tk' tv'
-  | otherwise = TMap (typeOfValue ctx key) (typeOfValue ctx val)-- Insert always calls turns 'map' into an actual TMap
+  | otherwise = TMap (typeOfValue ctx key) (typeOfValue ctx val) -- Insert always calls turns 'map' into an actual TMap
 typeOfSymValue ctx (Lookup idx map) = TAny
   -- we don't know if idx is going to be in the map, so
   -- we can't give more precise type information here.
@@ -129,7 +176,7 @@ typeOfSymValue ctx (Ref a)
   -- If the reference points to an object, use that object's type of the reference
   -- I'm not sure if we shouldn't instead distinguish between a reference to a typed
   -- object and that typed object instead on the type level.
-  | Just obj <- ctx ^. ctxObjs . at a = obj ^. objType
+  | Just obj <- ctx ^. L.ctxObjs . at a = obj ^. L.objType
   | otherwise = TAny
 typeOfSymValue ctx (Call _ _) = TAny
 typeOfSymValue ctx v = error $ "Not implemented: typeOfSymValue: " ++ show v
@@ -178,7 +225,7 @@ symValueHasType ctx (Add e1 e2) TInt =
   valueHasType ctx e1 TInt && valueHasType ctx e2 TInt
 symValueHasType ctx (SymVar _ t') t = t == t'
 symValueHasType ctx (Ref a) t
-  | Just t' <- ctx ^? ctxObjs . ix a . objType = t == t'
+  | Just t' <- ctx ^? L.ctxObjs . ix a . L.objType = t == t'
 symValueHasType ctx (Insert k v m) (TMap tk tv)
   -- TODO: this could be more precise: if we know that m is definitely not
   -- a map at this point, we can return True if k has type tk and v has type tv
@@ -201,19 +248,23 @@ defaultValue = VInt 0
 -- result indicates if the context had to be modified.
 findVar :: Var -> Context -> Maybe (Place, Context, Bool)
 findVar x ctx
-  | Just (v, t) <- M.lookup x (ctx ^. ctxScope) =
+  | Just (v, t) <- M.lookup x (ctx ^. L.ctxScope) =
     Just $
     ( Place
-        {_placeLens = ctxScope . ix x . _1, _placeConst = False, _placeType = t}
+        { _placeLens = L.ctxScope . ix x . _1
+        , _placeConst = False
+        , _placeType = t
+        }
     , ctx
     , False)
-  | Just loc <- ctx ^? ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x =
+  | Just loc <- ctx ^? L.ctxObjs . ix (ctx ^. L.ctxThis) . L.objLocals . ix x =
     Just $
     ( Place
         { _placeLens =
-            ctxObjs . ix (ctx ^. ctxThis) . objLocals . ix x . localValue
-        , _placeConst = loc ^. localImmutable
-        , _placeType = loc ^. localType
+            L.ctxObjs . ix (ctx ^. L.ctxThis) . L.objLocals . ix x .
+            L.localValue
+        , _placeConst = loc ^. L.localImmutable
+        , _placeType = loc ^. L.localType
         }
     , ctx
     , False)
@@ -221,24 +272,24 @@ findVar x ctx
   -- if we're not in a global context, we use a local variable
   -- FIXME: this should probably check if we are inside a method instead, but currently
   -- we don't store whether this is the case in the context.
-  | ctx ^. ctxThis /= 0 =
+  | ctx ^. L.ctxThis /= 0 =
     Just $
     ( Place
-        { _placeLens = ctxScope . ix x . _1
+        { _placeLens = L.ctxScope . ix x . _1
         , _placeConst = False
         , _placeType = TAny
         }
-    , set (ctxScope . at x) (Just (defaultValue, TAny)) ctx
+    , set (L.ctxScope . at x) (Just (defaultValue, TAny)) ctx
     , True)
   | otherwise =
     Just $
     ( Place
-        { _placeLens = ctxObjs . ix 0 . objLocals . ix x . localValue
+        { _placeLens = L.ctxObjs . ix 0 . L.objLocals . ix x . L.localValue
         , _placeConst = False
         , _placeType = TAny
         }
     , set
-        (ctxObjs . ix 0 . objLocals . at x)
+        (L.ctxObjs . ix 0 . L.objLocals . at x)
         (Just (Local defaultValue TAny False))
         ctx
     , True)
@@ -268,14 +319,14 @@ findLValue (EVar x) ctx pathCond =
 findLValue (EProj obj name) ctx pathCond = do
   foreachM (symEval (obj, ctx, pathCond)) $ \case
     (VRef addr, ctx', pathCond')
-      | Just loc <- ctx' ^? ctxObjs . ix addr . objLocals . ix name ->
+      | Just loc <- ctx' ^? L.ctxObjs . ix addr . L.objLocals . ix name ->
         return
           [ Just $
             ( Place
                 { _placeLens =
-                    ctxObjs . ix addr . objLocals . ix name . localValue
-                , _placeConst = loc ^. localImmutable
-                , _placeType = loc ^. localType
+                    L.ctxObjs . ix addr . L.objLocals . ix name . L.localValue
+                , _placeConst = loc ^. L.localImmutable
+                , _placeType = loc ^. L.localType
                 }
             , ctx'
             , pathCond'
@@ -287,7 +338,7 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
     Nothing -> error $ "Invalid l-value: " ++ show expr
     Just (place, ctx', pathCond', created) ->
       foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
-        case ctx'' ^? (place ^. placeLens) of
+        case ctx'' ^? (place ^. L.placeLens) of
           Just (VMap m) ->
             case M.lookup idxVal m of
               Just _ ->
@@ -295,7 +346,7 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
                   [ Just
                       ( Place
                           { _placeLens =
-                              (place ^. placeLens) . valMap . ix idxVal
+                              (place ^. L.placeLens) . L.valMap . ix idxVal
                           , _placeType = TAny -- FIXME
                           , _placeConst = False
                           }
@@ -311,12 +362,12 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
                   [ Just
                       ( Place
                           { _placeLens =
-                              (place ^. placeLens) . valMap . ix idxVal
+                              (place ^. L.placeLens) . L.valMap . ix idxVal
                           , _placeType = TAny -- FIXME
                           , _placeConst = False
                           }
                       , set
-                          ((place ^. placeLens) . valMap . at idxVal)
+                          ((place ^. L.placeLens) . L.valMap . at idxVal)
                           (Just defaultValue)
                           ctx''
                       , pathCond''
@@ -326,7 +377,8 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
             return
               [ Just
                   ( Place
-                      { _placeLens = (place ^. placeLens) . symVal . ix idxVal
+                      { _placeLens =
+                          (place ^. L.placeLens) . L.symVal . ix idxVal
                       , _placeType = TAny
                       , _placeConst = False
                       }
@@ -339,12 +391,13 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
             return
               [ Just
                   ( Place
-                      { _placeLens = (place ^. placeLens) . valMap . ix idxVal
+                      { _placeLens =
+                          (place ^. L.placeLens) . L.valMap . ix idxVal
                       , _placeType = TAny -- FIXME
                       , _placeConst = False
                       }
                   , set
-                      (place ^. placeLens)
+                      (place ^. L.placeLens)
                       (VMap $ M.fromList [(idxVal, defaultValue)])
                       ctx''
                   , pathCond''
@@ -366,34 +419,34 @@ illTypedAssignError x varType exprType =
 -- | Turn a local into a human-readable string
 printLocal :: Var -> Local -> String
 printLocal name loc =
-  "\t\t" ++ name ++ " = " ++ show (loc ^. localValue) ++ " : " ++
-  show (loc ^. localType)
+  "\t\t" ++ name ++ " = " ++ show (loc ^. L.localValue) ++ " : " ++
+  show (loc ^. L.localType)
 
 -- | Turn a method into a human-readable string
 printMethod :: Var -> Method -> String
 printMethod name mtd =
-  unlines ["\t\t" ++ name ++ " { " ++ show (mtd ^. methodBody) ++ " } "]
+  unlines ["\t\t" ++ name ++ " { " ++ show (mtd ^. L.methodBody) ++ " } "]
 
 -- | Turn an object into a human-readable string
 printObject :: Addr -> Object -> String
 printObject addr obj =
   unlines $
   [ "  " ++ show addr ++ " |-> "
-  , "\tAdversary?: " ++ show (obj ^. objAdversary)
+  , "\tAdversary?: " ++ show (obj ^. L.objAdversary)
   , "\tLocals:"
   ] ++
-  (map (uncurry printLocal) (M.toList (obj ^. objLocals))) ++
+  (map (uncurry printLocal) (M.toList (obj ^. L.objLocals))) ++
   ["\tMethods:"] ++
-  (map (uncurry printMethod) (M.toList (obj ^. objMethods)))
+  (map (uncurry printMethod) (M.toList (obj ^. L.objMethods)))
 
 -- | Turn a context into a human-readable string
 printContext :: Context -> String
 printContext ctx =
   unlines
-    [ "this: " ++ show (ctx ^. ctxThis)
-    , "scope: " ++ show (ctx ^. ctxScope)
+    [ "this: " ++ show (ctx ^. L.ctxThis)
+    , "scope: " ++ show (ctx ^. L.ctxScope)
     , "objects: " ++
-      intercalate "\n" (map (uncurry printObject) (M.toList (ctx ^. ctxObjs)))
+      intercalate "\n" (map (uncurry printObject) (M.toList (ctx ^. L.ctxObjs)))
     ]
 
 evalError :: String -> Context -> a
@@ -402,7 +455,7 @@ evalError s ctx = error (s ++ "\nContext:\n" ++ printContext ctx)
 lookupVar :: Var -> Context -> Value
 lookupVar x ctx
   | Just (place, ctx', _) <- findVar x ctx
-  , Just v <- ctx' ^? (place ^. placeLens) = v
+  , Just v <- ctx' ^? (place ^. L.placeLens) = v
   | otherwise = evalError ("No such variable: " ++ x) ctx
 
 -- | Take a list of monadic actions producing lists and map another monadic function over
@@ -417,8 +470,8 @@ foreachM s act = do
 -- | Add a method definition to the context
 defineMethod :: Var -> [(Var, Type)] -> Expr -> MethodKind -> Context -> Context
 defineMethod name formals body kind ctx
-  | Just obj <- ctx ^? ctxObjs . at (ctx ^. ctxThis) =
-    ctxObjs . ix (ctx ^. ctxThis) . objMethods . at name ?~
+  | Just obj <- ctx ^? L.ctxObjs . at (ctx ^. L.ctxThis) =
+    L.ctxObjs . ix (ctx ^. L.ctxThis) . L.objMethods . at name ?~
     (Method
        { _methodName = name
        , _methodFormals = formals
@@ -438,15 +491,15 @@ symEvalFields ::
   -> Verify [([(Var, (Value, Type, Bool))], Context, PathCond)]
 symEvalFields [] ctx pathCond = return [([], ctx, pathCond)]
 symEvalFields (field:fields) ctx pathCond =
-  foreachM (symEval (field ^. fieldInit, ctx, pathCond)) $ \(fieldVal, ctx', pathCond') -> do
-    unless (valueHasType ctx' fieldVal (field ^. fieldType)) $ do
+  foreachM (symEval (field ^. L.fieldInit, ctx, pathCond)) $ \(fieldVal, ctx', pathCond') -> do
+    unless (valueHasType ctx' fieldVal (field ^. L.fieldType)) $ do
       error $ "Ill-typed argument for field initialization: " ++ show fieldVal ++
         " is not a subtype of " ++
-        show (field ^. fieldType)
+        show (field ^. L.fieldType)
     foreachM (symEvalFields fields ctx' pathCond') $ \(evaledFields, ctx'', pathCond'') ->
       return
-        [ ( ( field ^. fieldName
-            , (fieldVal, field ^. fieldType, field ^. immutable)) :
+        [ ( ( field ^. L.fieldName
+            , (fieldVal, field ^. L.fieldType, field ^. L.immutable)) :
             evaledFields
           , ctx''
           , pathCond'')
@@ -463,9 +516,9 @@ symEvalList (e:es) ctx pathCond =
 -- | Return an unused address in the current context
 nextAddr :: Context -> Addr
 nextAddr ctx =
-  case ctx ^. ctxAllocStrategy of
-    Increase -> maximum (M.keys (ctx ^. ctxObjs)) + 1
-    Decrease -> minimum (M.keys (ctx ^. ctxObjs)) - 1
+  case ctx ^. L.ctxAllocStrategy of
+    Increase -> maximum (M.keys (ctx ^. L.ctxObjs)) + 1
+    Decrease -> minimum (M.keys (ctx ^. L.ctxObjs)) - 1
 
 -- | Uncurry a three-argument function (useful for partial application)
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
@@ -473,23 +526,23 @@ uncurry3 f (a, b, c) = f a b c
 
 -- | Try to find a method of the given name in the object at that address
 findMethod :: Addr -> Var -> Context -> Maybe Method
-findMethod addr name ctx = ctx ^? ctxObjs . ix addr . objMethods . ix name
+findMethod addr name ctx = ctx ^? L.ctxObjs . ix addr . L.objMethods . ix name
 
 callMethod :: Addr -> Method -> [Value] -> Context -> PathCond -> Verify Results
 callMethod addr mtd args ctx pathCond =
   let scope =
         M.fromList
           (zip
-             (map fst (mtd ^. methodFormals))
-             (zip args (map snd (mtd ^. methodFormals))))
-      ctx' = set ctxThis addr (set ctxScope scope ctx)
-   in foreachM (symEval (mtd ^. methodBody, ctx', pathCond)) $ \(val, ctx'', pathCond') ->
+             (map fst (mtd ^. L.methodFormals))
+             (zip args (map snd (mtd ^. L.methodFormals))))
+      ctx' = set L.ctxThis addr (set L.ctxScope scope ctx)
+   in foreachM (symEval (mtd ^. L.methodBody, ctx', pathCond)) $ \(val, ctx'', pathCond') ->
         return
           [ ( val
             , set
-                ctxThis
-                (ctx ^. ctxThis)
-                (set ctxScope (ctx ^. ctxScope) ctx'')
+                L.ctxThis
+                (ctx ^. L.ctxThis)
+                (set L.ctxScope (ctx ^. L.ctxScope) ctx'')
             , pathCond')
           ]
 
@@ -509,25 +562,27 @@ typedValue name (TTuple ts) ctx = do
   (vals, ctx', pathCond') <- symArgs ctx (zip (repeat name) ts)
   return $ (VTuple vals, ctx', pathCond')
 typedValue name (TNamed t) ctx
-  | Just tdecl <- ctx ^? ctxTypeDecls . ix t = do
+  | Just tdecl <- ctx ^? L.ctxTypeDecls . ix t = do
     (args, ctx', pathCond') <-
       symArgs
         ctx
-        (map (\(name, immut, typ) -> (name, typ)) (tdecl ^. typedeclFormals))
+        (map (\(name, immut, typ) -> (name, typ)) (tdecl ^. L.typedeclFormals))
     (val, ctx'', pathCond'') <-
       singleResult <$>
       symEval
         ( ENewConstr
             t
             (zip
-               (map (\(name, _, _) -> name) (tdecl ^. typedeclFormals))
+               (map (\(name, _, _) -> name) (tdecl ^. L.typedeclFormals))
                (map EConst args))
         , ctx'
         , pathCond')
     let pathCondEqs =
           zipWith
             (\(name, typ) argVal -> Sym (Deref val name) :=: argVal)
-            (map (\(name, immut, typ) -> (name, typ)) (tdecl ^. typedeclFormals))
+            (map
+               (\(name, immut, typ) -> (name, typ))
+               (tdecl ^. L.typedeclFormals))
             args
     return (val, ctx'', pathCondEqs ++ pathCond'')
   | otherwise = error $ "No such type: " ++ t
@@ -569,12 +624,12 @@ symEvalCall ::
   -> PathCond
   -> Verify [(Value, Context, PathCond)]
 symEvalCall (VRef addr) name args ctx pathCond
-  | Just obj <- ctx ^. ctxObjs . at addr
-  , obj ^. objAdversary =
-    let newCalls = args : (ctx ^. ctxAdvCalls)
+  | Just obj <- ctx ^. L.ctxObjs . at addr
+  , obj ^. L.objAdversary =
+    let newCalls = args : (ctx ^. L.ctxAdvCalls)
      in return
           [ ( Sym (AdversaryCall newCalls)
-            , set ctxAdvCalls newCalls ctx
+            , set L.ctxAdvCalls newCalls ctx
             , pathCond)
           ]
   | Just mtd <- findMethod addr name ctx = callMethod addr mtd args ctx pathCond
@@ -644,11 +699,11 @@ symEvalCall VNil "<=" [arg1, arg2] ctx pathCond
   | otherwise =
     error $ "Comparison of non-symbolic non-integers: " ++ show (arg1, arg2)
 symEvalCall VNil name args ctx pathCond
-  | Just mtd <- findMethod (ctx ^. ctxThis) name ctx =
-    callMethod (ctx ^. ctxThis) mtd args ctx pathCond
+  | Just mtd <- findMethod (ctx ^. L.ctxThis) name ctx =
+    callMethod (ctx ^. L.ctxThis) mtd args ctx pathCond
   | Just mtd <- findMethod 0 name ctx = callMethod 0 mtd args ctx pathCond
-  | Just funDecl <- ctx ^? ctxFunDecls . ix name = do
-    unless (length args == length (funDecl ^. funDeclArgs)) $ error $
+  | Just funDecl <- ctx ^? L.ctxFunDecls . ix name = do
+    unless (length args == length (funDecl ^. L.funDeclArgs)) $ error $
       "Wrong number of arguments in call to uninterpreted function: " ++
       show (name, args)
     return [(Sym (Call name args), ctx, pathCond)]
@@ -725,7 +780,7 @@ symEvalPatternMatch pat rhs ctx pathCond
                        show (pat, rhs)
           ctx''' =
             foldr
-              (\(place, proj) ctx'' -> set (place ^. placeLens) proj ctx'')
+              (\(place, proj) ctx'' -> set (place ^. L.placeLens) proj ctx'')
               ctx'
               (zip lvalues rhsVals)
           projEq =
@@ -752,8 +807,8 @@ symEval (expr@(EProj obj name), ctx, pathCond) =
   foreachM (symEval (obj, ctx, pathCond)) $ \(val, ctx', pathCond') ->
     case val of
       VRef addr
-        | Just loc <- ctx' ^? ctxObjs . ix addr . objLocals . ix name ->
-          return [(loc ^. localValue, ctx', pathCond')]
+        | Just loc <- ctx' ^? L.ctxObjs . ix addr . L.objLocals . ix name ->
+          return [(loc ^. L.localValue, ctx', pathCond')]
       Sym sv
         -- we might be able to make progress from here by forcing
         -- the receiver value to something more concrete:
@@ -789,14 +844,14 @@ symEval (EAssign lhs rhs, ctx, pathCond) =
   foreachM (symEval (rhs, ctx, pathCond)) $ \(rhsVal, ctx', pathCond') ->
     foreachM (findLValue lhs ctx' pathCond') $ \case
       Just (place, ctx'', pathCond'', created) -> do
-        unless (valueHasType ctx'' rhsVal (place ^. placeType)) $ do
+        unless (valueHasType ctx'' rhsVal (place ^. L.placeType)) $ do
           error $ "Ill-typed assignment from value of type: " ++
             show (typeOfValue ctx'' rhsVal) ++
             " to place with type: " ++
-            show (place ^. placeType)
-        when (place ^. placeConst) $ do
+            show (place ^. L.placeType)
+        when (place ^. L.placeConst) $ do
           error $ "Assignment to constant location: " ++ show lhs
-        return [(rhsVal, set (place ^. placeLens) rhsVal ctx'', pathCond'')]
+        return [(rhsVal, set (place ^. L.placeLens) rhsVal ctx'', pathCond'')]
       _ -> error $ "Invalid l-value: " ++ show lhs
 symEval (EIf cnd thn els, ctx, pathCond) = do
   foreachM (symEval (cnd, ctx, pathCond)) handle
@@ -816,7 +871,7 @@ symEval (EMethod name formals body mtdKind, ctx, pathCond) = do
 symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
   foreachM (findLValue lval ctx pathCond) $ \case
     Just (place, ctx', pathCond', False)
-      | Just oldVal <- ctx' ^? (place ^. placeLens) -> do
+      | Just oldVal <- ctx' ^? (place ^. L.placeLens) -> do
         updPaths <-
           symEval
             ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
@@ -876,7 +931,7 @@ symEval (ECall (EConst VNil) "|" [e1, e2], ctx, pathCond) = do
 symEval (ECall (EConst VNil) "adversary" [], ctx, pathCond) = do
   return
     [ ( VRef (nextAddr ctx)
-      , ctxObjs . at (nextAddr ctx) ?~
+      , L.ctxObjs . at (nextAddr ctx) ?~
         (Object
            { _objLocals = M.empty
            , _objMethods = M.empty
@@ -894,7 +949,7 @@ symEval (ENew fields body, ctx, pathCond) =
   foreachM (symEvalFields fields ctx pathCond) $ \(evaledFields, ctx', pathCond') ->
     let locals = M.fromList (map (second (uncurry3 Local)) evaledFields)
         ctx'' =
-          ctxObjs . at (nextAddr ctx') ?~
+          L.ctxObjs . at (nextAddr ctx') ?~
           Object
             { _objLocals = locals
             , _objMethods = M.empty
@@ -902,24 +957,25 @@ symEval (ENew fields body, ctx, pathCond) =
             , _objAdversary = False
             } $
           ctx'
-        ctx''' = set ctxThis (nextAddr ctx') ctx''
+        ctx''' = set L.ctxThis (nextAddr ctx') ctx''
      in foreachM (symEval (body, ctx''', pathCond')) $ \(bodyVal, ctx'''', pathCond'') ->
           return
             [ ( VRef (nextAddr ctx')
-              , set ctxThis (ctx' ^. ctxThis) ctx''''
+              , set L.ctxThis (ctx' ^. L.ctxThis) ctx''''
               , pathCond'')
             ]
 symEval (tdecl@(ETypeDecl name formals values body), ctx, pathCond)
-  | name `elem` M.keys (ctx ^. ctxTypeDecls) =
+  | name `elem` M.keys (ctx ^. L.ctxTypeDecls) =
     error $ "Duplicate type declaration: " ++ name
-  | otherwise = return [(VNil, ctxTypeDecls . at name ?~ tdecl $ ctx, pathCond)]
+  | otherwise =
+    return [(VNil, L.ctxTypeDecls . at name ?~ tdecl $ ctx, pathCond)]
 symEval (expr@(ENewConstr typeName args), ctx, pathCond)
-  | Just tdecl <- ctx ^. ctxTypeDecls . at typeName
+  | Just tdecl <- ctx ^. L.ctxTypeDecls . at typeName
       -- evaluate new expression stored for the type, then set the object's type
       -- to keep track that this was constructed with a constructor
    = do
     unless
-      (map fst args == map (\(name, _, _) -> name) (tdecl ^. typedeclFormals)) $
+      (map fst args == map (\(name, _, _) -> name) (tdecl ^. L.typedeclFormals)) $
       (error $ "Mismatch between actual and expected constructor arguments: " ++
        show expr)
     let fields =
@@ -932,7 +988,7 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
                  , _fieldType = typ
                  })
             args
-            (tdecl ^. typedeclFormals) ++
+            (tdecl ^. L.typedeclFormals) ++
           map
             (\(name, val) ->
                Field
@@ -941,31 +997,31 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
                  , _immutable = False -- FIXME
                  , _fieldType = typeOfValue ctx val
                  })
-            (tdecl ^. typedeclValues)
+            (tdecl ^. L.typedeclValues)
     foreachM
-      (symEval (ENew fields (fromJust $ tdecl ^? typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
+      (symEval (ENew fields (fromJust $ tdecl ^? L.typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
       case val of
         VRef addr ->
           return
             [ ( val
-              , ctxObjs . ix addr . objType .~ TNamed typeName $ ctx'
+              , L.ctxObjs . ix addr . L.objType .~ TNamed typeName $ ctx'
               , pathCond')
             ]
         _ -> return [(val, ctx', pathCond')] -- object creation may have returned an error
   | otherwise = error $ "No such type: " ++ typeName
 symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
-  let x = setCompr ^. comprVar
+  let x = setCompr ^. L.comprVar
   -- Get new symbolic variable for variable bound by comprehension:
   fv <- (Sym . (`SymVar` TAny)) <$> freshVar x
   -- Bind name in new context, in which we can evaluate predicate
   -- and function expression of comprehension
-  let newCtx = over ctxScope (M.insert x (fv, TAny)) ctx
-  predPaths <- symEval (fromJust (setCompr ^? comprPred), newCtx, pathCond)
+  let newCtx = over L.ctxScope (M.insert x (fv, TAny)) ctx
+  predPaths <- symEval (fromJust (setCompr ^? L.comprPred), newCtx, pathCond)
   comprs <-
     foreachM (pure predPaths) $ \(predVal, ctx', pathCond')
     -- foreachM (symEval (fromJust (setCompr ^? comprBase)
      ->
-      foreachM (symEval (fromJust (setCompr ^? comprValue), ctx', pathCond')) $ \(funVal, ctx'', pathCond'') -> do
+      foreachM (symEval (fromJust (setCompr ^? L.comprValue), ctx', pathCond')) $ \(funVal, ctx'', pathCond'') -> do
         return
           [ Sym
               (SetCompr
@@ -976,15 +1032,15 @@ symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
   return
     [(foldr (\sc v -> Sym (Union sc v)) (VSet S.empty) comprs, ctx, pathCond)]
 symEval (mapCompr@EMapCompr {}, ctx, pathCond) = do
-  let x = mapCompr ^. comprVar
+  let x = mapCompr ^. L.comprVar
   -- FIXME: factor out commonalities with ESetCompr case
   fv <- freshVar x
   let fvExpr = Sym (SymVar fv TAny)
-  let newCtx = over ctxScope (M.insert x (fvExpr, TAny)) ctx
-  predPaths <- symEval (fromJust (mapCompr ^? comprPred), newCtx, pathCond)
+  let newCtx = over L.ctxScope (M.insert x (fvExpr, TAny)) ctx
+  predPaths <- symEval (fromJust (mapCompr ^? L.comprPred), newCtx, pathCond)
   comprs <-
     foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
-      foreachM (symEval (fromJust (mapCompr ^? comprValue), newCtx, pathCond)) $ \(funVal, ctx'', pathCond'') -> do
+      foreachM (symEval (fromJust (mapCompr ^? L.comprValue), newCtx, pathCond)) $ \(funVal, ctx'', pathCond'') -> do
         return
           [ Sym
               (MapCompr
@@ -1027,24 +1083,24 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
                  error $ "Concrete non-map arguments for ⊆ operator: " ++
                  show (v1, v2)
 symEval (EAssume e1 e2, ctx, pathCond) =
-  return [(VNil, over ctxAssumptions ((e1, e2) :) ctx, pathCond)]
+  return [(VNil, over L.ctxAssumptions ((e1, e2) :) ctx, pathCond)]
 -- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 symEval (funDecl@EFunDecl {}, ctx, pathCond) =
   return
     [ ( VNil
       , over
-          ctxFunDecls
-          (M.insert funName (FunDecl funName (funDecl ^. efunDeclArgs)))
+          L.ctxFunDecls
+          (M.insert funName (FunDecl funName (funDecl ^. L.efunDeclArgs)))
           ctx
       , pathCond)
     ]
   where
-    funName = funDecl ^. efunDeclName
+    funName = funDecl ^. L.efunDeclName
 
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = True}
 
-conjunction :: [Prop] -> Prop
-conjunction [] = PTrue
+conjunction :: [L.Prop] -> L.Prop
+conjunction [] = L.PTrue
 conjunction [p] = p
 conjunction ps = foldr1 (:&:) ps

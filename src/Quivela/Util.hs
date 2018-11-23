@@ -1,11 +1,13 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.Util
-  ( heredoc
+  ( debug
+  , heredoc
   , readFileCompileTime
   ) where
 
 import qualified Control.Monad as M
+import qualified Control.Monad.RWS.Strict as R
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as Q
 import qualified Language.Haskell.TH.Syntax as S
@@ -36,3 +38,7 @@ readFileCompileTime inFile = do
     TH.reportError ("readFileCompileTime: No such file: " ++ file)
   S.addDependentFile file
   heredocExpr =<< TH.runIO (readFile file)
+
+-- | Print out debugging information.
+debug :: (R.MonadIO m) => String -> m ()
+debug = R.liftIO . putStrLn -- TODO: move this to a utility module or so

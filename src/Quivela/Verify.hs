@@ -1,47 +1,116 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PatternSynonyms #-}
 
-module Quivela.Verify where
+module Quivela.Verify
+  ( (≈)
+  , fieldsEqual
+  , proveStep
+  , runVerify
+  , toSteps
+  , fieldEqual
+  ) where
 
 import Control.Applicative ((<$>), (<|>))
 import Control.Arrow (second)
-import Control.Lens hiding (Context(..), rewrite)
-import Control.Lens.At
-import Control.Monad
-import Control.Monad.List
+import qualified Control.Lens as C
+import Control.Lens ((%=), (.=), (?~), (^.), (^?), at, set, use, view)
+import Control.Lens.At (ix)
 import Control.Monad.RWS.Strict
+  ( MonadIO
+  , MonadState
+  , MonadWriter
+  , RWST
+  , censor
+  , evalRWST
+  , filterM
+  , foldM
+  , forM
+  , gets
+  , liftIO
+  , listen
+  , modify
+  , runRWST
+  , tell
+  , unless
+  , when
+  )
 import qualified Data.ByteString as BS
-import Data.Data
-import Data.Function
-import Data.Generics hiding (Generic)
-import Data.List
+import Data.Data (Data)
+import Data.Function (on)
+import Data.Generics
+  ( everythingWithContext
+  , everywhere
+  , everywhereBut
+  , everywhereM
+  , extQ
+  , listify
+  , mkM
+  , mkQ
+  , mkT
+  )
+import Data.List ((\\), intercalate, intersect, isInfixOf, nub, nubBy)
 import qualified Data.Map as M
 import qualified Data.Map.Merge.Lazy as M
-import Data.Maybe
+import Data.Maybe (catMaybes, fromJust, listToMaybe)
 import Data.Serialize (Serialize(..), decode, encode, get, put)
 import qualified Data.Set as S
-import Data.Typeable
-import Debug.Trace
+import Data.Typeable (Typeable)
+import Debug.Trace (trace)
 import GHC.Generics (Generic)
-import System.Directory
-import System.Exit
-import System.IO
-import System.IO.Temp
-import System.Microtimer
+import System.Directory (doesFileExist, removeFile)
+import System.Exit (ExitCode(ExitSuccess))
+import System.IO (BufferMode(NoBuffering), hGetLine, hPutStrLn, hSetBuffering)
+import System.IO.Temp (writeTempFile)
+import qualified System.Microtimer as Timer
 import System.Process
+  ( StdStream(CreatePipe)
+  , createProcess
+  , proc
+  , readCreateProcessWithExitCode
+  , std_err
+  , std_in
+  , std_out
+  )
 
-import Quivela.Diff
+import Quivela.Diff (applyDiffs)
+import qualified Quivela.Language as L
 import Quivela.Language
-import Quivela.Parse
+  ( Addr
+  , Context
+  , Expr(..)
+  , Local
+  , Method
+  , MethodKind(..)
+  , Object
+  , PathCond(..)
+  , ProofHint(..)
+  , ProofPart(..)
+  , Prop(..)
+  , SymValue(..)
+  , Type(..)
+  , pattern VRef
+  , Value(..)
+  , Var
+  )
+import qualified Quivela.Parse as P
+import qualified Quivela.SymEval as E
 import Quivela.SymEval
-import Quivela.VerifyPreludes
+  ( Result
+  , Results
+  , Verify
+  , VerifyEnv
+  , VerifyState(..)
+  , emptyVerifyEnv
+  , symEval
+  , useCache
+  )
+import Quivela.Util (debug)
+import Quivela.VerifyPreludes (dafnyPrelude, z3Prelude)
 
 -- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
 -- then the boolean x indicates that a and b are equal/unequal. Otherwise, it cannot be determined
@@ -76,7 +145,7 @@ data VC = VC
   , _goal :: Prop
   } deriving (Read, Ord, Eq, Data, Typeable)
 
-makeLenses ''VC
+C.makeLenses ''VC
 
 data SolverCmd
   = Raw String
@@ -110,27 +179,27 @@ data EmitterState = EmitterState
                                  -- functions, etc.
   } deriving (Read, Show, Eq, Ord, Data, Typeable)
 
-makeLenses ''EmitterState
+C.makeLenses ''EmitterState
 
 -- | Havoc a local variable if it's not an immutable variable
 havocLocal :: Var -> Local -> Verify Local
 havocLocal name l
-  | not (view localImmutable l) = do
-    fv <- freshVar name
-    return $ set (localValue) (Sym (SymVar fv (l ^. localType))) l
+  | not (view L.localImmutable l) = do
+    fv <- E.freshVar name
+    return $ set (L.localValue) (Sym (SymVar fv (l ^. L.localType))) l
   | otherwise = return l
 
 -- | Havoc all non-immutable locals of an object
 havocObj :: Object -> Verify Object
 havocObj obj
-  | obj ^. objAdversary = return obj -- this is a hack, since we currently don't
+  | obj ^. L.objAdversary = return obj -- this is a hack, since we currently don't
   -- support const annotations on global variables
   | otherwise = do
     newLocals <-
       mapM
         (\(name, loc) -> (name, ) <$> havocLocal name loc)
-        (M.toList (obj ^. objLocals))
-    return (set objLocals (M.fromList newLocals) obj)
+        (M.toList (obj ^. L.objLocals))
+    return (set L.objLocals (M.fromList newLocals) obj)
 
 -- | Havoc all objects in a context
 havocContext :: Context -> Verify Context
@@ -158,7 +227,7 @@ newVerifyState = do
   return
     VerifyState
       { _nextVar = M.empty
-      , _verifyPrefixCtx = emptyCtx
+      , _verifyPrefixCtx = L.emptyCtx
       , _alreadyVerified = verificationCache
       , _z3Proc = (hin, hout, procHandle)
       }
@@ -167,7 +236,7 @@ newVerifyState = do
 runVerify :: VerifyEnv -> Verify a -> IO a
 runVerify env action = do
   initState <- newVerifyState
-  (res, state, _) <- runRWST (unVerify action) env initState
+  (res, state, _) <- runRWST (E.unVerify action) env initState
   return res
 
 emptyVC = VC {_conditionName = "vc", _assumptions = [], _goal = PTrue}
@@ -249,28 +318,28 @@ invToAsm (v1, _, _) (v1', _, _) _ =
 -- | Return all invariant methods in given context
 collectInvariants :: Addr -> Context -> [Method]
 collectInvariants addr ctx =
-  filter (\mtd -> mtd ^. methodKind == Invariant) . M.elems $ ctx ^. ctxObjs .
+  filter (\mtd -> mtd ^. L.methodKind == Invariant) . M.elems $ ctx ^. L.ctxObjs .
   ix addr .
-  objMethods
+  L.objMethods
 
 -- | Return all non-relational proof obligations generated by invariants
 invToVCnonRelational :: [Prop] -> Addr -> Result -> Verify [VC]
 invToVCnonRelational assms addr res@(v, ctx, pathCond) = do
   let univInvs = collectInvariants addr ctx
   fmap concat . forM univInvs $ \univInv -> do
-    let formals = univInv ^. methodFormals
-    (args, ctx', pathCond') <- symArgs ctx formals
+    let formals = univInv ^. L.methodFormals
+    (args, ctx', pathCond') <- E.symArgs ctx formals
     let scope = M.fromList (zip (map fst formals) (zip args (map snd formals)))
     paths <-
       symEval
-        ( univInv ^. methodBody
-        , set ctxThis addr (set ctxScope scope ctx')
+        ( univInv ^. L.methodBody
+        , set L.ctxThis addr (set L.ctxScope scope ctx')
         , pathCond' ++ pathCond)
-    foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
+    E.foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
       return $
       [ VC
           { _assumptions = nub $ pathCondI ++ assms
-          , _conditionName = "univInvPreserved_" ++ (univInv ^. methodName)
+          , _conditionName = "univInvPreserved_" ++ (univInv ^. L.methodName)
           , _goal = Not (res :=: VInt 0)
           }
       ]
@@ -337,19 +406,19 @@ onePointTransform vs assms conseq =
 universalInvariantAssms :: Addr -> Context -> PathCond -> Verify [Prop]
 universalInvariantAssms addr ctx pathCond =
   fmap concat . forM (collectInvariants addr ctx) $ \invariantMethod -> do
-    let formals = invariantMethod ^. methodFormals
+    let formals = invariantMethod ^. L.methodFormals
     onlySimpleTypes formals
-    (args, ctx', pathCond') <- symArgs ctx formals
+    (args, ctx', pathCond') <- E.symArgs ctx formals
     let scope = M.fromList (zip (map fst formals) (zip args (map snd formals)))
     let oldRefs = collectRefs ctx'
     let oldSymVars = collectSymVars ctx'
     paths <-
       symEval
-        ( invariantMethod ^. methodBody
-        , set ctxThis addr (set ctxScope scope ctx)
+        ( invariantMethod ^. L.methodBody
+        , set L.ctxThis addr (set L.ctxScope scope ctx)
         , pathCond' ++ pathCond)
     let argNames = map (\(Sym (SymVar name t)) -> (name, t)) args
-    foreachM (return paths) $ \(res, ctxI, pathCondI)
+    E.foreachM (return paths) $ \(res, ctxI, pathCondI)
       -- If there were symbolic objects created on demand, we may now have a bunch
       -- of extra symbolic variables that were introduced. Since these are going
       -- to be arbitrary parameters, we have to quantify over them as well here:
@@ -358,7 +427,7 @@ universalInvariantAssms addr ctx pathCond =
       let newSymVars = collectSymVars (res, ctxI, pathCondI) \\ oldSymVars
       let newRefs =
             map (\(VRef a) -> a) $ collectRefs (res, ctxI, pathCondI) \\ oldRefs
-      refVars <- mapM (freshVar . ("symref" ++) . show) newRefs
+      refVars <- mapM (E.freshVar . ("symref" ++) . show) newRefs
       let replaceRef :: Data p => Addr -> Value -> p -> p
           replaceRef a v = everywhere (mkT replace)
             where
@@ -377,7 +446,7 @@ universalInvariantAssms addr ctx pathCond =
               (nub $ argNames ++ map ((, TInt)) refVars ++ newSymVars)
               pathCondI
               (Not (res :=: VInt 0))
-      return $ replaceAllRefs [Forall vs (conjunction assms :=>: conseq)]
+      return $ replaceAllRefs [Forall vs (E.conjunction assms :=>: conseq)]
 
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = M.Map Addr Addr
@@ -584,11 +653,11 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
   assms <- (invAssms ++) . concat <$> mapM (invToAsm old old') invs
   -- Invariant methods aren't relational and hence we don't need to check them for each pair of
   -- of paths:
-  lhsInvVCs <- foreachM (return ress1) $ invToVCnonRelational assms addr1
-  rhsInvVCs <- foreachM (return ress1') $ invToVCnonRelational assms addr1'
+  lhsInvVCs <- E.foreachM (return ress1) $ invToVCnonRelational assms addr1
+  rhsInvVCs <- E.foreachM (return ress1') $ invToVCnonRelational assms addr1'
   relationalVCs <-
-    foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
-      foreachM (return ress1') $ \res1'@(v1', ctx1', pc1')
+    E.foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
+      E.foreachM (return ress1') $ \res1'@(v1', ctx1', pc1')
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
         -- if we are able to find a trivial bijection resulting in a
@@ -638,8 +707,8 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
                 { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
                 , _conditionName = "advCallsEq"
                 , _goal =
-                    Sym (AdversaryCall (ctx1 ^. ctxAdvCalls)) :=:
-                    applyBij (Sym (AdversaryCall (ctx1' ^. ctxAdvCalls)))
+                    Sym (AdversaryCall (ctx1 ^. L.ctxAdvCalls)) :=:
+                    applyBij (Sym (AdversaryCall (ctx1' ^. L.ctxAdvCalls)))
                 }
         return $ vcRes : vcAdv : invVCs
   return $ relationalVCs ++ lhsInvVCs ++ rhsInvVCs
@@ -657,15 +726,15 @@ methodEquivalenceVCs mtd invs args (VRef a1, ctx1, pathCond1) (VRef a1', ctx1', 
   ctxH1' <- havocContext ctx1'
   results <-
     symEval
-      ( ECall (EConst (VRef a1)) (mtd ^. methodName) (map EConst args)
+      ( ECall (EConst (VRef a1)) (mtd ^. L.methodName) (map EConst args)
       , ctxH1
       , pathCond1)
   results' <-
     symEval
-      ( ECall (EConst (VRef a1')) (mtd ^. methodName) (map EConst args)
+      ( ECall (EConst (VRef a1')) (mtd ^. L.methodName) (map EConst args)
       , if NoAddressBijection `inPartial` invs
           then ctxH1'
-          else set ctxAllocStrategy Decrease ctxH1'
+          else set L.ctxAllocStrategy L.Decrease ctxH1'
       , pathCond1')
   vcs <-
     resultsToVCs
@@ -693,25 +762,25 @@ methodEquivalenceVCs mtd invs args (v1, _, _) (v1', _, _) =
 getField :: [Var] -> Addr -> Context -> Value
 getField [] _ _ = error "Empty list of fields"
 getField [x] addr ctx
-  | Just v <- ctx ^? ctxObjs . ix addr . objLocals . ix x . localValue = v
+  | Just v <- ctx ^? L.ctxObjs . ix addr . L.objLocals . ix x . L.localValue = v
   | otherwise = error $ "getField: No such field: " ++ x
 getField (x:xs) addr ctx
   | Just (VRef addr') <-
-     ctx ^? ctxObjs . ix addr . objLocals . ix x . localValue =
+     ctx ^? L.ctxObjs . ix addr . L.objLocals . ix x . L.localValue =
     getField xs addr' ctx
   | otherwise = error $ "Non-reference in field lookup"
 
 -- | Find the shared methods between two objects in their respective contexts
 sharedMethods :: Addr -> Context -> Addr -> Context -> [Method]
 sharedMethods addrL ctxL addrR ctxR
-  | Just objL <- ctxL ^? ctxObjs . ix addrL
-  , Just objR <- ctxR ^? ctxObjs . ix addrR =
-    let mtdsL = objL ^. objMethods
-        mtdsR = objR ^. objMethods
+  | Just objL <- ctxL ^? L.ctxObjs . ix addrL
+  , Just objR <- ctxR ^? L.ctxObjs . ix addrR =
+    let mtdsL = objL ^. L.objMethods
+        mtdsR = objR ^. L.objMethods
         sharedNames = M.keys mtdsL `intersect` M.keys mtdsR
   -- TODO: check that there are no extraneous methods and that they
   -- take the same number (and type) of arguments
-     in filter ((== NormalMethod) . (^. methodKind)) .
+     in filter ((== NormalMethod) . (^. L.methodKind)) .
         map (fromJust . (`M.lookup` mtdsL)) $
         sharedNames
   | otherwise = error "Invalid addresses passed to sharedMethods"
@@ -908,14 +977,14 @@ checkWithDafny :: (MonadState VerifyState m, MonadIO m) => [VC] -> m Bool
 checkWithDafny [] = return True
 checkWithDafny vcs = do
   debug $ "Checking " ++ show (length vcs) ++ " VCs with Dafny"
-  pctx <- use verifyPrefixCtx
+  pctx <- use E.verifyPrefixCtx
   (_, cmds) <-
     runEmitter pctx $ do
       emitRaw dafnyPrelude
      -- Emit function declarations as uninterpreted functions:
-      forM (pctx ^. ctxFunDecls) $ \decl ->
-        emitRaw $ "function " ++ decl ^. funDeclName ++ "(" ++
-        intercalate ", " (map (++ ": Value") (decl ^. funDeclArgs)) ++
+      forM (pctx ^. L.ctxFunDecls) $ \decl ->
+        emitRaw $ "function " ++ decl ^. L.funDeclName ++ "(" ++
+        intercalate ", " (map (++ ": Value") (decl ^. L.funDeclArgs)) ++
         "): Value\n"
       mapM_ vcToDafny vcs
   tempFile <-
@@ -1095,20 +1164,20 @@ vcToZ3 :: VC -> Emitter ()
 vcToZ3 vc
   -- Emit declarations for uninterpreted functions:
  = do
-  decls <- use (emitterPrefixCtx . ctxFunDecls)
+  decls <- use (emitterPrefixCtx . L.ctxFunDecls)
   forM decls $ \decl -> do
     emitRaw
       (z3Call
          "declare-fun"
-         [ decl ^. funDeclName
+         [ decl ^. L.funDeclName
          , "(" ++
-           intercalate " " (replicate (length (decl ^. funDeclArgs)) "Value") ++
+           intercalate " " (replicate (length (decl ^. L.funDeclArgs)) "Value") ++
            ")"
          , "Value"
          ])
     -- FIXME: For debugging the envelope encryption proof, we emit an assumption that skenc never fails to encrypt
     -- to do this properly, we'd allow specifying such assumptions in the surface syntax
-    when (decl ^. funDeclName == "skenc") $
+    when (decl ^. L.funDeclName == "skenc") $
       emitRaw
         (z3Call
            "assert"
@@ -1117,13 +1186,15 @@ vcToZ3 vc
                [ "(" ++
                  intercalate
                    " "
-                   (map (\arg -> "(" ++ arg ++ " Value)") (decl ^. funDeclArgs)) ++
+                   (map
+                      (\arg -> "(" ++ arg ++ " Value)")
+                      (decl ^. L.funDeclArgs)) ++
                  ")"
                , z3Call
                    "not"
                    [ z3Call
                        "="
-                       [ z3Call (decl ^. funDeclName) (decl ^. funDeclArgs)
+                       [ z3Call (decl ^. L.funDeclName) (decl ^. L.funDeclArgs)
                        , "(VInt 0)"
                        ]
                    ]
@@ -1143,12 +1214,12 @@ vcToZ3 vc
 
 sendToZ3 :: String -> Verify ()
 sendToZ3 line = do
-  (hin, _, _) <- use z3Proc
+  (hin, _, _) <- use E.z3Proc
   liftIO $ hPutStrLn hin line
 
 readLineFromZ3 :: Verify String
 readLineFromZ3 = do
-  (_, hout, _) <- use z3Proc
+  (_, hout, _) <- use E.z3Proc
   liftIO $ hGetLine hout
 
 solverCmdToZ3 :: SolverCmd -> String
@@ -1157,7 +1228,7 @@ solverCmdToZ3 e = "; unimplemented: solverCmdToZ3 (" ++ show e ++ ")"
 
 checkWithZ3 :: VC -> Verify Bool
 checkWithZ3 vc = do
-  pctx <- use verifyPrefixCtx
+  pctx <- use E.verifyPrefixCtx
   -- TODO: implement a more structured way to handle variable
   -- declarations inside a translation function
   (_, vcLines) <-
@@ -1177,7 +1248,7 @@ instance ToZ3 SymValue where
 
 writeToZ3File :: VC -> Verify FilePath
 writeToZ3File vc = do
-  pctx <- use verifyPrefixCtx
+  pctx <- use E.verifyPrefixCtx
   (_, vcLines) <-
     fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
   tempFile <-
@@ -1190,12 +1261,12 @@ checkVCs :: [VC] -> Verify [VC]
 checkVCs [] = return []
 checkVCs vcs = do
   debug $ show (length vcs) ++ " verification conditions"
-  (t, vcs') <- time $ filterM (fmap not . checkWithZ3) vcs
+  (t, vcs') <- Timer.time $ filterM (fmap not . checkWithZ3) vcs
   when (not . null $ vcs') $ do
     debug $ "Remaining VCs in Z3 files: "
     mapM_ (\vc -> writeToZ3File vc >>= \f -> liftIO (debug f)) vcs'
   debug $ show (length vcs') ++ " VCs left after checking with Z3 (" ++
-    formatSeconds t ++
+    Timer.formatSeconds t ++
     ")"
   dafnyRes <- checkWithDafny vcs'
   -- currently we don't have a way to efficiently check just one VC with Dafny, so this
@@ -1210,10 +1281,10 @@ checkEqv useSolvers prefix hints lhs rhs
   -- debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
    = return []
 checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
-  (_, prefixCtx, _) <- fmap singleResult . symEval $ (prefix, emptyCtx, [])
+  (_, prefixCtx, _) <- fmap E.singleResult . symEval $ (prefix, L.emptyCtx, [])
   unless
-    ((from, to) `elem` (prefixCtx ^. ctxAssumptions) || (to, from) `elem`
-     (prefixCtx ^. ctxAssumptions)) $
+    ((from, to) `elem` (prefixCtx ^. L.ctxAssumptions) || (to, from) `elem`
+     (prefixCtx ^. L.ctxAssumptions)) $
     fail $
     "No such assumption: " ++
     show from ++
@@ -1225,7 +1296,7 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
   where
     lhs' = rewriteExpr from to lhs
 checkEqv useSolvers prefix hintsIn lhs rhs = do
-  cached <- S.member (lhs, rhs) <$> use alreadyVerified
+  cached <- S.member (lhs, rhs) <$> use E.alreadyVerified
   (_, hints, _) <- inferInvariants prefix (lhs, hintsIn, rhs)
   withCache <- view useCache
   let noteText =
@@ -1245,12 +1316,12 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
       return []
     else do
       (_, prefixCtx, pathCond) <-
-        fmap singleResult . symEval $ (prefix, emptyCtx, [])
-      verifyPrefixCtx .= prefixCtx
+        fmap E.singleResult . symEval $ (prefix, L.emptyCtx, [])
+      E.verifyPrefixCtx .= prefixCtx
       res1@(VRef a1, ctx1, _) <-
-        singleResult <$> symEval (lhs, prefixCtx, pathCond)
+        E.singleResult <$> symEval (lhs, prefixCtx, pathCond)
       res1'@(VRef a1', ctx1', _) <-
-        singleResult <$> symEval (rhs, prefixCtx, pathCond)
+        E.singleResult <$> symEval (rhs, prefixCtx, pathCond)
     -- check that invariants hold initially
       invLHS <- invToVCnonRelational [] a1 res1
       invRHS <- invToVCnonRelational [] a1' res1'
@@ -1260,10 +1331,10 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
     -- check that there are no other methods except invariants:
       let allMethods :: Addr -> Context -> S.Set String
           allMethods addr ctx =
-            S.fromList . map (^. methodName) .
-            filter ((== NormalMethod) . (^. methodKind)) .
+            S.fromList . map (^. L.methodName) .
+            filter ((== NormalMethod) . (^. L.methodKind)) .
             M.elems $
-            (ctx ^. ctxObjs . ix addr . objMethods)
+            (ctx ^. L.ctxObjs . ix addr . L.objMethods)
           lhsMethods = allMethods a1 ctx1
           rhsMethods = allMethods a1' ctx1'
       when (lhsMethods /= rhsMethods) $
@@ -1276,17 +1347,18 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
           "LHS and RHS do not have the same non-invariant methods; extra methods: " ++
           show extraMtds
       (t, remainingVCs) <-
-        fmap (second ([("_invsInit", remainingInvVCs)] ++)) . time $ forM mtds $ \mtd -> do
-          debug $ note ++ "Checking method: " ++ mtd ^. methodName
-          onlySimpleTypes (mtd ^. methodFormals)
-          (args, _, _) <- symArgs ctx1 (mtd ^. methodFormals)
+        fmap (second ([("_invsInit", remainingInvVCs)] ++)) . Timer.time $
+        forM mtds $ \mtd -> do
+          debug $ note ++ "Checking method: " ++ mtd ^. L.methodName
+          onlySimpleTypes (mtd ^. L.methodFormals)
+          (args, _, _) <- E.symArgs ctx1 (mtd ^. L.methodFormals)
       -- TODO: double-check that we don't need path condition here.
           vcs <- methodEquivalenceVCs mtd hints args res1 res1'
           verificationResult <-
             if useSolvers
               then checkVCs vcs
               else return vcs
-          return (mtd ^. methodName, verificationResult)
+          return (mtd ^. L.methodName, verificationResult)
       if (not . all (null . snd) $ remainingVCs)
         then do
           liftIO . putStrLn $ note ++ "Verification failed for step: "
@@ -1294,14 +1366,14 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
         else do
           cacheVerified lhs rhs
           liftIO . putStrLn $ note ++ "Verification succeeded in " ++
-            formatSeconds t
+            Timer.formatSeconds t
       return remainingVCs
 
 -- | Mark a pair of expressions as successfully verified in the cache
 cacheVerified :: Expr -> Expr -> Verify ()
 cacheVerified lhs rhs = do
-  alreadyVerified %= S.insert (lhs, rhs)
-  verified <- use alreadyVerified
+  E.alreadyVerified %= S.insert (lhs, rhs)
+  verified <- use E.alreadyVerified
   liftIO $ BS.writeFile "cache.bin" (encode verified)
 
 -- | Check two quivela files for equivalence using a list of invariants. The
@@ -1317,9 +1389,9 @@ checkEqvFile ::
   -> FilePath
   -> Verify [(Var, [VC])]
 checkEqvFile verify prefixFile invs lhsFile rhsFile = do
-  prefix <- parseFile prefixFile
-  lhs <- parseFile lhsFile
-  rhs <- parseFile rhsFile
+  prefix <- P.parseFile prefixFile
+  lhs <- P.parseFile lhsFile
+  rhs <- P.parseFile rhsFile
   checkEqv verify prefix invs lhs rhs
 
 -- | Quivela proofs are a series of equivalent expressions and a list of
@@ -1358,30 +1430,30 @@ clearCache = do
 
 commonVars :: [Var] -> Addr -> Context -> Addr -> Context -> [[Var]]
 commonVars prefixFields addrL ctxL addrR ctxR
-  | Just objL <- ctxL ^. ctxObjs . at addrL
-  , Just objR <- ctxR ^. ctxObjs . at addrR =
+  | Just objL <- ctxL ^. L.ctxObjs . at addrL
+  , Just objR <- ctxR ^. L.ctxObjs . at addrR =
     let common =
           M.filterWithKey
             (\field locL ->
-               case objR ^. objLocals . at field of
+               case objR ^. L.objLocals . at field of
                  Just locR ->
-                   locL ^. localType == locR ^. localType &&
-                   not (locL ^. localImmutable) &&
-                   not (locR ^. localImmutable) &&
+                   locL ^. L.localType == locR ^. L.localType &&
+                   not (locL ^. L.localImmutable) &&
+                   not (locR ^. L.localImmutable) &&
                    locL ^.
-                   localValue ==
+                   L.localValue ==
                    locR ^.
-                   localValue
+                   L.localValue
                  _ -> False)
-            (objL ^. objLocals)
+            (objL ^. L.objLocals)
         commonObjs =
           M.mapWithKey
             (\field locL ->
-               case ( locL ^. localValue
-                    , objR ^? objLocals . ix field . localValue) of
+               case ( locL ^. L.localValue
+                    , objR ^? L.objLocals . ix field . L.localValue) of
                  (VRef aL, Just (VRef aR)) -> Just (field, aL, aR)
                  _ -> Nothing)
-            (objL ^. objLocals)
+            (objL ^. L.objLocals)
      in map (\field -> prefixFields ++ [field]) (M.keys common) ++
         (concatMap
            (\(field, aL, aR) ->
@@ -1395,9 +1467,9 @@ inferInvariants :: Expr -> Step -> Verify Step
 inferInvariants prefix step@(lhs, invs, rhs)
   | any (\x -> (x === NoInfer) == Just True) invs = return step
   | otherwise = do
-    (_, prefixCtx, _) <- singleResult <$> symEval (prefix, emptyCtx, [])
-    (VRef addrL, ctxL, _) <- singleResult <$> symEval (lhs, prefixCtx, [])
-    (VRef addrR, ctxR, _) <- singleResult <$> symEval (rhs, prefixCtx, [])
+    (_, prefixCtx, _) <- E.singleResult <$> symEval (prefix, L.emptyCtx, [])
+    (VRef addrL, ctxL, _) <- E.singleResult <$> symEval (lhs, prefixCtx, [])
+    (VRef addrR, ctxR, _) <- E.singleResult <$> symEval (rhs, prefixCtx, [])
     let comVars = commonVars [] addrL ctxL addrR ctxR
     debug $ "Inferred equality invariants on fields: " ++ show comVars
     return (lhs, invs ++ map fieldEqual comVars, rhs)

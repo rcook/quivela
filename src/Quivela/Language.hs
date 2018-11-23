@@ -1,36 +1,87 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE Rank2Types #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE TemplateHaskell #-}
 
-module Quivela.Language where
+module Quivela.Language
+  ( Addr
+  , AllocStrategy(..)
+  , Context(..)
+  , Diff(..)
+  , Expr(..)
+  , Field(..)
+  , FunDecl(..)
+  , Local(..)
+  , Method(..)
+  , MethodKind(..)
+  , Object(..)
+  , PathCond
+  , Place(..)
+  , Proof
+  , ProofHint(..)
+  , ProofPart(..)
+  , Prop(..)
+  , SymValue(..)
+  , Type(..)
+  , Value(..)
+  , pattern VRef
+  , Var
+  , comprPred
+  , comprValue
+  , comprVar
+  , ctxAdvCalls
+  , ctxAllocStrategy
+  , ctxAssumptions
+  , ctxFunDecls
+  , ctxObjs
+  , ctxScope
+  , ctxThis
+  , ctxTypeDecls
+  , efunDeclArgs
+  , efunDeclName
+  , emethodName
+  , emptyCtx
+  , fieldInit
+  , fieldName
+  , fieldType
+  , funDeclArgs
+  , funDeclName
+  , immutable
+  , localImmutable
+  , localType
+  , localValue
+  , methodBody
+  , methodFormals
+  , methodKind
+  , methodName
+  , newBody
+  , newFields
+  , objAdversary
+  , objLocals
+  , objMethods
+  , objType
+  , placeConst
+  , placeLens
+  , placeType
+  , symVal
+  , typedeclBody
+  , typedeclFormals
+  , typedeclValues
+  , valMap
+  , varBindings
+  ) where
 
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
-import Control.Lens hiding (Context(..))
-import Control.Lens.At
-import Control.Monad
-import Control.Monad.List
-import Control.Monad.RWS.Strict
-import Data.Data
-import Data.List
+import qualified Control.Lens as C
+import Control.Lens ((^.), set)
+import Data.Data (Data)
 import qualified Data.Map as M
-import Data.Maybe
-import Data.Serialize (Serialize, get, put)
+import Data.Serialize (Serialize, get)
 import qualified Data.Set as S
-import Data.Typeable
-import GHC.Generics
-import System.IO
-import System.Process
+import Data.Typeable (Typeable)
+import GHC.Generics (Generic)
 
 {- Lenses
 
@@ -339,7 +390,7 @@ instance Show ProofPart where
 
 concat <$>
   mapM
-    makeLenses
+    C.makeLenses
     [ ''Method
     , ''Object
     , ''Context
@@ -468,7 +519,3 @@ emptyCtx =
 
 emptyCtxRHS :: Context
 emptyCtxRHS = set ctxAllocStrategy Decrease emptyCtx
-
--- | Print out debugging information.
-debug :: (MonadIO m) => String -> m ()
-debug = liftIO . putStrLn -- TODO: move this to a utility module or so

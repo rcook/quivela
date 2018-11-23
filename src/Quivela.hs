@@ -1,9 +1,9 @@
 module Quivela
-  ( module Quivela.Parse
+  ( module Quivela.Language
+  , module Quivela.Parse
+  , module Quivela.QuasiQuote
   , module Quivela.SymEval
   , module Quivela.Verify
-  , module Quivela.Language
-  , module Quivela.QuasiQuote
   ) where
 
 import Quivela.Language
