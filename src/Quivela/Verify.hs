@@ -110,7 +110,7 @@ import Quivela.SymEval
   , useCache
   )
 import Quivela.Util (debug)
-import Quivela.VerifyPreludes (dafnyPrelude, z3Prelude)
+import Quivela.VerifyPreludes (z3Prelude)
 
 -- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
 -- then the boolean x indicates that a and b are equal/unequal. Otherwise, it cannot be determined
@@ -841,120 +841,7 @@ symVarName :: SymValue -> Var
 symVarName (SymVar n t) = n
 symVarName x = error "symVarName: Not a SymVar: " ++ show x
 
--- | Type class for things that can be converted into Dafny terms
-class ToDafny a where
-  toDafny :: a -> Emitter String
-
-listToDafny :: ToDafny a => [a] -> Emitter String
-listToDafny [] = return "LNil()"
-listToDafny (v:vs) = do
-  car <- toDafny v
-  cdr <- listToDafny vs
-  return $ "Cons(" ++ car ++ ", " ++ cdr ++ ")"
-
-instance ToDafny a => ToDafny [a] where
-  toDafny = listToDafny
-
-instance ToDafny Value where
-  toDafny = valueToDafny
-
-instance (ToDafny a, ToDafny b) => ToDafny (a, b) where
-  toDafny (a, b) = do
-    car <- toDafny a
-    cdr <- toDafny b
-    return $ "Pair(" ++ car ++ ", " ++ cdr ++ ")"
-
 concatM = fmap concat . sequence
-
-instance ToDafny SymValue where
-  toDafny = symValToDafny
-
-dafnyFunCall :: String -> [String] -> String
-dafnyFunCall f args = f ++ "(" ++ intercalate ", " args ++ ")"
-
-symValToDafny :: SymValue -> Emitter String
-symValToDafny (SymVar s t) = translateVar s "Value"
-symValToDafny (Insert k v m) = dafnyFunCall "Insert" <$> mapM toDafny [k, v, m]
-symValToDafny (Lookup k m) = dafnyFunCall "Lookup" <$> mapM toDafny [k, m]
-symValToDafny (Proj tup idx) = dafnyFunCall "Proj" <$> mapM toDafny [tup, idx]
-symValToDafny (AdversaryCall advCalls) =
-  dafnyFunCall "Adversary" . (: []) <$> toDafny advCalls
-symValToDafny (Add e1 e2) = dafnyFunCall "Add" <$> mapM toDafny [e1, e2]
-symValToDafny (Mul e1 e2) = dafnyFunCall "Mul" <$> mapM toDafny [e1, e2]
-symValToDafny (Sub e1 e2) = dafnyFunCall "Sub" <$> mapM toDafny [e1, e2]
-symValToDafny (Div e1 e2) = dafnyFunCall "Div" <$> mapM toDafny [e1, e2]
-symValToDafny (Lt e1 e2) = dafnyFunCall "Lt" <$> mapM toDafny [e1, e2]
-symValToDafny (Le e1 e2) = dafnyFunCall "Le" <$> mapM toDafny [e1, e2]
-symValToDafny (ITE tst thn els) = do
-  tstDafny <- toDafny tst
-  [thnDafny, elsDafny] <- mapM toDafny [thn, els]
-  return $ "(if " ++ tstDafny ++ " then " ++ thnDafny ++ " else " ++ elsDafny ++
-    ")"
-symValToDafny (Ref a) = return $ "VRef(" ++ show a ++ ")"
-symValToDafny (SymRef s) =
-  dafnyFunCall "VRef" <$> sequence [translateVar s "int"]
-symValToDafny (Deref obj field) =
-  dafnyFunCall "Deref" <$> sequence [toDafny obj, pure ("\"" ++ field ++ "\"")]
-symValToDafny (Z v) = dafnyFunCall "Z" <$> sequence [toDafny v]
-symValToDafny (Call name args) = dafnyFunCall name <$> mapM toDafny args
-symValToDafny (SetCompr val name pred) = do
-  predD <- toDafny pred
-  valD <- valueToDafny val
-  nameD <- translateVar name "Value"
-  return $ "Set(set " ++ nameD ++ ":Value | " ++ predD ++ " :: " ++ valD ++ ")"
-symValToDafny (Union s1 s2) =
-  dafnyFunCall "Union" <$> sequence [toDafny s1, toDafny s2]
-symValToDafny (In elt set) =
-  dafnyFunCall "In" <$> sequence [toDafny elt, toDafny set]
-
-valueToDafny :: Value -> Emitter String
-valueToDafny (VInt i) = return $ "Int(" ++ show i ++ ")"
-valueToDafny (VTuple vs) = concatM [pure "Tuple(", toDafny vs, pure ")"]
-valueToDafny (VMap m) = concatM [pure "Map(", toDafny (M.toList m), pure ")"]
-valueToDafny VNil = return "Nil()"
-valueToDafny (Sym sv) = symValToDafny sv
-valueToDafny (VSet vals) = do
-  valEncodings <- mapM valueToDafny (S.toList vals)
-  return $ "Set({" ++ intercalate ", " valEncodings ++ "})"
-
-instance ToDafny Prop where
-  toDafny = propToDafny
-
-propToDafny :: Prop -> Emitter String
-propToDafny (x :=: y) = concatM [valueToDafny x, pure " == ", valueToDafny y]
-propToDafny (Not (x :=: y)) = concatM [toDafny x, pure " != ", toDafny y]
-propToDafny (Not p) = concatM [pure "!", pure "(", propToDafny p, pure ")"]
-propToDafny PTrue = return "true"
-propToDafny PFalse = return "false"
-propToDafny (p1 :&: p2) =
-  concatM [pure "(", toDafny p1, pure ") && (", toDafny p2, pure ")"]
-propToDafny (p1 :=>: p2) =
-  concatM [pure "(", toDafny p1, pure ") ==> (", toDafny p2, pure ")"]
-propToDafny (Forall [] p) = toDafny p
-propToDafny (Forall formals p) =
-  concatM
-    [ pure "forall "
-    , intercalate ", " . map ((++ ": Value")) <$>
-      mapM (\(x, t) -> translateVar x "Value") formals
-    , pure " :: "
-    , toDafny p
-    ]
-
-asmToDafny :: Prop -> Emitter ()
-asmToDafny p = emitRaw . ("  requires " ++) =<< propToDafny p
-
-vcToDafny :: VC -> Emitter ()
-vcToDafny vc = do
-  lemName <- (`freshEmitterVar` "_unused") $ vc ^. conditionName
-  lemArgs <- mapM (\(x, t) -> translateVar x "Value") $ collectSymVars vc
-  emitRaw $ "lemma " ++ lemName ++ "(" ++
-    intercalate ", " (map (++ ": Value") lemArgs) ++
-    ")"
-  mapM_ asmToDafny (vc ^. assumptions)
-  dafnyGoal <- propToDafny $ vc ^. goal
-  emitRaw $ "  ensures " ++ dafnyGoal
-  emitRaw $ "{ LookupSame(); LookupDifferent(); }"
-
 initialEmitterState prefixCtx =
   EmitterState
     { _nextEmitterVar = M.empty
@@ -966,44 +853,6 @@ initialEmitterState prefixCtx =
 runEmitter :: MonadIO m => Context -> Emitter a -> m (a, [SolverCmd])
 runEmitter prefix action =
   liftIO $ evalRWST (unEmitter action) () (initialEmitterState prefix)
-
-solverCmdToDafny :: SolverCmd -> String
-solverCmdToDafny (Raw s) = s
-solverCmdToDafny cmd =
-  error "not implemented yet: solverCmdToDafny: " ++ show cmd
-
--- | Try to verify a list of verification conditions with dafny
-checkWithDafny :: (MonadState VerifyState m, MonadIO m) => [VC] -> m Bool
-checkWithDafny [] = return True
-checkWithDafny vcs = do
-  debug $ "Checking " ++ show (length vcs) ++ " VCs with Dafny"
-  pctx <- use E.verifyPrefixCtx
-  (_, cmds) <-
-    runEmitter pctx $ do
-      emitRaw dafnyPrelude
-     -- Emit function declarations as uninterpreted functions:
-      forM (pctx ^. L.ctxFunDecls) $ \decl ->
-        emitRaw $ "function " ++ decl ^. L.funDeclName ++ "(" ++
-        intercalate ", " (map (++ ": Value") (decl ^. L.funDeclArgs)) ++
-        "): Value\n"
-      mapM_ vcToDafny vcs
-  tempFile <-
-    liftIO $
-    writeTempFile "." "dafny-vc.dfy" (unlines . map solverCmdToDafny $ cmds)
-  debug $ "Dafny code written to " ++ tempFile
-  (code, out, err) <-
-    liftIO $
-    readCreateProcessWithExitCode
-      (proc "time" ["dafny", "/compile:0", tempFile])
-      ""
-  if code == ExitSuccess
-    then do
-      debug "Verification succeeded"
-      debug err
-      return True
-    else do
-      debug $ "Verification failed\n:stdout:\n" ++ out ++ "\nstderr:\n" ++ err
-      return False
 
 -- | Type class for values that can be converted into Z3 terms/formulas
 class ToZ3 a where
@@ -1268,12 +1117,7 @@ checkVCs vcs = do
   debug $ show (length vcs') ++ " VCs left after checking with Z3 (" ++
     Timer.formatSeconds t ++
     ")"
-  dafnyRes <- checkWithDafny vcs'
-  -- currently we don't have a way to efficiently check just one VC with Dafny, so this
-  -- is all or nothing:
-  if dafnyRes
-    then return []
-    else return vcs'
+  return vcs'
 
 checkEqv :: Bool -> Expr -> [ProofHint] -> Expr -> Expr -> Verify [(Var, [VC])]
 checkEqv useSolvers prefix hints lhs rhs
