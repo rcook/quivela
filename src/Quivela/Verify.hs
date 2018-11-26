@@ -66,7 +66,7 @@ import System.Directory (doesFileExist, removeFile)
 import System.Exit (ExitCode(ExitSuccess))
 import System.IO (BufferMode(NoBuffering), hGetLine, hPutStrLn, hSetBuffering)
 import System.IO.Temp (writeTempFile)
-import qualified System.Microtimer as Timer
+import qualified System.Timer as Timer
 import System.Process
   ( StdStream(CreatePipe)
   , createProcess

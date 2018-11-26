@@ -40,8 +40,6 @@ packages:
 # (e.g., acme-missiles-0.3)
 # extra-deps: []
 extra-deps:
-- vendor/microtimer
-
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
