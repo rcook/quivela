@@ -1,0 +1,84 @@
+#!/usr/bin/env stack
+-- stack --resolver lts-12.6 script --package directory,pipes,strict,time
+import qualified Control.Monad as M
+import qualified Data.List as L
+import qualified Data.Time.Calendar as Cal
+import qualified Data.Time.Clock as Clock
+import qualified Pipes as P
+import Pipes (Effect, Producer, for, lift)
+import Prelude hiding (readFile)
+import qualified System.Directory as D
+import System.IO (FilePath, isEOF)
+import System.IO.Strict (readFile)
+
+type Year = String
+
+firstYear :: Year -- Dev started in 2018
+firstYear = "2018"
+
+fileNeedsLicense :: FilePath -> Bool
+fileNeedsLicense f =
+  L.all
+    id
+    [ not (L.isInfixOf "/.git/" f)
+    , not (L.isInfixOf "/.stack-work/" f)
+    , L.isSuffixOf ".hs" f
+    ]
+
+licenseEnd :: String
+licenseEnd = "Apache-2.0\n"
+
+licensePrefixEndIndex :: String -> Maybe Int
+licensePrefixEndIndex contents =
+  if contents == "" then Nothing
+  else if L.isPrefixOf licenseEnd contents then Just (L.length licenseEnd)
+  else fmap (1 +) (licensePrefixEndIndex (tail contents))
+
+licenseHeader :: Year -> String
+licenseHeader endYear =
+  let yearBlurb =
+        if firstYear == endYear
+          then firstYear
+          else firstYear ++ "-" ++ endYear
+   in "-- Copyright " ++
+      yearBlurb ++
+      " Amazon.com, Inc. or its affiliates. All Rights Reserved.\n" ++
+      "-- SPDX-License-Identifier: " ++ licenseEnd
+
+fixupLicenseHeader :: Year -> String -> String
+fixupLicenseHeader year fileContents =
+  let header = licenseHeader year
+      contentsNoHeader = case licensePrefixEndIndex fileContents of
+        Nothing -> fileContents
+        Just n ->  L.drop n fileContents
+   in header ++ contentsNoHeader
+
+getYear :: IO String
+getYear = do
+  d <- Clock.getCurrentTime
+  let (year, _, _) = Cal.toGregorian (Clock.utctDay d)
+  return (show year)
+
+lsFiles :: FilePath -> Producer String IO ()
+lsFiles dir = do
+  allRelFiles <- lift $ fmap L.sort (D.listDirectory dir)
+  let allFiles = fmap (\f -> dir ++ "/" ++ f) allRelFiles
+  dirs <- lift $ M.filterM D.doesDirectoryExist allFiles
+  M.mapM_ P.yield (L.filter fileNeedsLicense allFiles)
+  M.mapM_ lsFiles dirs
+
+processFiles :: Year -> FilePath -> Effect IO ()
+processFiles year dir =
+  for (lsFiles dir) $ \f -> do
+    lift $ putStrLn ("Reading " ++ f)
+    contents <- lift $ readFile f
+    let contents' = fixupLicenseHeader year contents
+    lift $ putStrLn ("Writing " ++ f)
+    lift $ writeFile f contents'
+
+main :: IO ()
+main = do
+  putStrLn "Adding license headers..."
+  cwd <- D.getCurrentDirectory
+  year <- getYear
+  P.runEffect (processFiles year cwd)
