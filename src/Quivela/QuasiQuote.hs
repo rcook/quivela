@@ -11,7 +11,7 @@ import qualified Control.Arrow
 import qualified Control.Monad as M
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as Q
-import qualified System.Microtimer as Timer
+import qualified System.Timer as Timer
 
 import qualified Quivela.Language as L
 import qualified Quivela.Parse as P
