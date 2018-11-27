@@ -9,7 +9,7 @@ import qualified Data.Map as M
 import Quivela
 
 prove
-  (set useCache False emptyVerifyEnv)
+  emptyVerifyEnv
   [prog'|
 function skenc(k, a, m)
 function skdec(k, a, c)

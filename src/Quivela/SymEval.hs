@@ -1100,7 +1100,7 @@ symEval (funDecl@EFunDecl {}, ctx, pathCond) =
     funName = funDecl ^. L.efunDeclName
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = True}
+emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = False}
 
 conjunction :: [L.Prop] -> L.Prop
 conjunction [] = L.PTrue

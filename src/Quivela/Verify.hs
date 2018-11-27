@@ -10,11 +10,11 @@
 
 module Quivela.Verify
   ( (≈)
+  , fieldEqual
   , fieldsEqual
   , proveStep
   , runVerify
   , toSteps
-  , fieldEqual
   ) where
 
 import Control.Applicative ((<$>), (<|>))
@@ -107,7 +107,6 @@ import Quivela.SymEval
   , Verify
   , VerifyEnv
   , VerifyState(..)
-  , emptyVerifyEnv
   , symEval
   , useCache
   )
@@ -1354,6 +1353,3 @@ infixr 5 ≈
 
 nop :: Expr
 nop = ENop
-
-noCache :: VerifyEnv
-noCache = set useCache False emptyVerifyEnv

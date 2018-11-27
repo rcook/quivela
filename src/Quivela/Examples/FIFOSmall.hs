@@ -8,7 +8,7 @@ import Control.Lens
 import Quivela
 
 prove
-  (set useCache False emptyVerifyEnv)
+  emptyVerifyEnv
   [prog'|
    method Fifo(n) {
      new (const n=n, s:int=0, r:int=0, h=0) {
