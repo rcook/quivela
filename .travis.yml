@@ -25,3 +25,8 @@ install:
 
 script:
 - stack --no-terminal test --haddock --no-haddock-deps
+
+notifications:
+  email:
+    recipients:
+      - quivela-team@amazon.com
