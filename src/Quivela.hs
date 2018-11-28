@@ -5,6 +5,7 @@ module Quivela
   , module Quivela.Parse
   , module Quivela.QuasiQuote
   , module Quivela.SymEval
+  , module Quivela.Util
   , module Quivela.Verify
   ) where
 
@@ -12,4 +13,5 @@ import Quivela.Language
 import Quivela.Parse
 import Quivela.QuasiQuote
 import Quivela.SymEval
+import Quivela.Util
 import Quivela.Verify

@@ -32,6 +32,7 @@ module Quivela.Language
   , comprPred
   , comprValue
   , comprVar
+  , conjunction
   , ctxAdvCalls
   , ctxAllocStrategy
   , ctxAssumptions
@@ -60,6 +61,7 @@ module Quivela.Language
   , methodName
   , newBody
   , newFields
+  , nop
   , objAdversary
   , objLocals
   , objMethods
@@ -339,6 +341,11 @@ data Prop
   | PFalse
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
+conjunction :: [Prop] -> Prop
+conjunction [] = PTrue
+conjunction [p] = p
+conjunction ps = foldr1 (:&:) ps
+
 -- | A path condition is a list of propositions that all hold on a given path
 -- These could be stored as just one big conjunction instead, but representing
 -- them as a list simplifies reasoning about which paths are prefixes of others.
@@ -522,3 +529,6 @@ emptyCtx =
 
 emptyCtxRHS :: Context
 emptyCtxRHS = set ctxAllocStrategy Decrease emptyCtx
+
+nop :: Expr
+nop = ENop

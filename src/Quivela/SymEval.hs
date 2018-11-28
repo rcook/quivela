@@ -13,10 +13,8 @@ module Quivela.SymEval
   , VerifyEnv(..)
   , VerifyState(..)
   , alreadyVerified
-  , conjunction
   , emptyVerifyEnv
   , freshVar
-  , foreachM
   , singleResult
   , symArgs
   , symEval
@@ -80,7 +78,8 @@ import Quivela.Language
   , Value(..)
   , Var
   )
-import Quivela.Util (debug)
+import qualified Quivela.Util as U
+import Quivela.Util (debug, foreachM)
 import System.IO (Handle)
 import System.Process (ProcessHandle)
 
@@ -460,15 +459,6 @@ lookupVar x ctx
   , Just v <- ctx' ^? (place ^. L.placeLens) = v
   | otherwise = evalError ("No such variable: " ++ x) ctx
 
--- | Take a list of monadic actions producing lists and map another monadic function over
--- the list and concatenate all results. This is basically a monadic version of the
--- bind operator in the list monad.
-foreachM :: (Monad m) => m [a] -> (a -> m [b]) -> m [b]
-foreachM s act = do
-  xs <- s
-  ys <- mapM act xs
-  return $ concat ys
-
 -- | Add a method definition to the context
 defineMethod :: Var -> [(Var, Type)] -> Expr -> MethodKind -> Context -> Context
 defineMethod name formals body kind ctx
@@ -521,10 +511,6 @@ nextAddr ctx =
   case ctx ^. L.ctxAllocStrategy of
     Increase -> maximum (M.keys (ctx ^. L.ctxObjs)) + 1
     Decrease -> minimum (M.keys (ctx ^. L.ctxObjs)) - 1
-
--- | Uncurry a three-argument function (useful for partial application)
-uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
-uncurry3 f (a, b, c) = f a b c
 
 -- | Try to find a method of the given name in the object at that address
 findMethod :: Addr -> Var -> Context -> Maybe Method
@@ -948,7 +934,7 @@ symEval (ECall obj name args, ctx, pathCond) =
       symEvalCall vobj name evaledArgs ctx'' pathCond''
 symEval (ENew fields body, ctx, pathCond) =
   foreachM (symEvalFields fields ctx pathCond) $ \(evaledFields, ctx', pathCond') ->
-    let locals = M.fromList (map (second (uncurry3 Local)) evaledFields)
+    let locals = M.fromList (map (second (U.uncurry3 Local)) evaledFields)
         ctx'' =
           L.ctxObjs . at (nextAddr ctx') ?~
           Object
@@ -1028,7 +1014,7 @@ symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
               (SetCompr
                  funVal
                  x
-                 (conjunction $ Not (predVal :=: VInt 0) : pathCond''))
+                 (L.conjunction $ Not (predVal :=: VInt 0) : pathCond''))
           ]
   return
     [(foldr (\sc v -> Sym (Union sc v)) (VSet S.empty) comprs, ctx, pathCond)]
@@ -1047,7 +1033,7 @@ symEval (mapCompr@EMapCompr {}, ctx, pathCond) = do
               (MapCompr
                  fv
                  funVal
-                 (conjunction $ Not (predVal :=: VInt 0) : pathCond' ++
+                 (L.conjunction $ Not (predVal :=: VInt 0) : pathCond' ++
                   pathCond''))
           ]
   return
@@ -1099,8 +1085,3 @@ symEval (funDecl@EFunDecl {}, ctx, pathCond) =
 
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = False}
-
-conjunction :: [L.Prop] -> L.Prop
-conjunction [] = L.PTrue
-conjunction [p] = p
-conjunction ps = foldr1 (:&:) ps
