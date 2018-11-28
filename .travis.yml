@@ -1,0 +1,27 @@
+dist: xenial
+
+sudo: false
+
+language: generic
+
+cache:
+  directories:
+  - $HOME/.stack
+
+addons:
+  apt:
+    packages:
+      - libgmp-dev
+
+before_install:
+- mkdir -p ~/.local/bin
+- export PATH=$HOME/.local/bin:$PATH
+- travis_retry curl -L https://github.com/Z3Prover/z3/releases/download/z3-4.8.3/z3-4.8.3.7f5d66c3c299-x64-ubuntu-16.04.zip -o z3.zip
+- unzip -j z3.zip z3-4.8.3.7f5d66c3c299-x64-ubuntu-16.04/bin/z3 -d ~/.local/bin
+- travis_retry curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+
+install:
+- stack --no-terminal --install-ghc test --only-dependencies
+
+script:
+- stack --no-terminal test --haddock --no-haddock-deps
