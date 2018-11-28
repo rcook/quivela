@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/awslabs/quivela.svg?branch=master)](https://travis-ci.org/awslabs/quivela)
+
 # quivela2 protocol verifier
 
 `quivela2` is a tool to verify protocols modeled as object-oriented programs.
