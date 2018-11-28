@@ -226,7 +226,6 @@ setComprExpr = do
   return $
     ESetCompr
       { _comprVar = name
-                     -- , _comprBase = base
       , _comprPred = ECall (EConst VNil) "&" [EIn (EVar name) base, pred]
       , _comprValue = fun
       }
@@ -238,8 +237,6 @@ mapComprExpr = do
   symbol "->" <|> symbol "↦"
   val <- withState (set inTuple True . set pipeAsOr False) expr
   symbol "|"
-  --  (reserved "in" <|> (symbol "∈" *> pure ()))
-  -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
   pred <- withState (set inTuple True) expr
   symbol "]"
   return $ EMapCompr {_comprVar = name, _comprValue = val, _comprPred = pred}

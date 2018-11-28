@@ -820,7 +820,6 @@ symEval (expr@(EProj obj name), ctx, pathCond) =
           then return [(Sym (Deref val name), ctx', pathCond')]
           else foreachM (pure forced) $ \(val', ctx'', pathCond'') -> do
                  symEval (EProj (EConst val') name, ctx'', pathCond'')
-      -- VInt 0 -> return [(VInt 0, ctx', pathCond')]
       _ -> return [(Sym (Deref val name), ctx', pathCond')]
 symEval (EIdx base idx, ctx, pathCond) =
   foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
@@ -832,9 +831,9 @@ symEval (EIdx base idx, ctx, pathCond) =
             then return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
             else case M.lookup idxVal vals of
                    Just val -> return [(val, ctx'', pathCond'')]
-                   Nothing ->
+                   Nothing -- if we can't find the value in the map, keep the lookup symbolic:
+                    ->
                      if isSymbolic idxVal
-                                  -- if we can't find the value in the map, keep the lookup symbolic:
                        then return
                               [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
                        else return [((VInt 0), ctx'', pathCond'')]
@@ -1086,7 +1085,6 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
                  show (v1, v2)
 symEval (EAssume e1 e2, ctx, pathCond) =
   return [(VNil, over L.ctxAssumptions ((e1, e2) :) ctx, pathCond)]
--- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 symEval (funDecl@EFunDecl {}, ctx, pathCond) =
   return
     [ ( VNil
