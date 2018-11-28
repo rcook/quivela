@@ -24,6 +24,8 @@ library:
   - Quivela.QuasiQuote
   - Quivela.Examples
   - Quivela.Examples.ETM
+  - Quivela.Examples.Envelope
+  - Quivela.Examples.FIFO
   - Quivela.Language
   - Quivela.Diff
   - Quivela
@@ -53,8 +55,8 @@ library:
 
 tests:
   quivela-test:
-    main:                Spec.hs
-    source-dirs:         test
+    main: Spec.hs
+    source-dirs: test
     ghc-options:
     - -threaded
     - -rtsopts

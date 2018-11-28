@@ -4,8 +4,10 @@
 
 module Quivela.Util
   ( debug
+  , foreachM
   , heredoc
   , readFileCompileTime
+  , uncurry3
   ) where
 
 import qualified Control.Monad as M
@@ -44,3 +46,16 @@ readFileCompileTime inFile = do
 -- | Print out debugging information.
 debug :: (R.MonadIO m) => String -> m ()
 debug = R.liftIO . putStrLn -- TODO: move this to a utility module or so
+
+-- | Take a list of monadic actions producing lists and map another monadic function over
+-- the list and concatenate all results. This is basically a monadic version of the
+-- bind operator in the list monad.
+foreachM :: (Monad m) => m [a] -> (a -> m [b]) -> m [b]
+foreachM s act = do
+  xs <- s
+  ys <- mapM act xs
+  return $ concat ys
+
+-- | Uncurry a three-argument function (useful for partial application)
+uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
+uncurry3 f (a, b, c) = f a b c

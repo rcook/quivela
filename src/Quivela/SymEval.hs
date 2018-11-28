@@ -13,10 +13,8 @@ module Quivela.SymEval
   , VerifyEnv(..)
   , VerifyState(..)
   , alreadyVerified
-  , conjunction
   , emptyVerifyEnv
   , freshVar
-  , foreachM
   , singleResult
   , symArgs
   , symEval
@@ -58,6 +56,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromJust, maybeToList)
 import Data.Serialize (Serialize, get, put)
 import qualified Data.Set as S
+import Data.Set (intersection, union)
 import Data.Typeable (Typeable)
 import qualified Quivela.Language as L
 import Quivela.Language
@@ -80,7 +79,8 @@ import Quivela.Language
   , Value(..)
   , Var
   )
-import Quivela.Util (debug)
+import qualified Quivela.Util as U
+import Quivela.Util (debug, foreachM)
 import System.IO (Handle)
 import System.Process (ProcessHandle)
 
@@ -191,6 +191,12 @@ typeOfValue ctx (VInt i) = TInt
 typeOfValue ctx VNil = TAny
 typeOfValue ctx (Sym sv) = typeOfSymValue ctx sv
 typeOfValue ctx (VTuple vs) = TTuple $ map (typeOfValue ctx) vs
+typeOfValue ctx (VSet vs) = TSet tv
+  where
+    valueTypes = map (typeOfValue ctx) . S.elems $ vs
+    tv
+      | [t] <- nub valueTypes = t
+      | otherwise = TAny
 typeOfValue ctx (VMap vs) = TMap tk tv
   where
     keyTypes = map (typeOfValue ctx) . M.keys $ vs
@@ -460,15 +466,6 @@ lookupVar x ctx
   , Just v <- ctx' ^? (place ^. L.placeLens) = v
   | otherwise = evalError ("No such variable: " ++ x) ctx
 
--- | Take a list of monadic actions producing lists and map another monadic function over
--- the list and concatenate all results. This is basically a monadic version of the
--- bind operator in the list monad.
-foreachM :: (Monad m) => m [a] -> (a -> m [b]) -> m [b]
-foreachM s act = do
-  xs <- s
-  ys <- mapM act xs
-  return $ concat ys
-
 -- | Add a method definition to the context
 defineMethod :: Var -> [(Var, Type)] -> Expr -> MethodKind -> Context -> Context
 defineMethod name formals body kind ctx
@@ -521,10 +518,6 @@ nextAddr ctx =
   case ctx ^. L.ctxAllocStrategy of
     Increase -> maximum (M.keys (ctx ^. L.ctxObjs)) + 1
     Decrease -> minimum (M.keys (ctx ^. L.ctxObjs)) - 1
-
--- | Uncurry a three-argument function (useful for partial application)
-uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
-uncurry3 f (a, b, c) = f a b c
 
 -- | Try to find a method of the given name in the object at that address
 findMethod :: Addr -> Var -> Context -> Maybe Method
@@ -820,7 +813,6 @@ symEval (expr@(EProj obj name), ctx, pathCond) =
           then return [(Sym (Deref val name), ctx', pathCond')]
           else foreachM (pure forced) $ \(val', ctx'', pathCond'') -> do
                  symEval (EProj (EConst val') name, ctx'', pathCond'')
-      -- VInt 0 -> return [(VInt 0, ctx', pathCond')]
       _ -> return [(Sym (Deref val name), ctx', pathCond')]
 symEval (EIdx base idx, ctx, pathCond) =
   foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
@@ -832,9 +824,9 @@ symEval (EIdx base idx, ctx, pathCond) =
             then return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
             else case M.lookup idxVal vals of
                    Just val -> return [(val, ctx'', pathCond'')]
-                   Nothing ->
+                   Nothing -- if we can't find the value in the map, keep the lookup symbolic:
+                    ->
                      if isSymbolic idxVal
-                                  -- if we can't find the value in the map, keep the lookup symbolic:
                        then return
                               [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
                        else return [((VInt 0), ctx'', pathCond'')]
@@ -949,7 +941,7 @@ symEval (ECall obj name args, ctx, pathCond) =
       symEvalCall vobj name evaledArgs ctx'' pathCond''
 symEval (ENew fields body, ctx, pathCond) =
   foreachM (symEvalFields fields ctx pathCond) $ \(evaledFields, ctx', pathCond') ->
-    let locals = M.fromList (map (second (uncurry3 Local)) evaledFields)
+    let locals = M.fromList (map (second (U.uncurry3 Local)) evaledFields)
         ctx'' =
           L.ctxObjs . at (nextAddr ctx') ?~
           Object
@@ -1020,16 +1012,14 @@ symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
   let newCtx = over L.ctxScope (M.insert x (fv, TAny)) ctx
   predPaths <- symEval (fromJust (setCompr ^? L.comprPred), newCtx, pathCond)
   comprs <-
-    foreachM (pure predPaths) $ \(predVal, ctx', pathCond')
-    -- foreachM (symEval (fromJust (setCompr ^? comprBase)
-     ->
+    foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
       foreachM (symEval (fromJust (setCompr ^? L.comprValue), ctx', pathCond')) $ \(funVal, ctx'', pathCond'') -> do
         return
           [ Sym
               (SetCompr
                  funVal
                  x
-                 (conjunction $ Not (predVal :=: VInt 0) : pathCond''))
+                 (L.conjunction $ Not (predVal :=: VInt 0) : pathCond''))
           ]
   return
     [(foldr (\sc v -> Sym (Union sc v)) (VSet S.empty) comprs, ctx, pathCond)]
@@ -1048,7 +1038,7 @@ symEval (mapCompr@EMapCompr {}, ctx, pathCond) = do
               (MapCompr
                  fv
                  funVal
-                 (conjunction $ Not (predVal :=: VInt 0) : pathCond' ++
+                 (L.conjunction $ Not (predVal :=: VInt 0) : pathCond' ++
                   pathCond''))
           ]
   return
@@ -1086,7 +1076,6 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
                  show (v1, v2)
 symEval (EAssume e1 e2, ctx, pathCond) =
   return [(VNil, over L.ctxAssumptions ((e1, e2) :) ctx, pathCond)]
--- symEval (e, ctx, pathCond) = error $ "unhandled case" ++ show e
 symEval (funDecl@EFunDecl {}, ctx, pathCond) =
   return
     [ ( VNil
@@ -1098,11 +1087,28 @@ symEval (funDecl@EFunDecl {}, ctx, pathCond) =
     ]
   where
     funName = funDecl ^. L.efunDeclName
+symEval (EUnion e1 e2, ctx, pathCond) = do
+  foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
+    foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
+      if (isSymbolic v1 || isSymbolic v2)
+        then return [(Sym (Union v1 v2), ctx'', pathCond'')]
+        else case (v1, v2) of
+               (VSet vals1, VSet vals2) ->
+                 return [(VSet (vals1 `union` vals2), ctx'', pathCond'')]
+               _ ->
+                 error $ "Tried to union non-set values: " ++ show v1 ++ " ∪ " ++
+                 show v2
+symEval (EIntersect e1 e2, ctx, pathCond) = do
+  foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
+    foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
+      if (isSymbolic v1 || isSymbolic v2)
+        then return [(Sym (Intersect v1 v2), ctx'', pathCond'')]
+        else case (v1, v2) of
+               (VSet vals1, VSet vals2) ->
+                 return [(VSet (vals1 `intersection` vals2), ctx'', pathCond'')]
+               _ ->
+                 error $ "Tried to union non-set values: " ++ show v1 ++ " ∪ " ++
+                 show v2
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = True}
-
-conjunction :: [L.Prop] -> L.Prop
-conjunction [] = L.PTrue
-conjunction [p] = p
-conjunction ps = foldr1 (:&:) ps
+emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = False}

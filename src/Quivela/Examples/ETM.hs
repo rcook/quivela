@@ -9,7 +9,7 @@ import Control.Lens hiding (rewrite)
 import Quivela
 
 prove
-  (set useCache False emptyVerifyEnv)
+  emptyVerifyEnv
   ([prog'|
 method MacI(mac) {
     new (const mac=mac,tg=0) {

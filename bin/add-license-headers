@@ -82,3 +82,7 @@ main = do
   cwd <- D.getCurrentDirectory
   year <- getYear
   P.runEffect (processFiles year cwd)
+
+-- Local Variables:
+-- mode:haskell
+-- End:

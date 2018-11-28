@@ -226,7 +226,6 @@ setComprExpr = do
   return $
     ESetCompr
       { _comprVar = name
-                     -- , _comprBase = base
       , _comprPred = ECall (EConst VNil) "&" [EIn (EVar name) base, pred]
       , _comprValue = fun
       }
@@ -236,13 +235,19 @@ mapComprExpr = do
   symbol "["
   name <- identifier
   symbol "->" <|> symbol "↦"
-  val <- withState (set inTuple True . set pipeAsOr False) expr
-  symbol "|"
-  --  (reserved "in" <|> (symbol "∈" *> pure ()))
-  -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
-  pred <- withState (set inTuple True) expr
+  fun <- withState (set inTuple True) expr
+  (name1, base, pred) <- comprSuffix
+  () <-
+    if name /= name1
+      then fail $ "bound var mismatch: " ++ show name ++ " != " ++ show name1
+      else return ()
   symbol "]"
-  return $ EMapCompr {_comprVar = name, _comprValue = val, _comprPred = pred}
+  return $
+    EMapCompr
+      { _comprVar = name
+      , _comprPred = ECall (EConst VNil) "&" [EIn (EVar name) base, pred]
+      , _comprValue = fun
+      }
 
 combExpr :: Expr -> Parser Expr
 combExpr prefix = do

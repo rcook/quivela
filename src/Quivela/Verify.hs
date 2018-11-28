@@ -10,11 +10,12 @@
 
 module Quivela.Verify
   ( (≈)
+  , clearCache
+  , fieldEqual
   , fieldsEqual
   , proveStep
   , runVerify
   , toSteps
-  , fieldEqual
   ) where
 
 import Control.Applicative ((<$>), (<|>))
@@ -107,11 +108,10 @@ import Quivela.SymEval
   , Verify
   , VerifyEnv
   , VerifyState(..)
-  , emptyVerifyEnv
   , symEval
   , useCache
   )
-import Quivela.Util (debug)
+import Quivela.Util (debug, foreachM)
 import Quivela.VerifyPreludes (z3Prelude)
 
 -- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
@@ -337,7 +337,7 @@ invToVCnonRelational assms addr res@(v, ctx, pathCond) = do
         ( univInv ^. L.methodBody
         , set L.ctxThis addr (set L.ctxScope scope ctx')
         , pathCond' ++ pathCond)
-    E.foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
+    foreachM (return $ paths) $ \(res, ctxI, pathCondI) ->
       return $
       [ VC
           { _assumptions = nub $ pathCondI ++ assms
@@ -420,7 +420,7 @@ universalInvariantAssms addr ctx pathCond =
         , set L.ctxThis addr (set L.ctxScope scope ctx)
         , pathCond' ++ pathCond)
     let argNames = map (\(Sym (SymVar name t)) -> (name, t)) args
-    E.foreachM (return paths) $ \(res, ctxI, pathCondI)
+    foreachM (return paths) $ \(res, ctxI, pathCondI)
       -- If there were symbolic objects created on demand, we may now have a bunch
       -- of extra symbolic variables that were introduced. Since these are going
       -- to be arbitrary parameters, we have to quantify over them as well here:
@@ -448,7 +448,7 @@ universalInvariantAssms addr ctx pathCond =
               (nub $ argNames ++ map ((, TInt)) refVars ++ newSymVars)
               pathCondI
               (Not (res :=: VInt 0))
-      return $ replaceAllRefs [Forall vs (E.conjunction assms :=>: conseq)]
+      return $ replaceAllRefs [Forall vs (L.conjunction assms :=>: conseq)]
 
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = M.Map Addr Addr
@@ -655,11 +655,11 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
   assms <- (invAssms ++) . concat <$> mapM (invToAsm old old') invs
   -- Invariant methods aren't relational and hence we don't need to check them for each pair of
   -- of paths:
-  lhsInvVCs <- E.foreachM (return ress1) $ invToVCnonRelational assms addr1
-  rhsInvVCs <- E.foreachM (return ress1') $ invToVCnonRelational assms addr1'
+  lhsInvVCs <- foreachM (return ress1) $ invToVCnonRelational assms addr1
+  rhsInvVCs <- foreachM (return ress1') $ invToVCnonRelational assms addr1'
   relationalVCs <-
-    E.foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
-      E.foreachM (return ress1') $ \res1'@(v1', ctx1', pc1')
+    foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
+      foreachM (return ress1') $ \res1'@(v1', ctx1', pc1')
         -- when (not . null . allAddrs $ v1') $
         -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
         -- if we are able to find a trivial bijection resulting in a
@@ -998,6 +998,7 @@ symValueToZ3 (MapCompr x val pred) = do
     ]
   return $ z3Call "VMap" [mapVar]
 symValueToZ3 (Union s1 s2) = z3CallM "vunion" [s1, s2]
+symValueToZ3 (Intersect s1 s2) = z3CallM "vintersect" [s1, s2]
 symValueToZ3 (MapUnion m1 m2) = z3CallM "munion" [m1, m2]
 symValueToZ3 (In elt set) = z3CallM "vmember" [elt, set]
 symValueToZ3 (Submap v1 v2) = z3CallM "is-submap" [v1, v2]
@@ -1351,9 +1352,3 @@ infixr 5 ~~
 x ≈ y = x : y
 
 infixr 5 ≈
-
-nop :: Expr
-nop = ENop
-
-noCache :: VerifyEnv
-noCache = set useCache False emptyVerifyEnv

@@ -6,6 +6,7 @@ module Quivela.QuasiQuote
   ( prog
   , prog'
   , prove
+  , prove'
   , rewrite
   ) where
 
