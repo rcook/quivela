@@ -998,6 +998,7 @@ symValueToZ3 (MapCompr x val pred) = do
     ]
   return $ z3Call "VMap" [mapVar]
 symValueToZ3 (Union s1 s2) = z3CallM "vunion" [s1, s2]
+symValueToZ3 (Intersect s1 s2) = z3CallM "vintersect" [s1, s2]
 symValueToZ3 (MapUnion m1 m2) = z3CallM "munion" [m1, m2]
 symValueToZ3 (In elt set) = z3CallM "vmember" [elt, set]
 symValueToZ3 (Submap v1 v2) = z3CallM "is-submap" [v1, v2]

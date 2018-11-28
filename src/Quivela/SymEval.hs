@@ -56,6 +56,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromJust, maybeToList)
 import Data.Serialize (Serialize, get, put)
 import qualified Data.Set as S
+import Data.Set (intersection, union)
 import Data.Typeable (Typeable)
 import qualified Quivela.Language as L
 import Quivela.Language
@@ -190,6 +191,12 @@ typeOfValue ctx (VInt i) = TInt
 typeOfValue ctx VNil = TAny
 typeOfValue ctx (Sym sv) = typeOfSymValue ctx sv
 typeOfValue ctx (VTuple vs) = TTuple $ map (typeOfValue ctx) vs
+typeOfValue ctx (VSet vs) = TSet tv
+  where
+    valueTypes = map (typeOfValue ctx) . S.elems $ vs
+    tv
+      | [t] <- nub valueTypes = t
+      | otherwise = TAny
 typeOfValue ctx (VMap vs) = TMap tk tv
   where
     keyTypes = map (typeOfValue ctx) . M.keys $ vs
@@ -1005,9 +1012,7 @@ symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
   let newCtx = over L.ctxScope (M.insert x (fv, TAny)) ctx
   predPaths <- symEval (fromJust (setCompr ^? L.comprPred), newCtx, pathCond)
   comprs <-
-    foreachM (pure predPaths) $ \(predVal, ctx', pathCond')
-    -- foreachM (symEval (fromJust (setCompr ^? comprBase)
-     ->
+    foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
       foreachM (symEval (fromJust (setCompr ^? L.comprValue), ctx', pathCond')) $ \(funVal, ctx'', pathCond'') -> do
         return
           [ Sym
@@ -1082,6 +1087,28 @@ symEval (funDecl@EFunDecl {}, ctx, pathCond) =
     ]
   where
     funName = funDecl ^. L.efunDeclName
+symEval (EUnion e1 e2, ctx, pathCond) = do
+  foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
+    foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
+      if (isSymbolic v1 || isSymbolic v2)
+        then return [(Sym (Union v1 v2), ctx'', pathCond'')]
+        else case (v1, v2) of
+               (VSet vals1, VSet vals2) ->
+                 return [(VSet (vals1 `union` vals2), ctx'', pathCond'')]
+               _ ->
+                 error $ "Tried to union non-set values: " ++ show v1 ++ " ∪ " ++
+                 show v2
+symEval (EIntersect e1 e2, ctx, pathCond) = do
+  foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
+    foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
+      if (isSymbolic v1 || isSymbolic v2)
+        then return [(Sym (Intersect v1 v2), ctx'', pathCond'')]
+        else case (v1, v2) of
+               (VSet vals1, VSet vals2) ->
+                 return [(VSet (vals1 `intersection` vals2), ctx'', pathCond'')]
+               _ ->
+                 error $ "Tried to union non-set values: " ++ show v1 ++ " ∪ " ++
+                 show v2
 
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = False}

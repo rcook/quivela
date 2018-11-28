@@ -84,6 +84,7 @@ import Control.Lens ((^.), set)
 import Data.Data (Data)
 import qualified Data.Map as M
 import Data.Serialize (Serialize, get)
+import Data.Set (Set, difference, union)
 import qualified Data.Set as S
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
@@ -112,6 +113,7 @@ data Type
   | TMap Type
          Type
   | TAny
+  | TSet Type
   | TNamed String
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
@@ -178,7 +180,7 @@ data Value
   | VMap { _valMap :: M.Map Value Value }
   | VTuple [Value]
   | VNil
-  | VSet { _valSet :: S.Set Value }
+  | VSet { _valSet :: Set Value }
   | Sym { _symVal :: SymValue }
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
@@ -237,10 +239,12 @@ data Expr
               , _typedeclFormals :: [(Var, Bool, Type)]
               , _typedeclValues :: [(Var, Value)]
               , _typedeclBody :: Expr }
+  -- { x + 1 | x ∈ y ∪ z, g(x) > f(x) }
   | ESetCompr { _comprVar :: Var
               , _comprValue :: Expr
               , _comprPred :: Expr -- set comprehensions
                }
+  -- [ x ↦ h(x, y) | x ∈ y ∪ z, g(x) > f(x) ]
   | EMapCompr { _comprVar :: Var
               , _comprValue :: Expr
               , _comprPred :: Expr -- map comprehensions
@@ -420,16 +424,27 @@ concat <$>
 -- Note that computing free variables is complicated by the fact that assignments
 -- to non-existent variables bind the variables in the "rest" of the expression,
 -- where the rest can be siblings of the assignment to the right in the AST
-varBindings :: Expr -> (S.Set Var, S.Set Binding)
+varBindings :: Expr -> (Set Var, Set Binding)
 varBindings ENop = (S.empty, S.empty)
+varBindings (EFunDecl name args) = (S.empty, S.empty)
+varBindings (EAssume e1 e2) = combine e1 e2
 varBindings (EVar x) = (S.singleton x, S.empty)
 varBindings (EConst _) = (S.empty, S.empty)
-varBindings (EAssign (EVar x) rhs)
-  | (freeRhs, boundRhs) <- varBindings rhs =
-    ( freeRhs
-    , S.insert (Binding {_bindingName = x, _bindingConst = False}) boundRhs)
+varBindings (EAssign (EVar x) rhs) =
+  let (freeRhs, boundRhs) = varBindings rhs
+  in (freeRhs, S.insert (Binding {_bindingName = x, _bindingConst = False}) boundRhs)
 varBindings (EAssign lhs rhs) = varBindings lhs `bindingSeq` varBindings rhs
-varBindings (ESeq e1 e2) = varBindings e1 `bindingSeq` varBindings e2
+varBindings (ESeq e1 e2) = combine e1 e2
+varBindings (EIn e1 e2) = combine e1 e2
+varBindings (EUnion e1 e2) = combine e1 e2
+varBindings (EIntersect e1 e2) = combine e1 e2
+varBindings (ESubmap e1 e2) = combine e1 e2
+varBindings (ESetCompr x v p) =
+  let (free, bound) = combine v p
+  in (S.delete x free, bound) -- TODO: should we remove bindings for `x` from `bound`?
+varBindings (EMapCompr x v p) =
+  let (free, bound) = combine v p
+  in (S.delete x free, bound) -- TODO: should we remove bindings for `x` from `bound`?
 varBindings (ECall obj name args) =
   let (freeObj, boundObj) = varBindings obj
    in varBindingsList (freeObj, boundObj) args
@@ -439,8 +454,8 @@ varBindings (ENew fields body) =
   let (fieldsFree, fieldsBound) =
         varBindingsList (S.empty, S.empty) $ map (^. fieldInit) fields
       (bodyFree, bodyBound) = varBindings body
-   in ( bodyFree `S.difference`
-        (S.fromList (map (^. fieldName) fields) `S.union`
+   in ( bodyFree `difference`
+        (S.fromList (map (^. fieldName) fields) `union`
          S.map (^. bindingName) fieldsBound)
       , fieldsBound)
 varBindings (EProj eobj name) = varBindings eobj
@@ -448,7 +463,7 @@ varBindings (EIdx base idx) = varBindings base `bindingSeq` varBindings idx
   -- Variables bound inside a method body are not visible outside:
 varBindings (EMethod name args body isInv) =
   let (bodyFree, bodyBound) = varBindings body
-   in (bodyFree `S.difference` S.fromList (map fst args), S.empty)
+   in (bodyFree `difference` S.fromList (map fst args), S.empty)
 varBindings (ETuple elts) = varBindingsList (S.empty, S.empty) elts
 varBindings (ETupleProj base idx) =
   varBindings base `bindingSeq` varBindings idx
@@ -480,28 +495,30 @@ varBindings (EIf cnd thn els) =
   varBindings cnd `bindingSeq`
   (let (thnFree, thnBound) = varBindings thn
        (elsFree, elsBound) = varBindings els
-    in (thnFree `S.union` elsFree, thnBound `S.union` elsBound))
+    in (thnFree `union` elsFree, thnBound `union` elsBound))
+
+combine e1 e2 = varBindings e1 `bindingSeq` varBindings e2
 
 -- | Combine two pieces of binding information assuming that the second set of bindings
 -- is produced by an expression that will be evaluated after the first
 bindingSeq ::
-     (S.Set Var, S.Set Binding)
-  -> (S.Set Var, S.Set Binding)
-  -> (S.Set Var, S.Set Binding)
+     (Set Var, Set Binding)
+  -> (Set Var, Set Binding)
+  -> (Set Var, Set Binding)
 bindingSeq (free1, bound1) (free2, bound2) =
-  ( free1 `S.union` (free2 `S.difference` S.map (^. bindingName) bound1)
-  , bound1 `S.union` bound2)
+  ( free1 `union` (free2 `difference` S.map (^. bindingName) bound1)
+  , bound1 `union` bound2)
 
 -- | Folds 'varBindings' over a list of expressions with a given set of initial bindings
 varBindingsList ::
-     (S.Set Var, S.Set Binding) -> [Expr] -> (S.Set Var, S.Set Binding)
+     (Set Var, Set Binding) -> [Expr] -> (Set Var, Set Binding)
 varBindingsList init exprs =
   foldl
     (\(freeAcc, boundAcc) expr ->
        let (freeExpr, boundExpr) = varBindings expr
-        in ( (freeAcc `S.union` freeExpr) `S.difference`
+        in ( (freeAcc `union` freeExpr) `difference`
              S.map (^. bindingName) boundAcc
-           , boundAcc `S.union` boundExpr))
+           , boundAcc `union` boundExpr))
     init
     exprs
 
