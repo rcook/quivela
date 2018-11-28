@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 
-module Envelope where
+module Quivela.Examples.Envelope where
 
 import Control.Lens hiding (rewrite)
 import qualified Data.Map as M

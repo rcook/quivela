@@ -1,3 +1,5 @@
+;; Begin Prelude
+
 (set-option :smt.auto-config false) ; disable automatic self configuration
 (set-option :smt.mbqi false) ; disable model-based quantifier instantiation
 
@@ -147,3 +149,5 @@
 
 (define-fun vintersect ((v Value) (w Value)) Value
   (VSet ((_ map and) (to-set v) (to-set w))))
+
+;; End Prelude

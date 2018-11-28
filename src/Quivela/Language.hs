@@ -44,6 +44,7 @@ module Quivela.Language
   , efunDeclName
   , emethodName
   , emptyCtx
+  , emptyCtxRHS
   , fieldInit
   , fieldName
   , fieldType

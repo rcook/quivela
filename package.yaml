@@ -24,6 +24,8 @@ library:
   - Quivela.QuasiQuote
   - Quivela.Examples
   - Quivela.Examples.ETM
+  - Quivela.Examples.Envelope
+  - Quivela.Examples.FIFO
   - Quivela.Language
   - Quivela.Diff
   - Quivela

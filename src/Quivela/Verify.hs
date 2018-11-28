@@ -10,6 +10,7 @@
 
 module Quivela.Verify
   ( (≈)
+  , clearCache
   , fieldEqual
   , fieldsEqual
   , proveStep
