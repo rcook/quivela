@@ -25,10 +25,13 @@ import qualified Quivela.SymEval as S
 import qualified Quivela.Util as U
 import qualified Quivela.Verify as V
 
+-- Don't print garbage during tests.  If a test fails, debug it separately.
+noDebugEnv = S.emptyVerifyEnv { S._debugFlag = False } 
+
 assertVerified :: String -> Expr -> Proof -> Assertion
 assertVerified msg prefix proof = do
   V.clearCache
-  res <- Q.prove' S.emptyVerifyEnv prefix proof
+  res <- Q.prove' noDebugEnv prefix proof
   T.assertEqual msg 0 res
 
 assertError :: String -> IO a -> Assertion
@@ -44,12 +47,12 @@ assertError msg x = do
 
 assertEvalError :: String -> Expr -> Assertion
 assertEvalError msg e =
-  assertError msg . V.runVerify S.emptyVerifyEnv $ S.symEval (e, L.emptyCtx, [])
+  assertError msg . V.runVerify noDebugEnv $ S.symEval (e, L.emptyCtx, [])
 
 assertEvalResult' :: String -> Context -> Expr -> Value -> Assertion
 assertEvalResult' msg ctx e v = do
   (res, _, _) <-
-    S.singleResult <$> (V.runVerify S.emptyVerifyEnv $ (S.symEval (e, ctx, [])))
+    S.singleResult <$> (V.runVerify noDebugEnv $ (S.symEval (e, ctx, [])))
   T.assertEqual msg res v
 
 assertEvalResult :: String -> Expr -> Value -> Assertion
@@ -57,14 +60,14 @@ assertEvalResult msg e v = assertEvalResult' msg L.emptyCtx e v
 
 assertVerifyError :: String -> Expr -> Proof -> Assertion
 assertVerifyError msg prefix proof =
-  assertError msg $ Q.prove' S.emptyVerifyEnv prefix proof
+  assertError msg $ Q.prove' noDebugEnv prefix proof
 
 assertParses :: String -> String -> Expr -> Assertion
 assertParses msg progText e = T.assertEqual msg (P.parseExpr progText) e
 
 doesntVerify :: String -> Expr -> Proof -> Assertion
 doesntVerify msg prefix proof = do
-  remaining <- Q.prove' S.emptyVerifyEnv prefix proof
+  remaining <- Q.prove' noDebugEnv prefix proof
   T.assertBool msg (remaining > 0)
 
 parserTests =

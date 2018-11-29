@@ -52,7 +52,6 @@ prove env prefix steps = do
 prove' :: E.VerifyEnv -> L.Expr -> [L.ProofPart] -> IO Int
 prove' env prefix steps = do
   (t, results) <- Timer.time $ mapM doCheck (V.toSteps steps)
-  putStrLn $ "Total verification time: " ++ Timer.formatSeconds t
   return $ sum results
   where
     doCheck = V.runVerify env . V.proveStep prefix

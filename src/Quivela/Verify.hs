@@ -1208,11 +1208,11 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
           return (mtd ^. L.methodName, verificationResult)
       if (not . all (null . snd) $ remainingVCs)
         then do
-          liftIO . putStrLn $ note ++ "Verification failed for step: "
-          liftIO $ print remainingVCs
+          debug $ note ++ "Verification failed for step: "
+          debug $ show remainingVCs
         else do
           cacheVerified lhs rhs
-          liftIO . putStrLn $ note ++ "Verification succeeded in " ++
+          debug $ note ++ "Verification succeeded in " ++
             Timer.formatSeconds t
       return remainingVCs
 
