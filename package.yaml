@@ -18,52 +18,52 @@ dependencies:
 library:
   source-dirs: src
   exposed-modules:
-  - Quivela.Parse
-  - Quivela.Verify
-  - Quivela.SymEval
-  - Quivela.QuasiQuote
+  - Quivela
+  - Quivela.Diff
   - Quivela.Examples
   - Quivela.Examples.ETM
   - Quivela.Examples.Envelope
   - Quivela.Examples.FIFO
   - Quivela.Language
-  - Quivela.Diff
-  - Quivela
+  - Quivela.Parse
+  - Quivela.QuasiQuote
+  - Quivela.SymEval
+  - Quivela.Util
+  - Quivela.Verify
   ghc-options:
   - -fwarn-incomplete-patterns
   other-modules:
-  - Quivela.Util
   - Quivela.VerifyPreludes
   - System.Timer
   dependencies:
-  - lens
+  - HUnit
+  - array
+  - bytestring
+  - cereal
   - cond
   - containers
-  - syb
-  - mtl
-  - array
-  - directory
-  - temporary
-  - process
-  - time
-  - cereal
-  - bytestring
-  - template-haskell
-  - HUnit
   - deepseq
-  - parsec
+  - directory
   - filepath
+  - lens
+  - mtl
+  - parsec
+  - process
+  - syb
+  - template-haskell
+  - temporary
+  - time
 
 tests:
   quivela-test:
     main: Spec.hs
     source-dirs: test
     ghc-options:
-    - -threaded
     - -rtsopts
+    - -threaded
     - -with-rtsopts=-N
     dependencies:
-    - quivela
     - HUnit
-    - deepseq
     - containers
+    - deepseq
+    - quivela

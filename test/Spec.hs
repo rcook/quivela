@@ -2,27 +2,41 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
 
-import Control.Applicative
 import qualified Control.DeepSeq as DS
-import Control.Exception
+import Control.Exception (SomeException, catch)
 import qualified Data.Map as M
-import Test.HUnit
+import qualified Test.HUnit as T
+import Test.HUnit (Assertion, Test(TestCase, TestList))
 
-import Quivela
-import Quivela.Examples
+import qualified Quivela.Examples as E
+import qualified Quivela.Language as L
+import Quivela.Language
+  ( Context(..)
+  , Expr(..)
+  , Proof(..)
+  , SymValue(..)
+  , Type(..)
+  , Value(..)
+  , nop
+  )
+import qualified Quivela.Parse as P
+import qualified Quivela.QuasiQuote as Q
+import qualified Quivela.SymEval as S
+import qualified Quivela.Util as U
+import qualified Quivela.Verify as V
 
 assertVerified :: String -> Expr -> Proof -> Assertion
 assertVerified msg prefix proof = do
-  clearCache
-  res <- prove' emptyVerifyEnv prefix proof
-  assertEqual msg 0 res
+  V.clearCache
+  res <- Q.prove' S.emptyVerifyEnv prefix proof
+  T.assertEqual msg 0 res
 
 assertError :: String -> IO a -> Assertion
 assertError msg x = do
   errored <- fmap DS.force $ catch (x >> pure False) handler
   if not errored
-    then assertFailure $ "Should have failed: " ++ msg
-    else assertBool "true" True
+    then T.assertFailure $ "Should have failed: " ++ msg
+    else T.assertBool "true" True
   where
     handler :: SomeException -> IO Bool
     handler _ = do
@@ -30,31 +44,31 @@ assertError msg x = do
 
 assertEvalError :: String -> Expr -> Assertion
 assertEvalError msg e =
-  assertError msg . runVerify emptyVerifyEnv $ symEval (e, emptyCtx, [])
+  assertError msg . V.runVerify S.emptyVerifyEnv $ S.symEval (e, L.emptyCtx, [])
 
 assertEvalResult' :: String -> Context -> Expr -> Value -> Assertion
 assertEvalResult' msg ctx e v = do
   (res, _, _) <-
-    singleResult <$> (runVerify emptyVerifyEnv $ (symEval (e, ctx, [])))
-  assertEqual msg res v
+    S.singleResult <$> (V.runVerify S.emptyVerifyEnv $ (S.symEval (e, ctx, [])))
+  T.assertEqual msg res v
 
 assertEvalResult :: String -> Expr -> Value -> Assertion
-assertEvalResult msg e v = assertEvalResult' msg emptyCtx e v
+assertEvalResult msg e v = assertEvalResult' msg L.emptyCtx e v
 
 assertVerifyError :: String -> Expr -> Proof -> Assertion
 assertVerifyError msg prefix proof =
-  assertError msg $ prove' emptyVerifyEnv prefix proof
+  assertError msg $ Q.prove' S.emptyVerifyEnv prefix proof
 
 assertParses :: String -> String -> Expr -> Assertion
-assertParses msg progText e = assertEqual msg (parseExpr progText) e
+assertParses msg progText e = T.assertEqual msg (P.parseExpr progText) e
 
 doesntVerify :: String -> Expr -> Proof -> Assertion
 doesntVerify msg prefix proof = do
-  remaining <- prove' emptyVerifyEnv prefix proof
-  assertBool msg (remaining > 0)
+  remaining <- Q.prove' S.emptyVerifyEnv prefix proof
+  T.assertBool msg (remaining > 0)
 
 parserTests =
-  map (TestCase . uncurry3 assertParses) $
+  map (TestCase . U.uncurry3 assertParses) $
   [ ("integer constants", "23", EConst (VInt 23))
   , ("empty map literal", "map", EConst (VMap M.empty))
   , ( "unqualified function call"
@@ -157,7 +171,7 @@ parserTests =
                              { _lhs = EVar "x"
                              , _rhs = ETuple [EConst (VInt 1), EConst (VInt 2)]
                              }
-                       , _emethodKind = NormalMethod
+                       , _emethodKind = L.NormalMethod
                        })
                     ENop
               }
@@ -199,178 +213,181 @@ tests =
   TestList $
   parserTests ++
   invalidCases ++
-  [ TestCase $ assertEvalError "assigning to constant variable" assignConst
-  , TestCase $ assertEvalError "assigning to constant variable" assignConst'
+  [ TestCase $ assertEvalError "assigning to constant variable" E.assignConst
+  , TestCase $ assertEvalError "assigning to constant variable" E.assignConst'
   , TestCase $
     assertEvalError
       "assigning to constant field in typedecl'd object"
-      assignConstTypeDecl
+      E.assignConstTypeDecl
   , TestCase $
-    assertEvalError "ill-typed assignment to object field" illTypedAssign
+    assertEvalError "ill-typed assignment to object field" E.illTypedAssign
   , TestCase $
-    assertEvalError "ill-typed assignment to object field" illTypedAssign'
+    assertEvalError "ill-typed assignment to object field" E.illTypedAssign'
   , TestCase $
     assertEvalError
       "ill-typed assignment to method parameter"
-      illTypedParamAssign
+      E.illTypedParamAssign
   , TestCase $
     assertEvalError
       "ill-typed assignment using object type"
-      illTypedConstrAssign
+      E.illTypedConstrAssign
   , TestCase $
-    assertEvalError "ill-typed object creation" illTypedObjectCreation
+    assertEvalError "ill-typed object creation" E.illTypedObjectCreation
   , TestCase $
     assertEvalError
       "ill-typed object creation using constructor"
-      illTypedObjectCreationNamed
+      E.illTypedObjectCreationNamed
   , TestCase $
     assertEvalResult
       "multiple indexing expressions in sequence"
-      doubleIdx
+      E.doubleIdx
       (VInt 5)
   , TestCase $
-    assertEvalResult "nested object field lookups" doubleFieldDeref (VInt 5)
+    assertEvalResult "nested object field lookups" E.doubleFieldDeref (VInt 5)
   , TestCase $
     assertEvalResult
       "post-increment on object field"
-      incrementFieldDeref
+      E.incrementFieldDeref
       (VTuple [VInt 1, VInt 2])
   , TestCase $
-    assertEvalResult "type declarations with parameters" typedeclTest (VInt 5)
+    assertEvalResult "type declarations with parameters" E.typedeclTest (VInt 5)
   , TestCase $
     assertEvalResult
       "Addresses can be used as symbolic values"
-      addressesSymbolic
+      E.addressesSymbolic
       (Sym (Add (Sym (Ref 1)) (Sym (Ref 2))))
   , TestCase $
     assertEvalResult'
       "Decreasing allocation strategy should yield negative addresses"
-      (emptyCtx {_ctxAllocStrategy = Decrease})
-      (parseExpr "<new() {}, new() {}>")
+      (L.emptyCtx {_ctxAllocStrategy = L.Decrease})
+      (P.parseExpr "<new() {}, new() {}>")
       (VTuple [Sym {_symVal = Ref (-1)}, Sym {_symVal = Ref (-2)}])
   , TestCase $
     assertEvalResult'
       "Decreasing allocation allows allocating objects in methods"
-      emptyCtxRHS
-      decreaseAlloc
+      L.emptyCtxRHS
+      E.decreaseAlloc
       (VInt 1)
   , TestCase $
     assertVerifyError
       "verification should detect extraneous methods on one side"
       nop
-      extraMethodsTest
+      E.extraMethodsTest
   , TestCase $
     doesntVerify
       "if expression equivalence differing on one branch"
       nop
-      ifEqvFalse
-  , TestCase $ assertVerified "<= works" nop leTaut
-  , TestCase $ assertVerified "& well-behaved" nop andExample
-  , TestCase $ assertVerified "simple equality invariant" nop eqInvExample
-  , TestCase $ assertVerified "simple const annotation" nop constExample
+      E.ifEqvFalse
+  , TestCase $ assertVerified "<= works" nop E.leTaut
+  , TestCase $ assertVerified "& well-behaved" nop E.andExample
+  , TestCase $ assertVerified "simple equality invariant" nop E.eqInvExample
+  , TestCase $ assertVerified "simple const annotation" nop E.constExample
   , TestCase $
-    assertVerified "addition is commutative and 0 is identity" nop addExample
-  , TestCase $ assertVerified "multiplication example" nop mulExample
-  , TestCase $ assertVerified "arithmetic example" nop arithExample
-  , TestCase $ assertVerified "assignment to local variable" nop assignAnd
-  , TestCase $ assertVerified "tupling never returns 0" nop tuplingAnd
-  , TestCase $ assertVerified "if-else with symbolic condition" nop ifSymbolic
+    assertVerified "addition is commutative and 0 is identity" nop E.addExample
+  , TestCase $ assertVerified "multiplication example" nop E.mulExample
+  , TestCase $ assertVerified "arithmetic example" nop E.arithExample
+  , TestCase $ assertVerified "assignment to local variable" nop E.assignAnd
+  , TestCase $ assertVerified "tupling never returns 0" nop E.tuplingAnd
+  , TestCase $ assertVerified "if-else with symbolic condition" nop E.ifSymbolic
   , TestCase $
-    assertVerified "if-else with same value in both branches" nop ifSimp
-  , TestCase $ assertVerified "if-else with true guard" nop ifConcreteTrue
-  , TestCase $ assertVerified "if-else with false guard" nop ifConcreteFalse
-  , TestCase $ assertVerified "post-increment example 1" nop postIncrExample3
-  , TestCase $ assertVerified "post-increment example 2" nop postIncrExample2
-  , TestCase $ assertVerified "post-increment example 3" nop postIncrExample1
+    assertVerified "if-else with same value in both branches" nop E.ifSimp
+  , TestCase $ assertVerified "if-else with true guard" nop E.ifConcreteTrue
+  , TestCase $ assertVerified "if-else with false guard" nop E.ifConcreteFalse
+  , TestCase $ assertVerified "post-increment example 1" nop E.postIncrExample3
+  , TestCase $ assertVerified "post-increment example 2" nop E.postIncrExample2
+  , TestCase $ assertVerified "post-increment example 3" nop E.postIncrExample1
   , TestCase $
-    assertVerified "post-increment in a map index" nop postIncrementInMap
-  , TestCase $ assertVerified "less-than operator example" nop leExample
-  , TestCase $ assertVerified "Z(..) is idempotent" nop zIdempotent
-  , TestCase $ assertVerified "call on symbolic object" nop symcallTest
-  , TestCase $ assertVerified "call on symbolic map value" nop symcallMap
+    assertVerified "post-increment in a map index" nop E.postIncrementInMap
+  , TestCase $ assertVerified "less-than operator example" nop E.leExample
+  , TestCase $ assertVerified "Z(..) is idempotent" nop E.zIdempotent
+  , TestCase $ assertVerified "call on symbolic object" nop E.symcallTest
+  , TestCase $ assertVerified "call on symbolic map value" nop E.symcallMap
   , TestCase $
-    assertVerified "object maps with an invariant" nop symcallMapParam
+    assertVerified "object maps with an invariant" nop E.symcallMapParam
   , TestCase $
     assertVerified
       "object maps with invariant using field access"
       nop
-      mapInvariantField
+      E.mapInvariantField
   , TestCase $
     assertVerified
       "commute two new(){} expressions used in result"
       nop
-      commuteNews
+      E.commuteNews
   , TestCase $
     assertVerified
       "commute two new(){} expressions with an extra new on one side"
       nop
-      commuteNewPathCondition
+      E.commuteNewPathCondition
   , TestCase $
     assertVerified
       "reason about new()s used only in path condition"
       nop
-      commuteNewContradictoryPath
+      E.commuteNewContradictoryPath
   , TestCase $
-    assertVerified "syntactic sugar rnd() also commutes" nop commuteRands
-  , TestCase $ assertVerified "basic set literals and membership" nop setInTest
-  , TestCase $ assertVerified "set membership in singleton set" nop setInTest2
-  , TestCase $ assertVerified "trivial set comprehension" nop setComprTest1
-  , TestCase $ assertVerified "constant map comprehension" nop mapComprTest1
+    assertVerified "syntactic sugar rnd() also commutes" nop E.commuteRands
+  , TestCase $
+    assertVerified "basic set literals and membership" nop E.setInTest
+  , TestCase $ assertVerified "set membership in singleton set" nop E.setInTest2
+  , TestCase $ assertVerified "trivial set comprehension" nop E.setComprTest1
+  , TestCase $ assertVerified "constant map comprehension" nop E.mapComprTest1
   , TestCase $
     assertVerified
       "map comprehension with another map in predicate"
       nop
-      mapComprTest2
+      E.mapComprTest2
   , TestCase $
     assertVerified
       "map comprehension using another map in predicate and mapping function"
       nop
-      mapComprTest3
+      E.mapComprTest3
   -- , TestCase $ assertVerified "map comprehension to modify existing map" nop mapComprTest4
-  , TestCase $ assertVerified "⊆ operation on concrete values" nop constSubmap
+  , TestCase $ assertVerified "⊆ operation on concrete values" nop E.constSubmap
   , TestCase $
-    assertVerified "⊆ operation on symbolic maps and indices" nop paramSubmap
-  , TestCase $ assertVerified "local method" nop localMethodExample
+    assertVerified "⊆ operation on symbolic maps and indices" nop E.paramSubmap
+  , TestCase $ assertVerified "local method" nop E.localMethodExample
   , TestCase $
     assertVerified
       "Pattern-matching behaves like tuple projection"
       nop
-      patMatch1
+      E.patMatch1
   , TestCase $
-    assertVerified "Pattern-matching remembers tuple size" nop patMatch2
-  , TestCase $ assertVerified "Nested symbolic objects" nop nestedObjs
-  , TestCase $ assertVerified "Nested symbolic objects in maps" nop nestedObjMap
+    assertVerified "Pattern-matching remembers tuple size" nop E.patMatch2
+  , TestCase $ assertVerified "Nested symbolic objects" nop E.nestedObjs
+  , TestCase $
+    assertVerified "Nested symbolic objects in maps" nop E.nestedObjMap
   , TestCase $
     uncurry
       (assertVerified "calling uninterpreted function with same arguments")
-      fundeclTest1
+      E.fundeclTest1
   , TestCase $
     uncurry
       (doesntVerify "uninterpreted function called with different arguments")
-      fundeclTest2
+      E.fundeclTest2
   , TestCase $
     assertVerified
       "Type declaration with constant initializer"
       nop
-      typedeclConstField
+      E.typedeclConstField
   , TestCase $
     uncurry
       (assertVerified "Placing object and its parameter in different maps")
-      objectInTwoMaps
+      E.objectInTwoMaps
   , TestCase $
     uncurry
       (assertVerified "Placing object and its parameter in different maps (2)")
-      objectInTwoMaps'
-  , TestCase $ assertVerified "Dropping a call to rnd()" nop dropRandom
+      E.objectInTwoMaps'
+  , TestCase $ assertVerified "Dropping a call to rnd()" nop E.dropRandom
   ]
   where
     invalidCases =
       map
         (TestCase . uncurry (`doesntVerify` nop))
-        [ ("trivial contradiction", incorrectVerify1)
-        , ("incorrect arithmetic", incorrectVerify2)
-        , ("variable capture in method inlining", incorrectMethodInlineCapture)
+        [ ("trivial contradiction", E.incorrectVerify1)
+        , ("incorrect arithmetic", E.incorrectVerify2)
+        , ( "variable capture in method inlining"
+          , E.incorrectMethodInlineCapture)
         ]
 
 main :: IO ()
-main = runTestTT tests >> return ()
+main = T.runTestTT tests >> return ()
