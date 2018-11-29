@@ -6,7 +6,10 @@ language: generic
 
 cache:
   directories:
+  - $HOME/.cabal
+  - $HOME/.ghc
   - $HOME/.stack
+  - .stack-work
 
 addons:
   apt:
@@ -24,7 +27,7 @@ install:
 - stack --no-terminal --install-ghc test --only-dependencies
 
 script:
-- stack --no-terminal test --haddock --no-haddock-deps
+- stack --no-terminal test
 
 notifications:
   email:
