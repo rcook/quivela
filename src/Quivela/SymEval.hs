@@ -13,6 +13,8 @@ module Quivela.SymEval
   , VerifyEnv(..)
   , VerifyState(..)
   , alreadyVerified
+  , debug
+  , debugFlag
   , emptyVerifyEnv
   , freshVar
   , singleResult
@@ -25,6 +27,7 @@ module Quivela.SymEval
 
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
+import Control.Conditional (ifM)
 import qualified Control.Lens as L
 import Control.Lens
   ( (%=)
@@ -51,10 +54,12 @@ import Control.Monad.RWS.Strict
   , unless
   , when
   )
+import qualified Control.Monad.RWS.Strict as RWS
+import qualified Control.Monad.Reader as Reader
 import Data.List (intercalate, nub)
 import qualified Data.Map as M
 import Data.Maybe (fromJust, maybeToList)
-import Data.Serialize (Serialize, get, put)
+import Data.Serialize (Serialize, put)
 import qualified Data.Set as S
 import Data.Set (intersection, union)
 import Data.Typeable (Typeable)
@@ -80,16 +85,18 @@ import Quivela.Language
   , Var
   )
 import qualified Quivela.Util as U
-import Quivela.Util (debug, foreachM)
+import Quivela.Util (foreachM)
 import System.IO (Handle)
 import System.Process (ProcessHandle)
 
 -- | The fixed environment for symbolic evaluation.
 data VerifyEnv = VerifyEnv
-  { _splitEq :: Bool
-                           -- ^ Split == operator into two paths during symbolic evaluation?
+  { _debugFlag :: Bool
+    -- ^ print debugging information
+  , _splitEq :: Bool
+    -- ^ Split == operator into two paths during symbolic evaluation?
   , _useCache :: Bool
-                           -- ^ Should we cache verification steps that succeed and not recheck them?
+    -- ^ Should we cache verification steps that succeed and not recheck them?
   } deriving (Typeable)
 
 -- | A monad for generating and discharging verification conditions, which
@@ -109,21 +116,24 @@ newtype Verify a = Verify
 -- | Keeps track of fresh variables and, a z3 process, and which conditions
 -- we already verified successfully in the past.
 data VerifyState = VerifyState
-  { _z3Proc :: (Handle, Handle, ProcessHandle)
-    -- ^ For performance reasons, we spawn a Z3 process once and keep it around
+  { _alreadyVerified :: S.Set (Expr, Expr)
+    -- ^ A cache of steps that we already verified before
+    -- FIXME: Currently, we cannot serialize invariants, since they include functions as arguments
+    -- in some cases
   , _nextVar :: M.Map String Integer
-  -- ^ Map of already used integers for fresh variable prefix
-  , _alreadyVerified :: S.Set (Expr, Expr)
-  -- ^ A cache of steps that we already verified before
-  -- FIXME: Currently, we cannot serialize invariants, since they include functions as arguments
-  -- in some cases
+    -- ^ Map of already used integers for fresh variable prefix
   , _verifyPrefixCtx :: Context
-  -- ^ The context returned by the "prefix" program of a proof that defines constructors,
-  -- lists assumptions, etc.
+    -- ^ The context returned by the "prefix" program of a proof that defines constructors,
+    -- lists assumptions, etc.
+  , _z3Proc :: (Handle, Handle, ProcessHandle)
+    -- ^ For performance reasons, we spawn a Z3 process once and keep it around
   }
 
 -- Generate lenses for all types defined above:
 concat <$> mapM L.makeLenses [''VerifyEnv, ''VerifyState]
+
+ :: String -> Verify ()
+debug msg = ifM (view debugFlag) (RWS.liftIO (putStrLn msg)) (return ())
 
 -- | Generate a fresh variable starting with a given prefix
 freshVar :: String -> Verify String
@@ -595,10 +605,8 @@ force e@(Sym (Lookup k m)) ctx pathCond
   -- path into a successful lookup and a failing one. If we have enough type
   -- information on the map, hopefully the call will be resolved to a type for
   -- which we know the method body.
-  -- debug $ "Symbolic call on map lookup" ++ show (Lookup k m) ++ " of type: " ++ show (TMap tk tv)
    = do
     (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
-  -- res <- symEval fv name args ctx' ((e :=: fv) : pathCond')
     return
       [ (VInt 0, ctx, (e :=: VInt 0) : pathCond)
       , (fv, ctx', (e :=: fv) : Not (e :=: VInt 0) : pathCond' ++ pathCond)
@@ -720,9 +728,8 @@ symEvalCall (Sym sv) name args ctx pathCond = do
        -- if the path condition is contradictory
       fv <- freshVar "untyped_symcall"
       return [(Sym (SymVar fv TAny), ctx, pathCond)]
-    else foreachM (return forced) $ \(val, ctx', pathCond')
-       -- debug $ "Forced symbolic value to: " ++ show (val, ctx', pathCond')
-          -> do symEvalCall val name args ctx' pathCond'
+    else foreachM (return forced) $ \(val, ctx', pathCond') -> do
+           symEvalCall val name args ctx' pathCond'
 symEvalCall (VInt 0) name args ctx pathCond = return [((VInt 0), ctx, pathCond)]
 symEvalCall obj name args ctx pathCond =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name ++ "\n" ++ show ctx
@@ -1111,4 +1118,4 @@ symEval (EIntersect e1 e2, ctx, pathCond) = do
                  show v2
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv {_splitEq = False, _useCache = False}
+emptyVerifyEnv = VerifyEnv {_debugFlag = True, _splitEq = False, _useCache = False}

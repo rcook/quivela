@@ -19,7 +19,6 @@ import qualified System.Timer as Timer
 import qualified Quivela.Language as L
 import qualified Quivela.Parse as P
 import qualified Quivela.SymEval as E
-import Quivela.Util (debug)
 import qualified Quivela.Verify as V
 
 -- | Construct a term that parses the given string as a quivela expression
@@ -53,7 +52,7 @@ prove env prefix steps = do
 prove' :: E.VerifyEnv -> L.Expr -> [L.ProofPart] -> IO Int
 prove' env prefix steps = do
   (t, results) <- Timer.time $ mapM doCheck (V.toSteps steps)
-  debug $ "Total verification time: " ++ Timer.formatSeconds t
+  putStrLn $ "Total verification time: " ++ Timer.formatSeconds t
   return $ sum results
   where
     doCheck = V.runVerify env . V.proveStep prefix

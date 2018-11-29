@@ -3,8 +3,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.Util
-  ( debug
-  , foreachM
+  ( foreachM
   , heredoc
   , readFileCompileTime
   , uncurry3
@@ -42,10 +41,6 @@ readFileCompileTime inFile = do
     TH.reportError ("readFileCompileTime: No such file: " ++ file)
   S.addDependentFile file
   heredocExpr =<< TH.runIO (readFile file)
-
--- | Print out debugging information.
-debug :: (R.MonadIO m) => String -> m ()
-debug = R.liftIO . putStrLn -- TODO: move this to a utility module or so
 
 -- | Take a list of monadic actions producing lists and map another monadic function over
 -- the list and concatenate all results. This is basically a monadic version of the

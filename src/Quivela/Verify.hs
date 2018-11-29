@@ -108,10 +108,10 @@ import Quivela.SymEval
   , Verify
   , VerifyEnv
   , VerifyState(..)
+  , debug
   , symEval
-  , useCache
   )
-import Quivela.Util (debug, foreachM)
+import Quivela.Util (foreachM)
 import Quivela.VerifyPreludes (z3Prelude)
 
 -- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
@@ -228,9 +228,9 @@ newVerifyState = do
          else return S.empty
   return
     VerifyState
-      { _nextVar = M.empty
+      { _alreadyVerified = verificationCache
+      , _nextVar = M.empty
       , _verifyPrefixCtx = L.emptyCtx
-      , _alreadyVerified = verificationCache
       , _z3Proc = (hin, hout, procHandle)
       }
 
@@ -660,8 +660,6 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
   relationalVCs <-
     foreachM (return ress1) $ \res1@(v1, ctx1, pc1) ->
       foreachM (return ress1') $ \res1'@(v1', ctx1', pc1')
-        -- when (not . null . allAddrs $ v1') $
-        -- debug ("Trying to find address bijection for: " ++ show (v1, v1'))
         -- if we are able to find a trivial bijection resulting in a
         -- a trivial contradiction in the path conditions, then we are done:
        -> do
@@ -689,7 +687,6 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
         -- obligations, since non-relational VCs should can not depend on concrete addresses
         -- that the allocator chose.
         -- when (not . null . allAddrs $ v1') $
-        -- debug ("Using address bijection: " ++ show addrMap)
         let vcRes =
               VC
                 { _assumptions = applyBij $ nub $ assms ++ pc1 ++ pc1'
@@ -745,12 +742,10 @@ methodEquivalenceVCs mtd invs args (VRef a1, ctx1, pathCond1) (VRef a1', ctx1', 
       results
       (VRef a1', ctxH1', pathCond1')
       results'
-  -- debug $ "VCs before pruning: " ++ show (length vcs)
   filterM
     (\vc -> do
        trivial <- triviallyTrue vc
        if trivial
-                     -- debug $ "Discarding VC as trivial: " ++ show vc
          then do
            return False
          else return True)
@@ -1116,7 +1111,7 @@ checkVCs vcs = do
   (t, vcs') <- Timer.time $ filterM (fmap not . checkWithZ3) vcs
   when (not . null $ vcs') $ do
     debug $ "Remaining VCs in Z3 files: "
-    mapM_ (\vc -> writeToZ3File vc >>= \f -> liftIO (debug f)) vcs'
+    mapM_ (\vc -> writeToZ3File vc >>= debug) vcs'
   debug $ show (length vcs') ++ " VCs left after checking with Z3 (" ++
     Timer.formatSeconds t ++
     ")"
@@ -1124,9 +1119,9 @@ checkVCs vcs = do
 
 checkEqv :: Bool -> Expr -> [ProofHint] -> Expr -> Expr -> Verify [(Var, [VC])]
 checkEqv useSolvers prefix hints lhs rhs
-  | any ((== Just True) . (=== Admit)) hints
-  -- debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
-   = return []
+  | any ((== Just True) . (=== Admit)) hints = do
+      debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
+      return []
 checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
   (_, prefixCtx, _) <- fmap E.singleResult . symEval $ (prefix, L.emptyCtx, [])
   unless
@@ -1145,7 +1140,7 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
 checkEqv useSolvers prefix hintsIn lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use E.alreadyVerified
   (_, hints, _) <- inferInvariants prefix (lhs, hintsIn, rhs)
-  withCache <- view useCache
+  withCache <- view E.useCache
   let noteText =
         concatMap
           (\hint ->
