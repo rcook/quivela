@@ -68,8 +68,7 @@ import GHC.Generics (Generic)
 import System.Directory (doesFileExist, removeFile)
 import System.Exit (ExitCode(ExitSuccess))
 import System.IO (BufferMode(NoBuffering), hGetLine, hPutStrLn, hSetBuffering)
-import System.IO.Temp (writeTempFile)
-import qualified System.Timer as Timer
+import qualified System.IO.Temp as Temp
 import System.Process
   ( StdStream(CreatePipe)
   , createProcess
@@ -79,6 +78,7 @@ import System.Process
   , std_in
   , std_out
   )
+import qualified System.Timer as Timer
 
 import Quivela.Diff (applyDiffs)
 import qualified Quivela.Language as L
@@ -839,6 +839,7 @@ symVarName (SymVar n t) = n
 symVarName x = error "symVarName: Not a SymVar: " ++ show x
 
 concatM = fmap concat . sequence
+
 initialEmitterState prefixCtx =
   EmitterState
     { _nextEmitterVar = M.empty
@@ -1093,13 +1094,13 @@ instance ToZ3 Value where
 instance ToZ3 SymValue where
   toZ3 = symValueToZ3
 
-writeToZ3File :: VC -> Verify FilePath
-writeToZ3File vc = do
+writeToZ3File :: FilePath -> VC -> Verify FilePath
+writeToZ3File dir vc = do
   pctx <- use E.verifyPrefixCtx
   (_, vcLines) <-
     fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
   tempFile <-
-    liftIO $ writeTempFile "." "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++
+    liftIO $ Temp.writeTempFile dir "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++
     ["(check-sat)"]
   return tempFile
 
@@ -1111,7 +1112,11 @@ checkVCs vcs = do
   (t, vcs') <- Timer.time $ filterM (fmap not . checkWithZ3) vcs
   when (not . null $ vcs') $ do
     debug $ "Remaining VCs in Z3 files: "
-    mapM_ (\vc -> writeToZ3File vc >>= debug) vcs'
+    tmp <- liftIO Temp.getCanonicalTemporaryDirectory
+    dir <- liftIO $ Temp.createTempDirectory tmp "vcs"
+    mapM_
+      (\vc -> writeToZ3File dir vc >>= \f -> debug ("Writing vc to file: " ++ f))
+      vcs'
   debug $ show (length vcs') ++ " VCs left after checking with Z3 (" ++
     Timer.formatSeconds t ++
     ")"
@@ -1120,8 +1125,8 @@ checkVCs vcs = do
 checkEqv :: Bool -> Expr -> [ProofHint] -> Expr -> Expr -> Verify [(Var, [VC])]
 checkEqv useSolvers prefix hints lhs rhs
   | any ((== Just True) . (=== Admit)) hints = do
-      debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
-      return []
+    debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
+    return []
 checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
   (_, prefixCtx, _) <- fmap E.singleResult . symEval $ (prefix, L.emptyCtx, [])
   unless
