@@ -132,7 +132,7 @@ data VerifyState = VerifyState
 -- Generate lenses for all types defined above:
 concat <$> mapM L.makeLenses [''VerifyEnv, ''VerifyState]
 
- :: String -> Verify ()
+debug :: String -> Verify ()
 debug msg = ifM (view debugFlag) (RWS.liftIO (putStrLn msg)) (return ())
 
 -- | Generate a fresh variable starting with a given prefix
