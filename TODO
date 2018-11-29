@@ -1,0 +1,40 @@
+## Polynomial time checks
+Disallow building up data structures exponential in the number of calls
+made to methods.
+
+## Pass the name of the method to the adversary
+Because I never got around to fixing this, the adversary calls log
+only method arguments, but not method names.
+
+### Possible implementation approach
+Just add a `String` parameter to each list of arguments for one call,
+and then record the method name there too. Also extend the SMT
+and Dafny files accordingly.
+
+## Unify treatment of adversaries and calls on untyped objects
+Calling an adversary is a lot like calling a method on an object
+without a type in that we can assume that they are deterministic
+in terms of the list of all previous calls to them. Moreover, this
+models the assumption that they all collude. Currently all such
+calls are on objects created by `adversary()`, but I think there
+is a more general principle at work here that we should use.
+
+### Possible implementation approach
+Get rid of `adversary()` and store a list of all calls to methods on
+untyped objects where we now store the list of adversary calls. Any
+call on symbolic value will then result in appending to this list.
+
+## Less messy handling of assumption generation for universal invariants
+Universal invariants about symbolic objects "lazily" allocate new
+symbolic objects on the heap when encountering something symbolic that is
+using them. Intuitively, they forall-quantify over all such objects of that type,
+so `universalInvariantAssms` quantifies over these objects by taking the delta
+of references that existed before and after running the invariant. Ideally,
+we'd do this in a more structured way, where `symEval` keeps track of what was
+lazily allocated specifically and communicates that explicitly to its caller.
+
+### Possible implementation approach
+In the Verify monad, add a data structure to be used for the `Writer` part
+of the monad, that keeps track of this, then use `Writer` primitives
+like `listen` when calling `symEval` to obtain this set. This way,
+we don't have to propagate these things throughout all result types.
