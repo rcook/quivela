@@ -1,12 +1,12 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
-{-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
+{-# LANGUAGE NamedFieldPuns, TemplateHaskell #-}
 
 import qualified Control.DeepSeq as DS
 import Control.Exception (SomeException, catch)
 import qualified Data.Map as M
 import qualified Test.HUnit as T
-import Test.HUnit (Assertion, Test(TestCase, TestList))
+import Test.HUnit (Assertion, Counts(..), Test(TestCase, TestList))
 
 import qualified Quivela.Examples as E
 import qualified Quivela.Language as L
@@ -26,7 +26,7 @@ import qualified Quivela.Util as U
 import qualified Quivela.Verify as V
 
 -- Don't print garbage during tests.  If a test fails, debug it separately.
-noDebugEnv = S.emptyVerifyEnv { S._debugFlag = False } 
+noDebugEnv = S.emptyVerifyEnv {S._debugFlag = False}
 
 assertVerified :: String -> Expr -> Proof -> Assertion
 assertVerified msg prefix proof = do
@@ -393,4 +393,10 @@ tests =
         ]
 
 main :: IO ()
-main = T.runTestTT tests >> return ()
+main = do
+  counts@Counts {cases, tried, errors, failures} <- T.runTestTT tests
+  if failures > 0 || errors > 0
+    then error $ "Failed tests: " ++ show counts
+    else if tried /= cases
+           then error $ "Not all tests ran: " ++ show counts
+           else return ()
