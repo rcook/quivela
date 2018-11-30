@@ -28,6 +28,7 @@ import Control.Monad.RWS.Strict
   , MonadState
   , MonadWriter
   , RWST
+  , ask
   , censor
   , evalRWST
   , filterM
@@ -59,7 +60,7 @@ import Data.Generics
 import Data.List ((\\), intercalate, intersect, isInfixOf, nub, nubBy)
 import qualified Data.Map as M
 import qualified Data.Map.Merge.Lazy as M
-import Data.Maybe (catMaybes, fromJust, listToMaybe)
+import Data.Maybe (catMaybes, fromJust, isJust, listToMaybe)
 import Data.Serialize (Serialize(..), decode, encode, get, put)
 import qualified Data.Set as S
 import Data.Typeable (Typeable)
@@ -208,8 +209,8 @@ havocContext :: Context -> Verify Context
 havocContext = everywhereM (mkM havocObj)
 
 -- | Return an initial state for the verifier monad
-newVerifyState :: IO VerifyState
-newVerifyState = do
+newVerifyState :: VerifyEnv -> IO VerifyState
+newVerifyState env = do
   (Just hin, Just hout, _, procHandle) <-
     createProcess $
     (proc "z3" ["-in"])
@@ -217,15 +218,16 @@ newVerifyState = do
   hSetBuffering hin NoBuffering
   hSetBuffering hout NoBuffering
   hPutStrLn hin z3Prelude
-  verificationCache <-
-    do exists <- doesFileExist "cache.bin"
-       if exists
-         then do
-           maybeCache <- decode <$> liftIO (BS.readFile "cache.bin")
-           case maybeCache of
-             Right cache -> return cache
-             Left err -> return S.empty
-         else return S.empty
+  verificationCache <- case E._cacheFile env of
+    Nothing -> return S.empty
+    Just f -> do
+      exists <- doesFileExist f
+      if not exists then return S.empty
+      else do
+        maybeCache <- decode <$> liftIO (BS.readFile f)
+        case maybeCache of
+          Right cache -> return cache
+          Left err -> error $ "Can't parse proof cache: " ++ f
   return
     VerifyState
       { _alreadyVerified = verificationCache
@@ -237,7 +239,7 @@ newVerifyState = do
 -- | Run a Verify action
 runVerify :: VerifyEnv -> Verify a -> IO a
 runVerify env action = do
-  initState <- newVerifyState
+  initState <- newVerifyState env
   (res, state, _) <- runRWST (E.unVerify action) env initState
   return res
 
@@ -1145,7 +1147,8 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
 checkEqv useSolvers prefix hintsIn lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use E.alreadyVerified
   (_, hints, _) <- inferInvariants prefix (lhs, hintsIn, rhs)
-  withCache <- view E.useCache
+  env <- ask
+  withCache <- E.useCache
   let noteText =
         concatMap
           (\hint ->

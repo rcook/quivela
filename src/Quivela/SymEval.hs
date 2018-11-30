@@ -13,6 +13,7 @@ module Quivela.SymEval
   , VerifyEnv(..)
   , VerifyState(..)
   , alreadyVerified
+  , cacheFile
   , debug
   , debugFlag
   , emptyVerifyEnv
@@ -58,7 +59,7 @@ import qualified Control.Monad.RWS.Strict as RWS
 import qualified Control.Monad.Reader as Reader
 import Data.List (intercalate, nub)
 import qualified Data.Map as M
-import Data.Maybe (fromJust, maybeToList)
+import Data.Maybe (fromJust, isJust, maybeToList)
 import Data.Serialize (Serialize, put)
 import qualified Data.Set as S
 import Data.Set (intersection, union)
@@ -91,12 +92,12 @@ import System.Process (ProcessHandle)
 
 -- | The fixed environment for symbolic evaluation.
 data VerifyEnv = VerifyEnv
-  { _debugFlag :: Bool
+  { _cacheFile :: Maybe FilePath,
+    -- ^ Proof cache location
+    _debugFlag :: Bool
     -- ^ print debugging information
   , _splitEq :: Bool
     -- ^ Split == operator into two paths during symbolic evaluation?
-  , _useCache :: Bool
-    -- ^ Should we cache verification steps that succeed and not recheck them?
   } deriving (Typeable)
 
 -- | A monad for generating and discharging verification conditions, which
@@ -110,6 +111,9 @@ newtype Verify a = Verify
              , Functor
              , MonadReader VerifyEnv
              )
+
+useCache :: Verify Bool
+useCache = (isJust . _cacheFile) <$> RWS.ask
 
 -- Right now, we only need the same environment as symbolic evaluation, so we reuse
 -- that type here.
@@ -1118,4 +1122,4 @@ symEval (EIntersect e1 e2, ctx, pathCond) = do
                  show v2
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv {_debugFlag = True, _splitEq = False, _useCache = False}
+emptyVerifyEnv = VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False}
