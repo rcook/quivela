@@ -30,7 +30,6 @@ noDebugEnv = S.emptyVerifyEnv {S._debugFlag = False}
 
 assertVerified :: String -> Expr -> Proof -> Assertion
 assertVerified msg prefix proof = do
-  V.clearCache
   res <- Q.prove' noDebugEnv prefix proof
   T.assertEqual msg 0 res
 

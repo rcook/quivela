@@ -10,7 +10,6 @@
 
 module Quivela.Verify
   ( (≈)
-  , clearCache
   , fieldEqual
   , fieldsEqual
   , proveStep
@@ -1147,7 +1146,6 @@ checkEqv useSolvers prefix [Rewrite from to] lhs rhs = do
 checkEqv useSolvers prefix hintsIn lhs rhs = do
   cached <- S.member (lhs, rhs) <$> use E.alreadyVerified
   (_, hints, _) <- inferInvariants prefix (lhs, hintsIn, rhs)
-  env <- ask
   withCache <- E.useCache
   let noteText =
         concatMap
@@ -1222,9 +1220,13 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
 -- | Mark a pair of expressions as successfully verified in the cache
 cacheVerified :: Expr -> Expr -> Verify ()
 cacheVerified lhs rhs = do
-  E.alreadyVerified %= S.insert (lhs, rhs)
-  verified <- use E.alreadyVerified
-  liftIO $ BS.writeFile "cache.bin" (encode verified)
+  f <- view E.cacheFile
+  case f of
+    Nothing -> return ()
+    Just f -> do
+      E.alreadyVerified %= S.insert (lhs, rhs)
+      verified <- use E.alreadyVerified
+      liftIO $ BS.writeFile f (encode verified)
 
 -- | Check two quivela files for equivalence using a list of invariants. The
 -- first quivela file contains shared global variables and method definitions
@@ -1271,12 +1273,6 @@ fieldsEqual fieldsL fieldsR = EqualInv (getField fieldsL) (getField fieldsR)
 -- | Like 'fieldsEqual' but looking up the same fields on both sides.
 fieldEqual :: [Var] -> ProofHint
 fieldEqual fields = fieldsEqual fields fields
-
--- | Clears the proof cache
-clearCache :: IO ()
-clearCache = do
-  exists <- doesFileExist "cache.bin"
-  when exists $ removeFile "cache.bin"
 
 commonVars :: [Var] -> Addr -> Context -> Addr -> Context -> [[Var]]
 commonVars prefixFields addrL ctxL addrR ctxR
