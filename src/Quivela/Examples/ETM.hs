@@ -1,16 +1,18 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 
-module Quivela.Examples.ETM where
+module Quivela.Examples.ETM
+  ( program
+  ) where
 
 import Control.Lens hiding (rewrite)
 import Quivela
 
-prove
-  emptyVerifyEnv
-  ([prog'|
+program =
+  prove'
+    emptyVerifyEnv
+    ([prog'|
 method MacI(mac) {
     new (const mac=mac,tg=0) {
         method tag(m) { tg[m] = mac.tag(m) }

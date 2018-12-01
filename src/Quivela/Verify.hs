@@ -239,7 +239,7 @@ newVerifyState env = do
 runVerify :: VerifyEnv -> Verify a -> IO a
 runVerify env action = do
   initState <- newVerifyState env
-  (res, state, _) <- runRWST (E.unVerify action) env initState
+  (res, state, ()) <- runRWST (E.unVerify action) env initState
   return res
 
 emptyVC = VC {_conditionName = "vc", _assumptions = [], _goal = PTrue}
@@ -1334,6 +1334,7 @@ toSteps (Prog lhs:Hint invs:Prog rhs:steps') =
   (lhs, invs, rhs) : toSteps (Prog rhs : steps')
 toSteps _ = error "Invalid sequence of steps"
 
+-- | Return the number of remaining verification conditions
 proveStep :: Expr -> Step -> Verify Int
 proveStep prefix (lhs, invs, rhs) = do
   remaining <- checkEqv True prefix invs lhs rhs

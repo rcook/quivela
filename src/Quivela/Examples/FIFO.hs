@@ -1,15 +1,18 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
-{-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 
-module Quivela.Examples.FIFO where
+module Quivela.Examples.FIFO
+  ( program
+  ) where
 
 import Control.Lens
 import Quivela
 
-prove
-  emptyVerifyEnv
-  [prog'|
+program =
+  prove'
+    emptyVerifyEnv
+    [prog'|
    method Fifo(n) {
      new (const n=n, s:int=0, r:int=0, h=0) {
        method snd(m) { n.snd(Z(m)) & h[s] = <m>, s++, 1 }

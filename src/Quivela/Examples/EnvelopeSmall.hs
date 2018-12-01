@@ -2,15 +2,18 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 
-module Envelope where
+module Envelope
+  ( program
+  ) where
 
 import Control.Lens hiding (rewrite)
 import qualified Data.Map as M
 import Quivela
 
-prove
-  emptyVerifyEnv
-  [prog'|
+program =
+  prove'
+    emptyVerifyEnv
+    [prog'|
 function skenc(k, a, m)
 function skdec(k, a, c)
 

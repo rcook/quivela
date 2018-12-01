@@ -230,23 +230,21 @@ setComprExpr = do
       , _comprValue = fun
       }
 
+-- TODO: Why is map comprehension syntax/functionality so different from set comprehensions?
 mapComprExpr :: Parser Expr
 mapComprExpr = do
   symbol "["
-  name <- identifier
+  var <- identifier
   symbol "->" <|> symbol "↦"
-  fun <- withState (set inTuple True) expr
-  (name1, base, pred) <- comprSuffix
-  () <-
-    if name /= name1
-      then fail $ "bound var mismatch: " ++ show name ++ " != " ++ show name1
-      else return ()
+  val <- withState (set inTuple True . set pipeAsOr False) expr
+  symbol "|"
+  pred <- withState (set inTuple True) expr
   symbol "]"
   return $
     EMapCompr
-      { _comprVar = name
-      , _comprPred = ECall (EConst VNil) "&" [EIn (EVar name) base, pred]
-      , _comprValue = fun
+      { _comprPred = pred
+      , _comprValue = val
+      , _comprVar = var
       }
 
 combExpr :: Expr -> Parser Expr

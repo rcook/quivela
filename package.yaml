@@ -20,9 +20,6 @@ library:
   exposed-modules:
   - Quivela
   - Quivela.Diff
-  - Quivela.Examples.ETM
-  - Quivela.Examples.Envelope
-  - Quivela.Examples.FIFO
   - Quivela.Language
   - Quivela.Parse
   - Quivela.QuasiQuote
