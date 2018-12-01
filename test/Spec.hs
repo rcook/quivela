@@ -6,9 +6,6 @@
 import qualified Control.DeepSeq as DS
 import Control.Exception (SomeException, catch)
 import qualified Data.Map as M
-import qualified Test.HUnit as T
-import Test.HUnit (Assertion, Counts(..), Test(TestCase, TestList), (~:))
-
 import qualified Quivela.Language as L
 import Quivela.Language (ProofPart(..))
 import Quivela.Language
@@ -29,6 +26,9 @@ import qualified Quivela.SymEval as S
 import qualified Quivela.Util as U
 import qualified Quivela.Verify as V
 import Quivela.Verify ((≈), fieldEqual, fieldsEqual)
+import qualified System.Environment as E
+import qualified Test.HUnit as T
+import Test.HUnit (Assertion, Counts(..), Test(TestCase, TestList), (~:))
 
 -- Don't print garbage during tests.  If a test fails, debug it separately.
 env = S.emptyVerifyEnv {S._debugFlag = False}
@@ -67,8 +67,7 @@ assertEvalResult :: String -> Expr -> Value -> Test
 assertEvalResult msg e v = assertEvalResult' msg L.emptyCtx e v
 
 assertVerifyError :: String -> Expr -> Proof -> Test
-assertVerifyError msg prefix proof =
-  assertError msg $ prove' env prefix proof
+assertVerifyError msg prefix proof = assertError msg $ prove' env prefix proof
 
 assertParses :: String -> String -> Expr -> Test
 assertParses msg progText e =
@@ -77,8 +76,8 @@ assertParses msg progText e =
 doesntVerify :: String -> Expr -> Proof -> Test
 doesntVerify msg prefix proof =
   let a = do
-       remaining <- prove' env prefix proof
-       T.assertBool msg (remaining > 0)
+        remaining <- prove' env prefix proof
+        T.assertBool msg (remaining > 0)
    in msg ~: TestCase a
 
 parserTests =
@@ -243,19 +242,20 @@ invalidCases =
 
 -- Tests that should work but are currently broken.  We don't run these as
 -- part of "stack test"
-failingTests :: [Test]
-failingTests = [
-  assertVerified "map comprehension to modify existing map" nop $
-    [prog|
+failingTests :: Test
+failingTests =
+  TestList
+    [ assertVerified "map comprehension to modify existing map" nop $
+      [prog|
 new(i:int=0) {
   method f(y) { m = 0, m[y] = i, i++, m = [x ↦ m[x]+1 | m[x]], m[y] }
 }|] ≈
-    Hint [NoInfer, fieldEqual ["i"]] :
-    [prog|
+      Hint [NoInfer, fieldEqual ["i"]] :
+      [prog|
 new(i:int=0) {
   method f(y) { if (!(0 == i)) { i++ } else { i++, 0 } }
 } |] :
-    []
+      []
     ]
 
 tests :: Test
@@ -728,7 +728,13 @@ new() {
 
 main :: IO ()
 main = do
-  counts@Counts {cases, tried, errors, failures} <- T.runTestTT tests
+  args <- E.getArgs
+  let t =
+        case args of
+          [] -> tests
+          ["bug"] -> failingTests
+          _ -> error "Illegal arguments"
+  counts@Counts {cases, tried, errors, failures} <- T.runTestTT t
   if failures > 0 || errors > 0
     then error $ "Failed tests: " ++ show counts
     else if tried /= cases
