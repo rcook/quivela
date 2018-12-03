@@ -763,14 +763,14 @@ symEvalPatternMatch pat rhs ctx pathCond
   -- check that all elements of the pattern are just simple variables
   | [vars] <- sequence (map (maybeToList . fromEVar) pat) =
     foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') ->
-      let (lvalues, ctx', isNew) =
+      let (lvalues, ctx') =
             foldr
-              (\var (places, ctx', isNew) ->
+              (\var (places, ctx') ->
                  case findVar var ctx' of
-                   Just (place, ctx'', isNew') ->
-                     (place : places, ctx'', isNew || isNew')
+                   Just (place, ctx'', _) ->
+                     (place : places, ctx'')
                    Nothing -> error $ "Not a valid l-value: " ++ show var)
-              ([], ctx, False)
+              ([], ctx)
               vars
           rhsVals =
             if isSymbolic vrhs
