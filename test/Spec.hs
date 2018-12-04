@@ -256,6 +256,18 @@ new(i:int=0) {
   method f(y) { if (!(0 == i)) { i++ } else { i++, 0 } }
 } |] :
       []
+    , assertVerified
+        "assignment of tuple 4"
+        ([prog'|
+      method F(e) { new (const e=e) { method foo(m) { m & <t> = e.foo(m) }}}
+      _e = adversary() |]) $
+      [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
+    , assertVerified
+        "assignment of tuple 5"
+        ([prog'|
+      method F(e) { new (const e=e) { method foo() { <t> = e.foo() & <1> }}}
+      _e = adversary() |]) $
+      [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
     ]
 
 tests :: Test
@@ -724,6 +736,24 @@ new() {
   method f(x, y) { 5 }
 }|] :
     []
+  , assertVerified
+      "assignment of tuple 1"
+      ([prog'|
+      method F(e) { new (const e=e) { method foo(m) { <t> = e.foo(m) }}}
+      _e = adversary() |]) $
+    [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
+  , assertVerified
+      "assignment of tuple 2"
+      ([prog'|
+      method F(e) { new (const e=e) { method foo(m) { 1 & <t> = e.foo(m) }}}
+      _e = adversary() |]) $
+    [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
+  , assertVerified
+      "assignment of tuple 3"
+      ([prog'|
+      method F(e) { new (const e=e) { method foo() { <t> = e.foo() , <1> }}}
+      _e = adversary() |]) $
+    [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
   ]
 
 main :: IO ()
