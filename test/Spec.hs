@@ -219,6 +219,19 @@ parserTests =
            , _callName = "+"
            , _callArgs = [EConst (VInt 1), EConst (VInt 2)]
            }))
+  , ( ", as separator"
+    , "(<t> = e.foo()) , <1>"
+    , ESeq
+        (EAssign (ETuple [EVar "t"]) (ECall (EVar "e") "foo" []))
+        (ETuple [EConst $ VInt 1]))
+  , ( "& as seperator"
+    , "(<t> = e.foo()) & <1>"
+    , ECall
+        (EConst VNil)
+        "&"
+        [ EAssign (ETuple [EVar "t"]) (ECall (EVar "e") "foo" [])
+        , ETuple [EConst $ VInt 1]
+        ])
   ]
 
 invalidCases =

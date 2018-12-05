@@ -761,8 +761,8 @@ fromEVar _ = Nothing
 symEvalPatternMatch :: [Expr] -> Expr -> Context -> PathCond -> Verify Results
 symEvalPatternMatch pat rhs ctx pathCond
   -- check that all elements of the pattern are just simple variables
-  | [vars] <- sequence (map (maybeToList . fromEVar) pat) =
-    foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') ->
+  | Just vars <- sequence $ map fromEVar pat =
+    foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') -> -- FIXME: pathCond' is unused
       let (lvalues, ctx') =
             foldr
               (\var (places, ctx') ->
@@ -771,27 +771,23 @@ symEvalPatternMatch pat rhs ctx pathCond
                    Nothing -> error $ "Not a valid l-value: " ++ show var)
               ([], ctx)
               vars
-          rhsVals =
-            if isSymbolic vrhs
-              then map
-                     (Sym . Proj vrhs . VInt . fromIntegral)
-                     [0 .. length pat - 1]
-              else case vrhs of
-                     VTuple rhsVals
-                       | length rhsVals == length vars -> rhsVals
-                     _ ->
-                       error $
-                       "Invalid concrete value for pattern-match expression: " ++
-                       show (pat, rhs)
+          (rhsVals, projEq) =
+            case vrhs of
+              Sym _ ->
+                ( map
+                    (Sym . Proj vrhs . VInt . fromIntegral)
+                    [0 .. length pat - 1]
+                , [vrhs :=: VTuple rhsVals])
+              VTuple rhsVals
+                | length rhsVals == length vars -> (rhsVals, [])
+              _ ->
+                error $ "Invalid concrete value for pattern-match expression: " ++
+                show (pat, rhs, vrhs)
           ctx''' =
             foldr
               (\(place, proj) ctx'' -> set (place ^. L.placeLens) proj ctx'')
               ctx'
               (zip lvalues rhsVals)
-          projEq =
-            if isSymbolic vrhs
-              then [vrhs :=: VTuple rhsVals]
-              else []
        in return [(vrhs, ctx''', projEq ++ pathCond)]
   | otherwise =
     error $ "Nested patterns not supported yet: " ++ show pat ++ " = " ++

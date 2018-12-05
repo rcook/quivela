@@ -117,7 +117,7 @@ data Type
   | TNamed String
   deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
 
--- | Symbolic values representing unknowns and operations on the
+-- | Symbolic values representing unknowns and operations on them
 -- Calls to the adversary are also symbolic.
 data SymValue
   = SymVar String
@@ -309,12 +309,13 @@ data AllocStrategy
 data Context = Context
   { _ctxObjs :: M.Map Addr Object
   , _ctxThis :: Addr
-  , _ctxScope :: Scope -- ^ Keeps track of local variables and arguments in a
-                                            -- method call.
-  , _ctxAdvCalls :: [[Value]] -- ^ All adversary calls so far
+  , _ctxScope :: Scope
+    -- ^ Keeps track of local variables and arguments in a method call.
+  , _ctxAdvCalls :: [[Value]]
+    -- ^ All adversary calls so far
   , _ctxTypeDecls :: M.Map Var Expr
-                       -- ^ Map from type names to typedecl expressions (all values in this
-                       -- map can be assumed to be of the form (ETypeDecl ...)
+    -- ^ Map from type names to typedecl expressions (all values in this
+    -- map can be assumed to be of the form (ETypeDecl ...)
   , _ctxAllocStrategy :: AllocStrategy
   , _ctxAssumptions :: [(Expr, Expr)]
   , _ctxFunDecls :: M.Map String FunDecl

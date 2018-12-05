@@ -173,12 +173,12 @@ data EmitterState = EmitterState
   { _nextEmitterVar :: M.Map String Integer
   , _varTranslations :: M.Map String String
   , _usedVars :: [(String, String)]
-                                 -- ^ Stores generated fresh variables and their type in the solver
+    -- ^ Stores generated fresh variables and their type in the solver
   , _emitterPrefixCtx :: Context
-                                 -- ^ We make the context of the "prefix"
-                                 -- program of a proof available to emitters so
-                                 -- they can generate output for uninterpreted
-                                 -- functions, etc.
+    -- ^ We make the context of the "prefix"
+    -- program of a proof available to emitters so
+    -- they can generate output for uninterpreted
+    -- functions, etc.
   } deriving (Read, Show, Eq, Ord, Data, Typeable)
 
 C.makeLenses ''EmitterState
