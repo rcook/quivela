@@ -432,7 +432,8 @@ varBindings (EVar x) = (S.singleton x, S.empty)
 varBindings (EConst _) = (S.empty, S.empty)
 varBindings (EAssign (EVar x) rhs) =
   let (freeRhs, boundRhs) = varBindings rhs
-  in (freeRhs, S.insert (Binding {_bindingName = x, _bindingConst = False}) boundRhs)
+   in ( freeRhs
+      , S.insert (Binding {_bindingName = x, _bindingConst = False}) boundRhs)
 varBindings (EAssign lhs rhs) = varBindings lhs `bindingSeq` varBindings rhs
 varBindings (ESeq e1 e2) = combine e1 e2
 varBindings (EIn e1 e2) = combine e1 e2
@@ -441,10 +442,10 @@ varBindings (EIntersect e1 e2) = combine e1 e2
 varBindings (ESubmap e1 e2) = combine e1 e2
 varBindings (ESetCompr x v p) =
   let (free, bound) = combine v p
-  in (S.delete x free, bound) -- TODO: should we remove bindings for `x` from `bound`?
+   in (S.delete x free, bound) -- TODO: should we remove bindings for `x` from `bound`?
 varBindings (EMapCompr x v p) =
   let (free, bound) = combine v p
-  in (S.delete x free, bound) -- TODO: should we remove bindings for `x` from `bound`?
+   in (S.delete x free, bound) -- TODO: should we remove bindings for `x` from `bound`?
 varBindings (ECall obj name args) =
   let (freeObj, boundObj) = varBindings obj
    in varBindingsList (freeObj, boundObj) args
@@ -502,16 +503,13 @@ combine e1 e2 = varBindings e1 `bindingSeq` varBindings e2
 -- | Combine two pieces of binding information assuming that the second set of bindings
 -- is produced by an expression that will be evaluated after the first
 bindingSeq ::
-     (Set Var, Set Binding)
-  -> (Set Var, Set Binding)
-  -> (Set Var, Set Binding)
+     (Set Var, Set Binding) -> (Set Var, Set Binding) -> (Set Var, Set Binding)
 bindingSeq (free1, bound1) (free2, bound2) =
   ( free1 `union` (free2 `difference` S.map (^. bindingName) bound1)
   , bound1 `union` bound2)
 
 -- | Folds 'varBindings' over a list of expressions with a given set of initial bindings
-varBindingsList ::
-     (Set Var, Set Binding) -> [Expr] -> (Set Var, Set Binding)
+varBindingsList :: (Set Var, Set Binding) -> [Expr] -> (Set Var, Set Binding)
 varBindingsList init exprs =
   foldl
     (\(freeAcc, boundAcc) expr ->

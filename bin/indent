@@ -1,0 +1,43 @@
+#!/usr/bin/env stack
+-- stack --resolver lts-12.6 script --package directory,pipes,process
+import qualified Control.Monad as M
+import qualified Data.List as L
+import qualified Pipes as P
+import Pipes (Effect, Producer, for, lift)
+import qualified System.Directory as D
+import System.IO (FilePath)
+import qualified System.Process as Proc
+
+shouldIndent :: FilePath -> Bool
+shouldIndent f =
+  L.all
+    id
+    [ not (L.isInfixOf "/.git/" f)
+    , not (L.isInfixOf "/.stack-work/" f)
+    , L.isSuffixOf ".hs" f
+    ]
+
+lsFiles :: FilePath -> Producer String IO ()
+lsFiles dir = do
+  allRelFiles <- lift $ fmap L.sort (D.listDirectory dir)
+  let allFiles = fmap (\f -> dir ++ "/" ++ f) allRelFiles
+  dirs <- lift $ M.filterM D.doesDirectoryExist allFiles
+  M.mapM_ P.yield (L.filter shouldIndent allFiles)
+  M.mapM_ lsFiles dirs
+
+processFiles :: FilePath -> Effect IO ()
+processFiles dir =
+  for (lsFiles dir) $ \f -> do
+    lift $ putStrLn ("Reading " ++ f)
+    let p = Proc.proc "hindent" [f]
+    lift $ fmap (const ()) (Proc.createProcess p)
+
+main :: IO ()
+main = do
+  putStrLn "Running hindent..."
+  cwd <- D.getCurrentDirectory
+  P.runEffect $ processFiles cwd
+
+-- Local Variables:
+-- mode:haskell
+-- End:

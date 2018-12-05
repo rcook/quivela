@@ -92,9 +92,9 @@ import System.Process (ProcessHandle)
 
 -- | The fixed environment for symbolic evaluation.
 data VerifyEnv = VerifyEnv
-  { _cacheFile :: Maybe FilePath,
+  { _cacheFile :: Maybe FilePath
     -- ^ Proof cache location
-    _debugFlag :: Bool
+  , _debugFlag :: Bool
     -- ^ print debugging information
   , _splitEq :: Bool
     -- ^ Split == operator into two paths during symbolic evaluation?
@@ -767,8 +767,7 @@ symEvalPatternMatch pat rhs ctx pathCond
             foldr
               (\var (places, ctx') ->
                  case findVar var ctx' of
-                   Just (place, ctx'', _) ->
-                     (place : places, ctx'')
+                   Just (place, ctx'', _) -> (place : places, ctx'')
                    Nothing -> error $ "Not a valid l-value: " ++ show var)
               ([], ctx)
               vars
@@ -1122,4 +1121,5 @@ symEval (EIntersect e1 e2, ctx, pathCond) = do
                  show v2
 
 emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv = VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False}
+emptyVerifyEnv =
+  VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False}

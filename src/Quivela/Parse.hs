@@ -240,12 +240,7 @@ mapComprExpr = do
   symbol "|"
   pred <- withState (set inTuple True) expr
   symbol "]"
-  return $
-    EMapCompr
-      { _comprPred = pred
-      , _comprValue = val
-      , _comprVar = var
-      }
+  return $ EMapCompr {_comprPred = pred, _comprValue = val, _comprVar = var}
 
 combExpr :: Expr -> Parser Expr
 combExpr prefix = do

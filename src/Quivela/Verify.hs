@@ -217,16 +217,18 @@ newVerifyState env = do
   hSetBuffering hin NoBuffering
   hSetBuffering hout NoBuffering
   hPutStrLn hin z3Prelude
-  verificationCache <- case E._cacheFile env of
-    Nothing -> return S.empty
-    Just f -> do
-      exists <- doesFileExist f
-      if not exists then return S.empty
-      else do
-        maybeCache <- decode <$> liftIO (BS.readFile f)
-        case maybeCache of
-          Right cache -> return cache
-          Left err -> error $ "Can't parse proof cache: " ++ f
+  verificationCache <-
+    case E._cacheFile env of
+      Nothing -> return S.empty
+      Just f -> do
+        exists <- doesFileExist f
+        if not exists
+          then return S.empty
+          else do
+            maybeCache <- decode <$> liftIO (BS.readFile f)
+            case maybeCache of
+              Right cache -> return cache
+              Left err -> error $ "Can't parse proof cache: " ++ f
   return
     VerifyState
       { _alreadyVerified = verificationCache
@@ -1213,8 +1215,7 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
           debug $ show remainingVCs
         else do
           cacheVerified lhs rhs
-          debug $ note ++ "Verification succeeded in " ++
-            Timer.formatSeconds t
+          debug $ note ++ "Verification succeeded in " ++ Timer.formatSeconds t
       return remainingVCs
 
 -- | Mark a pair of expressions as successfully verified in the cache

@@ -5,7 +5,6 @@
 
 -- This module is slightly generalized from
 -- http://hackage.haskell.org/package/microtimer
-
 module System.Timer
   ( time
   , time_
