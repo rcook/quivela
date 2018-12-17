@@ -11,9 +11,9 @@
 To build Quivela, run `stack build` in the source directory. To get a GHCi REPL
 with the quivela modules loaded, run `stack ghci`.
 
-To run, `quivela2` requires both (z3)[https://github.com/Z3Prover/z3] and
-(dafny)[https://github.com/Microsoft/dafny] to be installed and executable (i.e.
-the binaries should be in a directory listed in `$PATH` on Linux/Mac systems).
+To run, `quivela2` requires (z3)[https://github.com/Z3Prover/z3] to be installed
+and executable (i.e. the binary should be in a directory listed in `$PATH` on
+Linux/Mac systems).
 
 ## Usage
 
@@ -44,10 +44,14 @@ which expands into parsing the given Quivela expression. The `≈` operator chai
 together several expressions. Since proofs are represented as lists, each proof
 must be terminated by `: []`.
 
-To check this proof, load the file in `GHCi` and evaluate `prove' nop andExample`.
-The `prove'` function takes an expression containing shared method definitions
-and global variable declarations as the first argument and a list of `ProofPart`s
-as the second argument.
+To check this proof, load the file in `GHCi` and evaluate
+
+```prove' emptyVerifyEnv nop andExample```
+
+The `prove'` function takes an environment as the first argument (usually 
+`emptyVerifyEnv` if starting from scratch), an expression containing shared method definitions
+and global variable declarations as the second argument and a list of `ProofPart`s
+as the third argument.
 
 To avoid having to manually evaluate a call to `prove'` after each modification,
 `quivela2` also provides a compile-time version called `prove` that will perform
@@ -55,7 +59,7 @@ the verification as part of loading the file in GHCi. The proof above
 can then be written as follows:
 
 ```
-prove nop $
+prove emptyVerifyEnv nop $
   [prog| new() { method f(x, y) { 1 & x & y & 1 } } |]
   ≈
   [prog| new() { method f(x, y) { 1 & y & x & 1 } } |]
@@ -81,7 +85,7 @@ Instead of stating many equality invariants on variables that are never
 modified, object fields can be declared as constant:
 
 ```
-prove nop
+prove emptyVerifyEnv nop
   [prog| new (const x=0) { method f() { x } } |]
   ≈
   [prog| new (const x=0) { method f() { 0 } } |]
@@ -104,7 +108,7 @@ There are number of side conditions that are currently not checked:
   step will not be rechecked. This does not affect soundness, since the two
   programs are equivalent and the invariants are only used during this
   verification step.
-  
+
 - The concrete syntax is somewhat ugly in that semicolons are required as
   separators in between expressions, and methods need to be prefixed by the
   keyword "method".
