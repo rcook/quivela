@@ -7,6 +7,7 @@ module Quivela.QuasiQuote
   , prog'
   , prove
   , prove'
+  , proveFailFast
   , rewrite
   ) where
 
@@ -53,6 +54,19 @@ prove' :: E.VerifyEnv -> L.Expr -> [L.ProofPart] -> IO Int
 prove' env prefix steps = do
   (t, results) <- Timer.time $ mapM doCheck (V.toSteps steps)
   return $ sum results
+  where
+    doCheck = V.runVerify env . V.proveStep prefix
+
+-- | Fail at first failure.  Return 0 if all succeed, 1 if there's a failure
+proveFailFast :: E.VerifyEnv -> L.Expr -> [L.ProofPart] -> IO Int
+proveFailFast env prefix steps =
+  M.foldM
+    (\c s ->
+       if c > 0
+         then return c
+         else doCheck s)
+    0
+    (V.toSteps steps)
   where
     doCheck = V.runVerify env . V.proveStep prefix
 
