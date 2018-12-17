@@ -2,10 +2,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 
-module Quivela.Examples.FIFOSmall
-  ( program
-  ) where
-
 import Control.Lens
 import Quivela
 

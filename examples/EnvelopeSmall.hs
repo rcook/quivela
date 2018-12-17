@@ -2,10 +2,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 
-module Quivela.Examples.Envelope
-  ( program
-  ) where
-
 import Control.Lens hiding (rewrite)
 import qualified Data.Map as M
 import Quivela
@@ -59,18 +55,6 @@ e = adversary()
 |] $
   [prog|
          Enc(Env(Enc(e))) |] ≈
-  Hint [Note "defs"] :
-  [prog|
-new (const e = Env(Enc(e)),d=0) {
-  method enc(a,m)      { c = e.enc(a,Z(m)) & d[a][c] = <m> & c }
-  method dec(a,c)      { d[a][c] }
-}|] ≈
-  Hint [Note "defs, renaming e"] :
-  [prog|
-new (const e = Enc(e),d=0) {
-  method enc(a,m)      { k=rnd() & ek = e.enc(0,k) & em = skenc(k,a,Z(m)) & c = <ek,em> & d[a][c] = <m> & c }
-  method dec(a,c)      { d[a][c] }
-}|] ≈
   Hint [Note "switching from Enc to EncL since no calls to dec"] :
   [prog|
 new (const e = EncL(e),d=0) {
@@ -83,14 +67,6 @@ new (const e = EncLI(e),d=0) {
   method enc(a,m)      { k=rnd() & ek = e.enc(0,k) & em = skenc(k,a,Z(m)) & c = <ek,em> & d[a][c] = <m> & c }
   method dec(a,c)      { d[a][c] }
 }|] ≈
-  Hint [Note "def e.enc; Z(k) ~ zk"] :
-  [prog|
-new (const e = EncLI(e),d=0) {
-  method enc(a,m)      { k=rnd(), zk = Z(k) & ek = e.enc(0,zk) & em = skenc(k,a,Z(m)) & c = <ek,em> & d[a][c] = <m> & c }
-// orig: enc(a,m)      { k=rnd() & ek = e.enc(0,zk) & em = skEnc(k,a,Z(m)) & c = <ek,em> & d[a][c] = <m> & c }
-  method dec(a,c)      { d[a][c] }
-}|] ≈
-  Hint [Note "introducing f; def E"] :
   [prog|
 new (const e = EncLI(e),d=0) {
   method enc(a,m)      { zk = Z(rnd()), f = E() & ek = e.enc(0,zk) & em = f.enc(a,Z(m)) & c = <ek,em> & d[a][c] = <m> & c }
@@ -101,15 +77,6 @@ new (const e = EncLI(e),d=0) {
   [prog|
 new (const e = EncLI(e),d=0) {
   method enc(a,m)      { zk = Z(rnd()), f = Enc(E()) & ek = e.enc(0,zk) & em = f.enc(a,Z(m)) & c = <ek,em> & d[a][c] = <m> & c }
-  method dec(a,c)      { d[a][c] }
-}|] ≈
-  Hint
-    [ Note
-        "similar to above (f.dec not called) - replace Enc(E()) w EncLI(E()), then Z(m) w. m, then EncLI(E()) w. Enc(E())"
-    ] :
-  [prog|
-new (const e = EncLI(e),d=0) {
-  method enc(a,m)      { zk = Z(rnd()), f = Enc(E()) & ek = e.enc(0,zk) & em = f.enc(a,m) & c = <ek,em> & d[a][c] = <m> & c }
   method dec(a,c)      { d[a][c] }
 }|] ≈
   Hint [Note "introduce fs, move to EncE()"] :
@@ -142,18 +109,6 @@ new (const e = EncLI(e),fs:map * ET=0) {
     method enc(a,m)    { zk = Z(rnd()), f = new ET(k=rnd()) & ek = e.enc(0,f.k) & em = f.enc(a,m) & fs[ek]=f & <ek,em> }
     method dec(a,c)    { <ek,em> = c & fs[ek].dec(a,em) }
 }|] ≈
-  Hint [Note "Drop zk"] :
-  [prog|
-new (const e = EncLI(e),fs:map * ET=0) {
-    method enc(a,m)    { f = new ET(k=rnd()) & ek = e.enc(0,f.k) & em = f.enc(a,m) & fs[ek]=f & <ek,em> }
-    method dec(a,c)    { <ek,em> = c & fs[ek].dec(a,em) }
-}|] ≈
-  Hint [] :
-  [prog|
-new (const e = EncL(e),fs:map * ET=0) {
-    method enc(a,m)    { f = new ET(k=rnd()) & ek = e.enc(0,f.k) & em = f.enc(a,m) & fs[ek]=f & <ek,em> }
-    method dec(a,c)    { <ek,em> = c & fs[ek].dec(a,em) }
-}|] ≈
   Hint [Note "Move from fs[..].dec to using e and skdec"] :
   [prog|
 new (const e = Enc(e),fs:map * ET=0) {
@@ -162,18 +117,6 @@ new (const e = Enc(e),fs:map * ET=0) {
    invariant i1(ek)   { !fs[ek]  | fs[ek].k == e.d[0][ek] } // type of fs
    invariant i2(ek)   { !(fs[ek] == 0) | !e.d[0][ek] }
    invariant i3(ek)   { !(e.d[0][ek] == 0) | !fs[ek] }
-}|] ≈
-  Hint [Note "fs auxiliary"] :
-  [prog|
-new (const e = Enc(e)) {
-   method enc(a,m)         { f = new ET(k=rnd()) & ek = e.enc(0,f.k) & em = f.enc(a,m) & <ek,em> }
-   method dec(a,c)         { <ek,em> = c & k = e.dec(0,ek) & skdec(k,a,em) }
-}|] ≈
-  Hint [Note "inlining"] :
-  [prog|
-new (const e = Enc(e)) {
-   method enc(a,m)         { k=rnd() & ek = e.enc(0,k) & em = skenc(k, a, m) & <ek,em> }
-   method dec(a,c)         { <ek,em> = c & k = e.dec(0,ek) & skdec(k,a,em) }
 }|] ≈
   Hint [Note "fold definitions"] :
   [prog|
