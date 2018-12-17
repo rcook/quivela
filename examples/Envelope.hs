@@ -1,10 +1,9 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
-import Control.Lens hiding (rewrite)
-import qualified Data.Map as M
 import Quivela
+import qualified System.Exit as E
 
 program =
   prove'
@@ -175,3 +174,8 @@ new (const e = Enc(e)) {
   [prog|
 Env(Enc(e)) |] :
   []
+
+main :: IO ()
+main = do
+  n <- program
+  if n == 0 then E.exitSuccess else E.exitFailure

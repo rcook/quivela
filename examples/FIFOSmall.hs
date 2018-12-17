@@ -1,9 +1,9 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
-import Control.Lens
 import Quivela
+import System.Exit as E
 
 program =
   prove'
@@ -91,3 +91,8 @@ new (const n=ChC(n,AEAD(e)), h=0) {
        [["n", "r"], ["n", "s"], ["n", "e", "d"]]
        [["r"], ["s"], ["e", "d"]]) :
   [prog| ChC(n, AEAD(e)) |] : []
+
+main :: IO ()
+main = do
+  n <- program
+  if n == 0 then E.exitSuccess else E.exitFailure

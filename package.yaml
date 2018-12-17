@@ -63,3 +63,27 @@ tests:
     - containers
     - deepseq
     - quivela
+  envelope:
+    main: examples/Envelope.hs
+    dependencies:
+    - quivela
+  envelope-small:
+    main: examples/EnvelopeSmall.hs
+    dependencies:
+    - quivela
+  etm:
+    main: examples/ETM.hs
+    dependencies:
+    - quivela
+  etm-small:
+    main: examples/ETMSmall.hs
+    dependencies:
+    - quivela
+  fifo:
+    main: examples/FIFO.hs
+    dependencies:
+    - quivela
+  fifo-small:
+    main: examples/FIFOSmall.hs
+    dependencies:
+    - quivela

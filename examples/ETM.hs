@@ -1,9 +1,9 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
-import Control.Lens hiding (rewrite)
 import Quivela
+import qualified System.Exit as E
 
 program =
   prove'
@@ -202,3 +202,8 @@ new (const mac=MacI(_mac),const cpa=CpaI(Enc(_e)), const e=Enc(_e), d=0) {
   }|] ≈ -- Hint [d]:
       [prog| AeadI(EtM(_e,_mac)) |] :
       []
+
+main :: IO ()
+main = do
+  n <- program
+  if n == 0 then E.exitSuccess else E.exitFailure
