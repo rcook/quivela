@@ -63,6 +63,10 @@ tests:
     - containers
     - deepseq
     - quivela
+  cpp-example:
+    main: examples/CppExample.hs
+    dependencies:
+    - quivela
   envelope:
     main: examples/Envelope.hs
     dependencies:
