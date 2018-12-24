@@ -281,12 +281,10 @@ new(i:int=0) {
       method F(e) { new (const e=e) { method foo() { <t> = e.foo() & <1> }}}
       _e = adversary() |]) $
       [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
-    , assertVerified
-        "assignment of tuple 6"
-      ([prog'| 1 |]) $
-      [prog| new () { method enc(m) { <t> = m }} |] ≈ 
-      [prog| new () { method enc(m) { <t> = (<tg>=m & <tg>)  }} |]
-      :[]
+    , assertVerified "assignment of tuple 6" ([prog'| 1 |]) $
+      [prog| new () { method enc(m) { <t> = m }} |] ≈
+      [prog| new () { method enc(m) { <t> = (<tg>=m & <tg>)  }} |] :
+      []
     ]
 
 tests :: Test

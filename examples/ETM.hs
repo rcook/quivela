@@ -206,4 +206,6 @@ new (const mac=MacI(_mac),const cpa=CpaI(Enc(_e)), const e=Enc(_e), d=0) {
 main :: IO ()
 main = do
   n <- program
-  if n == 0 then E.exitSuccess else E.exitFailure
+  if n == 0
+    then E.exitSuccess
+    else E.exitFailure

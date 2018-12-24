@@ -178,4 +178,6 @@ Env(Enc(e)) |] :
 main :: IO ()
 main = do
   n <- program
-  if n == 0 then E.exitSuccess else E.exitFailure
+  if n == 0
+    then E.exitSuccess
+    else E.exitFailure

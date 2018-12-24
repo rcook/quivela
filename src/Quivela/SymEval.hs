@@ -762,7 +762,8 @@ symEvalPatternMatch :: [Expr] -> Expr -> Context -> PathCond -> Verify Results
 symEvalPatternMatch pat rhs ctx pathCond
   -- check that all elements of the pattern are just simple variables
   | Just vars <- sequence $ map fromEVar pat =
-    foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') -> -- FIXME: pathCond' is unused
+    foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, ctx', pathCond') -- FIXME: pathCond' is unused
+     ->
       let (lvalues, ctx') =
             foldr
               (\var (places, ctx') ->
