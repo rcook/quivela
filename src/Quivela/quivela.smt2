@@ -3,14 +3,17 @@
 (set-option :smt.auto-config false) ; disable automatic self configuration
 (set-option :smt.mbqi false) ; disable model-based quantifier instantiation
 
-(declare-datatypes ((Value 0) (Values 0) (Valuess 0))
+(declare-datatypes ((Value 0) (Values 0))
                    (((VInt (val Int))
                      VNil
                      (VSet (valSet (Array Value Bool)))
                      (VMap (valMap (Array Value Value)))
                      (VTuple (elts Values)))
                     (nil (cons (hd Value) (tl Values)))
-                    (nils (conss (hds Values) (tls Valuess)))))
+                    ))
+
+(declare-datatypes ((Valuess 0))
+                   ((nils (conss (hds Values) (tls Valuess)))))
 
 (declare-fun deref (Value String) Value)
 (assert (forall ((s String))
