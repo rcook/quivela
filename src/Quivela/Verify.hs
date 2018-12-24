@@ -216,7 +216,8 @@ newVerifyState env = do
       {std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe}
   hSetBuffering hin NoBuffering
   hSetBuffering hout NoBuffering
-  hPutStrLn hin z3Prelude
+  prelude <- z3Prelude
+  hPutStrLn hin prelude
   verificationCache <-
     case E._cacheFile env of
       Nothing -> return S.empty
@@ -1100,10 +1101,11 @@ instance ToZ3 SymValue where
 writeToZ3File :: FilePath -> VC -> Verify FilePath
 writeToZ3File dir vc = do
   pctx <- use E.verifyPrefixCtx
+  prelude <- liftIO $ z3Prelude
   (_, vcLines) <-
     fmap (second (nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
   tempFile <-
-    liftIO $ Temp.writeTempFile dir "z3-vc.smt2" $ unlines $ z3Prelude : vcLines ++
+    liftIO $ Temp.writeTempFile dir "z3-vc.smt2" $ unlines $ prelude : vcLines ++
     ["(check-sat)"]
   return tempFile
 
