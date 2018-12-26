@@ -9,12 +9,12 @@ module Quivela.Parse
   , parseProofPart
   ) where
 
-import Control.Applicative ((<*>), (<*), (*>))
+import Control.Applicative ((*>), (<*), (<*>))
 import qualified Control.Lens as Lens
 import Control.Lens ((^.))
 import qualified Control.Monad as Monad
 import qualified Control.Monad.IO.Class as MonadIO
-import Control.Monad.IO.Class(MonadIO)
+import Control.Monad.IO.Class (MonadIO)
 import qualified Data.Function as F
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -180,7 +180,8 @@ expr = do
         parens
           (withState
              (Lens.set pipeAsOr True .
-              Lens.set inArgs False . Lens.set inFieldInit False . Lens.set inTuple False)
+              Lens.set inArgs False .
+              Lens.set inFieldInit False . Lens.set inTuple False)
              expr) <|>
         try unqualifiedFunCall <|>
         try baseExpr <|>
@@ -216,7 +217,8 @@ comprSuffix = do
   -- TODO: rename inTuple, inArgs, etc. to something like "commaAsSeq"
   base <- withState (Lens.set inTuple True) expr
   pred <-
-    (symbol "," *> withState (Lens.set inTuple True) expr) <|> pure (EConst (VInt 1))
+    (symbol "," *> withState (Lens.set inTuple True) expr) <|>
+    pure (EConst (VInt 1))
   return (name, base, pred)
 
 assumeExpr :: Parser Expr
@@ -309,11 +311,7 @@ field = do
   init <- try (symbol "=" *> expr) <|> pure (EVar x)
   return $
     Field
-      { _fieldName = x
-      , _fieldInit = init
-      , _fieldType = ty
-      , _immutable = isConst
-      }
+      {_fieldName = x, _fieldInit = init, _fieldType = ty, _immutable = isConst}
 
 -- | Fails if list elements are not unique under given function; returns its argument unchanged otherwise
 uniqueBy :: (Show a, Eq b) => (a -> b) -> [a] -> Parser [a]
@@ -328,7 +326,9 @@ newExpr :: Parser Expr
 newExpr =
   ENew <$>
   (reserved "new" *> symbol "(" *>
-   withState (Lens.set inFieldInit True) (field `sepBy` symbol "," >>= uniqueFields) <*
+   withState
+     (Lens.set inFieldInit True)
+     (field `sepBy` symbol "," >>= uniqueFields) <*
    symbol ")") <*>
   (symbol "{" *> (L.foldr ESeq ENop <$> P.many expr) <* symbol "}") <?>
   "new(){} expression"
@@ -392,7 +392,8 @@ typedecl = do
   typeName <- identifier
   symbol "=" *> reserved "new"
   fields <-
-    symbol "(" *> withState (Lens.set inFieldInit True) (field `sepBy` symbol ",") <*
+    symbol "(" *>
+    withState (Lens.set inFieldInit True) (field `sepBy` symbol ",") <*
     symbol ")"
   body <- symbol "{" *> (L.foldr ESeq ENop <$> P.many expr) <* symbol "}"
   (formals, values) <- splitTypeDeclFields fields

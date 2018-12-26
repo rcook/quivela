@@ -12,7 +12,7 @@ module Quivela.Util
 import qualified Control.Monad as Monad
 import qualified Data.List as L
 import qualified Language.Haskell.TH as TH
-import Language.Haskell.TH(Exp, Q)
+import Language.Haskell.TH (Exp, Q)
 import qualified Language.Haskell.TH.Quote as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import Quivela.Prelude

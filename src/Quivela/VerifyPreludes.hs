@@ -3,12 +3,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.VerifyPreludes
-  ( z3Prelude,
-    z3PreludeCompiled
+  ( z3Prelude
+  , z3PreludeCompiled
   ) where
 
-import qualified Quivela.Util as Q
 import Quivela.Prelude
+import qualified Quivela.Util as Q
 import qualified System.IO as IO
 
 -- This file defines the preludes for the z3 backend so we don't

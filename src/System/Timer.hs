@@ -11,8 +11,8 @@ module System.Timer
   , formatSeconds
   ) where
 
-import Control.Monad(liftM)
-import Control.Monad.IO.Class(MonadIO, liftIO)
+import Control.Monad (liftM)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Prelude
 import Text.Printf (printf)

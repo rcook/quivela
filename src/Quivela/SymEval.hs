@@ -28,22 +28,11 @@ module Quivela.SymEval
 import qualified Control.Arrow as Arrow
 import qualified Control.Conditional as Cond
 import qualified Control.Lens as Lens
-import Control.Lens
-  ( (%=)
-  , (.~)
-  , (?~)
-  , (^.)
-  , (^?)
-  )
+import Control.Lens ((%=), (.~), (?~), (^.), (^?))
 import qualified Control.Monad as Monad
-import Control.Monad.Fail(MonadFail)
+import Control.Monad.Fail (MonadFail)
 import qualified Control.Monad.RWS.Strict as RWS
-import Control.Monad.RWS.Strict
-  ( MonadIO
-  , MonadReader
-  , MonadState
-  , RWST
-  )
+import Control.Monad.RWS.Strict (MonadIO, MonadReader, MonadState, RWST)
 import qualified Data.List as L
 import Data.List ((!!))
 import qualified Data.Map as M
@@ -123,7 +112,8 @@ data VerifyState = VerifyState
 L.concat <$> Monad.mapM Lens.makeLenses [''VerifyEnv, ''VerifyState]
 
 debug :: String -> Verify ()
-debug msg = Cond.ifM (Lens.view debugFlag) (RWS.liftIO (putStrLn msg)) (return ())
+debug msg =
+  Cond.ifM (Lens.view debugFlag) (RWS.liftIO (putStrLn msg)) (return ())
 
 -- | Generate a fresh variable starting with a given prefix
 freshVar :: String -> Verify String
@@ -214,7 +204,8 @@ valueHasType _ _ TAny = True
 valueHasType _ (VInt 0) (TMap _ _) = True
 valueHasType _ (VInt _) TInt = True
 valueHasType ctx (VTuple vs) (TTuple ts)
-  | L.length vs == L.length ts = L.all (uncurry (valueHasType ctx)) (L.zip vs ts)
+  | L.length vs == L.length ts =
+    L.all (uncurry (valueHasType ctx)) (L.zip vs ts)
   | otherwise = False
 valueHasType ctx (VMap values) (TMap tk tv) =
   L.all (\key -> valueHasType ctx key tk) (M.keys values) &&
@@ -261,7 +252,8 @@ findVar x ctx
         }
     , ctx
     , False)
-  | Just loc <- ctx ^? Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objLocals . Lens.ix x =
+  | Just loc <-
+     ctx ^? Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objLocals . Lens.ix x =
     Just $
     ( Place
         { _placeLens =
@@ -288,7 +280,8 @@ findVar x ctx
   | otherwise =
     Just $
     ( Place
-        { _placeLens = Q.ctxObjs . Lens.ix 0 . Q.objLocals . Lens.ix x . Q.localValue
+        { _placeLens =
+            Q.ctxObjs . Lens.ix 0 . Q.objLocals . Lens.ix x . Q.localValue
         , _placeConst = False
         , _placeType = TAny
         }
@@ -315,12 +308,14 @@ findLValue (EVar x) ctx pathCond =
 findLValue (EProj obj name) ctx pathCond = do
   Q.foreachM (symEval (obj, ctx, pathCond)) $ \case
     (VRef addr, ctx', pathCond')
-      | Just loc <- ctx' ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name ->
+      | Just loc <-
+         ctx' ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name ->
         return
           [ Just $
             ( Place
                 { _placeLens =
-                    Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name . Q.localValue
+                    Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name .
+                    Q.localValue
                 , _placeConst = loc ^. Q.localImmutable
                 , _placeType = loc ^. Q.localType
                 }
@@ -432,7 +427,9 @@ printContext ctx =
     [ "this: " ++ show (ctx ^. Q.ctxThis)
     , "scope: " ++ show (ctx ^. Q.ctxScope)
     , "objects: " ++
-      L.intercalate "\n" (map (uncurry printObject) (M.toList (ctx ^. Q.ctxObjs)))
+      L.intercalate
+        "\n"
+        (map (uncurry printObject) (M.toList (ctx ^. Q.ctxObjs)))
     ]
 
 evalError :: String -> Context -> a
@@ -499,7 +496,8 @@ nextAddr ctx =
 
 -- | Try to find a method of the given name in the object at that address
 findMethod :: Addr -> Var -> Context -> Maybe Method
-findMethod addr name ctx = ctx ^? Q.ctxObjs . Lens.ix addr . Q.objMethods . Lens.ix name
+findMethod addr name ctx =
+  ctx ^? Q.ctxObjs . Lens.ix addr . Q.objMethods . Lens.ix name
 
 callMethod :: Addr -> Method -> [Value] -> Context -> PathCond -> Verify Results
 callMethod addr mtd args ctx pathCond =
@@ -539,7 +537,9 @@ typedValue _ (TNamed t) ctx
     (args, ctx', pathCond') <-
       symArgs
         ctx
-        (map (\(name', _immut, typ) -> (name', typ)) (tdecl ^. Q.typedeclFormals))
+        (map
+           (\(name', _immut, typ) -> (name', typ))
+           (tdecl ^. Q.typedeclFormals))
     (val, ctx'', pathCond'') <-
       singleResult <$>
       symEval
@@ -726,8 +726,7 @@ symEvalPatternMatch :: [Expr] -> Expr -> Context -> PathCond -> Verify Results
 symEvalPatternMatch pat rhs ctx pathCond
   -- check that all elements of the pattern are just simple variables
   | Just vars <- Monad.sequence $ map fromEVar pat =
-    Q.foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, _ctx', _pathCond')
-     ->
+    Q.foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, _ctx', _pathCond') ->
       let (lvalues, ctx'') =
             L.foldr
               (\var (places, cx) ->
@@ -773,7 +772,8 @@ symEval ((EProj obj name), ctx, pathCond) =
   Q.foreachM (symEval (obj, ctx, pathCond)) $ \(val, ctx', pathCond') ->
     case val of
       VRef addr
-        | Just loc <- ctx' ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name ->
+        | Just loc <-
+           ctx' ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name ->
           return [(loc ^. Q.localValue, ctx', pathCond')]
       Sym sv
         -- we might be able to make progress from here by forcing
@@ -816,7 +816,8 @@ symEval (EAssign lhs rhs, ctx, pathCond) =
             show (place ^. Q.placeType)
         Cond.when (place ^. Q.placeConst) $ do
           error $ "Assignment to constant location: " ++ show lhs
-        return [(rhsVal, Lens.set (place ^. Q.placeLens) rhsVal ctx'', pathCond'')]
+        return
+          [(rhsVal, Lens.set (place ^. Q.placeLens) rhsVal ctx'', pathCond'')]
       _ -> error $ "Invalid l-value: " ++ show lhs
 symEval (EIf cnd thn els, ctx, pathCond) = do
   Q.foreachM (symEval (cnd, ctx, pathCond)) handle
@@ -842,8 +843,7 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
             ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
             , ctx'
             , pathCond')
-        return .
-          map (\(_, ctx'', pathCond'') -> (oldVal, ctx'', pathCond'')) $
+        return . map (\(_, ctx'', pathCond'') -> (oldVal, ctx'', pathCond'')) $
           updPaths
     _ -> error $ "Invalid l-value in post-increment: " ++ show lval
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
@@ -964,7 +964,8 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
                  })
             (tdecl ^. Q.typedeclValues)
     Q.foreachM
-      (symEval (ENew fields (Maybe.fromJust $ tdecl ^? Q.typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
+      (symEval
+         (ENew fields (Maybe.fromJust $ tdecl ^? Q.typedeclBody), ctx, pathCond)) $ \(val, ctx', pathCond') ->
       case val of
         VRef addr ->
           return
@@ -981,10 +982,12 @@ symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
   -- Bind name in new context, in which we can evaluate predicate
   -- and function expression of comprehension
   let newCtx = Lens.over Q.ctxScope (M.insert x (fv, TAny)) ctx
-  predPaths <- symEval (Maybe.fromJust (setCompr ^? Q.comprPred), newCtx, pathCond)
+  predPaths <-
+    symEval (Maybe.fromJust (setCompr ^? Q.comprPred), newCtx, pathCond)
   comprs <-
     Q.foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
-      Q.foreachM (symEval (Maybe.fromJust (setCompr ^? Q.comprValue), ctx', pathCond')) $ \(funVal, _ctx'', pathCond'') -> do
+      Q.foreachM
+        (symEval (Maybe.fromJust (setCompr ^? Q.comprValue), ctx', pathCond')) $ \(funVal, _ctx'', pathCond'') -> do
         return
           [ Sym
               (SetCompr
@@ -993,17 +996,22 @@ symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
                  (Q.conjunction $ Not (predVal :=: VInt 0) : pathCond''))
           ]
   return
-    [(L.foldr (\sc v -> Sym (Q.Union sc v)) (VSet S.empty) comprs, ctx, pathCond)]
+    [ ( L.foldr (\sc v -> Sym (Q.Union sc v)) (VSet S.empty) comprs
+      , ctx
+      , pathCond)
+    ]
 symEval (mapCompr@EMapCompr {}, ctx, pathCond) = do
   let x = mapCompr ^. Q.comprVar
   -- FIXME: factor out commonalities with ESetCompr case
   fv <- freshVar x
   let fvExpr = Sym (SymVar fv TAny)
   let newCtx = Lens.over Q.ctxScope (M.insert x (fvExpr, TAny)) ctx
-  predPaths <- symEval (Maybe.fromJust (mapCompr ^? Q.comprPred), newCtx, pathCond)
+  predPaths <-
+    symEval (Maybe.fromJust (mapCompr ^? Q.comprPred), newCtx, pathCond)
   comprs <-
     Q.foreachM (pure predPaths) $ \(predVal, _ctx', pathCond') ->
-      Q.foreachM (symEval (Maybe.fromJust (mapCompr ^? Q.comprValue), newCtx, pathCond)) $ \(funVal, _ctx'', pathCond'') -> do
+      Q.foreachM
+        (symEval (Maybe.fromJust (mapCompr ^? Q.comprValue), newCtx, pathCond)) $ \(funVal, _ctx'', pathCond'') -> do
         return
           [ Sym
               (MapCompr
@@ -1076,7 +1084,8 @@ symEval (EIntersect e1 e2, ctx, pathCond) = do
         then return [(Sym (Intersect v1 v2), ctx'', pathCond'')]
         else case (v1, v2) of
                (VSet vals1, VSet vals2) ->
-                 return [(VSet (vals1 `S.intersection` vals2), ctx'', pathCond'')]
+                 return
+                   [(VSet (vals1 `S.intersection` vals2), ctx'', pathCond'')]
                _ ->
                  error $ "Tried to union non-set values: " ++ show v1 ++ " ∪ " ++
                  show v2

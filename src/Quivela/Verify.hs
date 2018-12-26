@@ -24,18 +24,12 @@ import qualified Control.Arrow as Arrow
 import qualified Control.Lens as Lens
 import Control.Lens ((%=), (.=), (?~), (^.), (^?))
 import qualified Control.Monad.RWS.Strict as Monad
-import Control.Monad.RWS.Strict
-  ( MonadIO
-  , MonadState
-  , MonadWriter
-  , RWST
-  , (=<<)
-  )
+import Control.Monad.RWS.Strict (MonadIO, MonadState, MonadWriter, RWST, (=<<))
 import qualified Data.ByteString as ByteString
 import qualified Data.Function as F
 import qualified Data.Generics as Generics
 import qualified Data.List as L
-import Data.List((\\))
+import Data.List ((\\))
 import qualified Data.Map as M
 import qualified Data.Map.Merge.Lazy as Merge
 import qualified Data.Maybe as Maybe
@@ -64,13 +58,7 @@ import Quivela.Language
   )
 import Quivela.Prelude
 import qualified Quivela.SymEval as Q
-import Quivela.SymEval
-  ( Result
-  , Results
-  , Verify
-  , VerifyEnv
-  , VerifyState(..)
-  )
+import Quivela.SymEval (Result, Results, Verify, VerifyEnv, VerifyState(..))
 import qualified Quivela.Util as Q
 import qualified Quivela.VerifyPreludes as Q
 import qualified System.Directory as Directory
@@ -178,7 +166,10 @@ newVerifyState env = do
   (Just hin, Just hout, _, procHandle) <-
     Proc.createProcess $
     (Proc.proc "z3" ["-in"])
-      {Proc.std_out = Proc.CreatePipe, Proc.std_in = Proc.CreatePipe, Proc.std_err = Proc.CreatePipe}
+      { Proc.std_out = Proc.CreatePipe
+      , Proc.std_in = Proc.CreatePipe
+      , Proc.std_err = Proc.CreatePipe
+      }
   IO.hSetBuffering hin IO.NoBuffering
   IO.hSetBuffering hout IO.NoBuffering
   prelude <- Q.z3Prelude
@@ -191,7 +182,8 @@ newVerifyState env = do
         if not exists
           then return S.empty
           else do
-            maybeCache <- Serialize.decode <$> Monad.liftIO (ByteString.readFile f)
+            maybeCache <-
+              Serialize.decode <$> Monad.liftIO (ByteString.readFile f)
             case maybeCache of
               Right cache -> return cache
               Left _ -> error $ "Can't parse proof cache: " ++ f
@@ -270,7 +262,8 @@ invToAsm _ _ _ = error "invToAsm called with non-address arguments"
 -- | Return all invariant methods in given context
 collectInvariants :: Addr -> Context -> [Method]
 collectInvariants addr ctx =
-  L.filter (\mtd -> mtd ^. Q.methodKind == Invariant) . M.elems $ ctx ^. Q.ctxObjs .
+  L.filter (\mtd -> mtd ^. Q.methodKind == Invariant) . M.elems $ ctx ^.
+  Q.ctxObjs .
   Lens.ix addr .
   Q.objMethods
 
@@ -281,7 +274,8 @@ invToVCnonRelational assms addr (_, ctx, pathCond) = do
   fmap L.concat . Monad.forM univInvs $ \univInv -> do
     let formals = univInv ^. Q.methodFormals
     (args, ctx', pathCond') <- Q.symArgs ctx formals
-    let scope = M.fromList (L.zip (map fst formals) (L.zip args (map snd formals)))
+    let scope =
+          M.fromList (L.zip (map fst formals) (L.zip args (map snd formals)))
     paths <-
       Q.symEval
         ( univInv ^. Q.methodBody
@@ -315,7 +309,8 @@ collectRefs = Generics.listify isRef
 
 -- | Substitute x by v in p
 substSymVar :: Var -> Value -> Prop -> Prop
-substSymVar x v p = Generics.everywhereBut (Generics.mkQ False binds) (Generics.mkT replace) p
+substSymVar x v p =
+  Generics.everywhereBut (Generics.mkQ False binds) (Generics.mkT replace) p
   where
     binds (Forall vs _) = x `L.elem` map fst vs
     binds _ = False
@@ -361,7 +356,8 @@ universalInvariantAssms addr ctx pathCond =
     let formals = invariantMethod ^. Q.methodFormals
     onlySimpleTypes formals
     (args, ctx', pathCond') <- Q.symArgs ctx formals
-    let scope = M.fromList (L.zip (map fst formals) (L.zip args (map snd formals)))
+    let scope =
+          M.fromList (L.zip (map fst formals) (L.zip args (map snd formals)))
     let oldRefs = collectRefs ctx'
     let oldSymVars = collectSymVars ctx'
     paths <-
@@ -406,12 +402,7 @@ universalInvariantAssms addr ctx pathCond =
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = M.Map Addr Addr
 
-maybeInsert ::
-     (Ord k, Eq v)
-  => k
-  -> v
-  -> M.Map k v
-  -> Maybe (M.Map k v)
+maybeInsert :: (Ord k, Eq v) => k -> v -> M.Map k v -> Maybe (M.Map k v)
 maybeInsert k v m
   | Just v' <- M.lookup k m =
     if v == v'
@@ -423,8 +414,7 @@ maybeInsert k v m
         | not (L.all (== k) ks') -> Nothing
       _ -> Just (M.insert k v m)
 
-tryInsert ::
-     (Show k, Show v, Ord k, Eq v) => k -> v -> M.Map k v -> M.Map k v
+tryInsert :: (Show k, Show v, Ord k, Eq v) => k -> v -> M.Map k v -> M.Map k v
 tryInsert k v m =
   case maybeInsert k v m of
     Just m' -> m'
@@ -472,7 +462,10 @@ unifyAddrsExact (VMap vs1) (VMap vs2) bij
          vs2)
 unifyAddrsExact (VTuple vs1) (VTuple vs2) bij
   | L.length vs1 == L.length vs2 =
-    Monad.foldM (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij') bij (L.zip vs1 vs2)
+    Monad.foldM
+      (\bij' (v1, v2) -> unifyAddrsExact v1 v2 bij')
+      bij
+      (L.zip vs1 vs2)
   | otherwise = Nothing
 unifyAddrsExact VNil VNil bij = Just bij
 unifyAddrsExact (Sym sL) (Sym sR) bij = unifyAddrsExactSym sL sR bij
@@ -564,7 +557,8 @@ findAddressBijection inMap (v, _, pathCond) (v', _, pathCond') =
 
 -- | Remap all addresses in a piece of data with given bijection.
 applyAddressBijection :: Data p => AddrBijection -> p -> p
-applyAddressBijection addrMap = Generics.everywhere (Generics.mkT replaceAddress)
+applyAddressBijection addrMap =
+  Generics.everywhere (Generics.mkT replaceAddress)
   where
     replaceAddress :: SymValue -> SymValue
     replaceAddress (Ref addr)
@@ -624,7 +618,9 @@ resultsToVCs invs old@(VRef addr1, ctxH, pathCondH) ress1 old'@(VRef addr1', ctx
                           UseAddressBijection m -> Just m
                           _ -> Nothing)
                      invs of
-                [m] -> Trace.trace ("Using user-supplied address map: " ++ show m) $ m
+                [m] ->
+                  Trace.trace ("Using user-supplied address map: " ++ show m) $
+                  m
                 [] -> M.empty
                 _ -> error "More than one address bijection hint"
         let addrMap =
@@ -711,7 +707,9 @@ methodEquivalenceVCs _ _ _ (v1, _, _) (v1', _, _) =
 getField :: [Var] -> Addr -> Context -> Value
 getField [] _ _ = error "Empty list of fields"
 getField [x] addr ctx
-  | Just v <- ctx ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix x . Q.localValue = v
+  | Just v <-
+     ctx ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix x . Q.localValue =
+    v
   | otherwise = error $ "getField: No such field: " ++ x
 getField (x:xs) addr ctx
   | Just (VRef addr') <-
@@ -775,7 +773,11 @@ translateVar v typ = do
 collectSymVars :: Data p => p -> [(Var, Type)]
 collectSymVars vc =
   L.nubBy ((==) `F.on` fst) . map toTup $
-  Generics.everythingWithContext [] (++) (Generics.mkQ ((,) []) collect `Generics.extQ` propBind) vc
+  Generics.everythingWithContext
+    []
+    (++)
+    (Generics.mkQ ((,) []) collect `Generics.extQ` propBind)
+    vc
   where
     collect (SymVar x t) bound
       | x `L.notElem` bound = ([SymVar x t], bound)
@@ -800,7 +802,8 @@ initialEmitterState prefixCtx =
 
 runEmitter :: MonadIO m => Context -> Emitter a -> m (a, [SolverCmd])
 runEmitter prefix action =
-  Monad.liftIO $ Monad.evalRWST (unEmitter action) () (initialEmitterState prefix)
+  Monad.liftIO $
+  Monad.evalRWST (unEmitter action) () (initialEmitterState prefix)
 
 -- | Type class for values that can be converted into Z3 terms/formulas
 class ToZ3 a where
@@ -829,7 +832,9 @@ propToZ3 (x :&: y) = z3CallM "and" [x, y]
 propToZ3 (Forall [] p) = toZ3 p
 propToZ3 (Forall formals p) = do
   argNames <-
-    Monad.mapM (\(x, t) -> (,) <$> (translateVar x =<< typeToZ3 t) <*> pure t) formals
+    Monad.mapM
+      (\(x, t) -> (,) <$> (translateVar x =<< typeToZ3 t) <*> pure t)
+      formals
   concatM
     [ pure "(forall ("
     , L.intercalate " " <$>
@@ -1006,10 +1011,12 @@ vcToZ3 vc
   -- FIXME: this is a hacky way to make sure we output the variable
   -- declarations before the places where we need them.
   -- Really we should be doing this in a more structured way.
-  (translatedAssms, assmOutput) <- intercept $ Monad.mapM toZ3 (vc ^. assumptions)
+  (translatedAssms, assmOutput) <-
+    intercept $ Monad.mapM toZ3 (vc ^. assumptions)
   (goalProp, goalOutput) <- intercept $ toZ3 (vc ^. goal)
   vars <- Lens.use usedVars
-  _ <- Monad.forM vars $ \(var, typ) -> emitRaw $ z3Call "declare-const" [var, typ]
+  _ <-
+    Monad.forM vars $ \(var, typ) -> emitRaw $ z3Call "declare-const" [var, typ]
   Monad.mapM_ emit (assmOutput ++ goalOutput)
   Monad.mapM_ (\asm -> emitRaw (z3Call "assert" [asm])) translatedAssms
   emitRaw $ z3Call "assert" [z3Call "not" [goalProp]]
@@ -1034,7 +1041,8 @@ checkWithZ3 vc = do
   -- TODO: implement a more structured way to handle variable
   -- declarations inside a translation function
   (_, vcLines) <-
-    fmap (Arrow.second (L.nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
+    fmap (Arrow.second (L.nub . map solverCmdToZ3)) . runEmitter pctx $
+    vcToZ3 vc
   sendToZ3 "(push)"
   sendToZ3 (L.unlines vcLines)
   sendToZ3 "(check-sat)"
@@ -1053,9 +1061,11 @@ writeToZ3File dir vc = do
   pctx <- Lens.use Q.verifyPrefixCtx
   prelude <- Monad.liftIO $ Q.z3Prelude
   (_, vcLines) <-
-    fmap (Arrow.second (L.nub . map solverCmdToZ3)) . runEmitter pctx $ vcToZ3 vc
+    fmap (Arrow.second (L.nub . map solverCmdToZ3)) . runEmitter pctx $
+    vcToZ3 vc
   tempFile <-
-    Monad.liftIO $ Temp.writeTempFile dir "z3-vc.smt2" $ L.unlines $ prelude : vcLines ++
+    Monad.liftIO $ Temp.writeTempFile dir "z3-vc.smt2" $ L.unlines $ prelude :
+    vcLines ++
     ["(check-sat)"]
   return tempFile
 
@@ -1070,7 +1080,8 @@ checkVCs vcs = do
     tmp <- Monad.liftIO Temp.getCanonicalTemporaryDirectory
     dir <- Monad.liftIO $ Temp.createTempDirectory tmp "vcs"
     Monad.mapM_
-      (\vc -> writeToZ3File dir vc >>= \f -> Q.debug ("Writing vc to file: " ++ f))
+      (\vc ->
+         writeToZ3File dir vc >>= \f -> Q.debug ("Writing vc to file: " ++ f))
       vcs'
   Q.debug $ show (L.length vcs') ++ " VCs left after checking with Z3 (" ++
     Timer.formatSeconds t ++
@@ -1083,7 +1094,8 @@ checkEqv _ _ hints lhs rhs
     Q.debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
     return []
 checkEqv _ prefix [Rewrite from to] lhs rhs = do
-  (_, prefixCtx, _) <- fmap Q.singleResult . Q.symEval $ (prefix, Q.emptyCtx, [])
+  (_, prefixCtx, _) <-
+    fmap Q.singleResult . Q.symEval $ (prefix, Q.emptyCtx, [])
   Monad.unless
     ((from, to) `L.elem` (prefixCtx ^. Q.ctxAssumptions) || (to, from) `L.elem`
      (prefixCtx ^. Q.ctxAssumptions)) $
@@ -1112,7 +1124,8 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
         if noteText == ""
           then ""
           else noteText ++ ": "
-  if cached && not (L.any ((== Just True) . (=== IgnoreCache)) hints) && withCache
+  if cached && not (L.any ((== Just True) . (=== IgnoreCache)) hints) &&
+     withCache
     then do
       Q.debug $ note ++ "Skipping cached verification step"
       return []
@@ -1167,7 +1180,8 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
           Q.debug $ show remainingVCs
         else do
           cacheVerified lhs rhs
-          Q.debug $ note ++ "Verification succeeded in " ++ Timer.formatSeconds t
+          Q.debug $ note ++ "Verification succeeded in " ++
+            Timer.formatSeconds t
       return remainingVCs
 
 -- | Mark a pair of expressions as successfully verified in the cache

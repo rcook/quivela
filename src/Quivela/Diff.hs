@@ -58,7 +58,8 @@ applyDiff :: Diff -> Expr -> Expr
 applyDiff d en@(Q.ENew {}) =
   case d of
     Q.NewField f -> Lens.over Q.newFields (replaceField f) en
-    Q.DeleteField s -> Lens.over Q.newFields (L.filter ((/= s) . (^. Q.fieldName))) en
+    Q.DeleteField s ->
+      Lens.over Q.newFields (L.filter ((/= s) . (^. Q.fieldName))) en
     Q.OverrideMethod em -> Lens.over Q.newBody (replaceMethod em) en
     Q.DeleteMethod mname -> Lens.over Q.newBody (deleteMethod mname) en
 applyDiff _ _ = error "Can only apply diffs to new expressions"

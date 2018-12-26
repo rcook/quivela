@@ -47,7 +47,9 @@ assertError msg x =
   let t = do
         errored <-
           fmap DeepSeq.force $
-          Exception.catch (x >> pure False) (\(_ :: SomeException) -> return True)
+          Exception.catch
+            (x >> pure False)
+            (\(_ :: SomeException) -> return True)
         if not errored
           then T.assertFailure $ "Should have failed: " ++ msg
           else T.assertBool "true" True
