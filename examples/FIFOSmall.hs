@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE QuasiQuotes #-}
 
+import Prelude
 import Quivela
 import System.Exit as E
 

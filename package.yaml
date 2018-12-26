@@ -15,6 +15,9 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 
+default-extensions:
+  - NoImplicitPrelude
+
 library:
   source-dirs: src
   exposed-modules:
@@ -27,8 +30,16 @@ library:
   - Quivela.Util
   - Quivela.Verify
   ghc-options:
-  - -fwarn-incomplete-patterns
+  - -Werror
+  - -Weverything
+  - -Wno-missing-import-lists # This is too painful
+  - -Wno-missing-local-signatures # This is too painful
+  - -Wno-unsafe # Template Haskell and Serializable
+  - -Wno-safe # Not sure what this is, and failing on System.Timer
+  - -Wno-all-missed-specialisations # We don't want to add noisy INLINABLE pragmas as we aren't peformance sensitive
+  - -Wno-missed-specialisations # We don't want to add noisy INLINABLE pragmas as we aren't peformance sensitive
   other-modules:
+  - Quivela.Prelude
   - Quivela.VerifyPreludes
   - System.Timer
   dependencies:

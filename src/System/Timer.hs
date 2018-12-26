@@ -1,6 +1,5 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- This module is slightly generalized from
@@ -12,9 +11,10 @@ module System.Timer
   , formatSeconds
   ) where
 
-import Control.Monad (liftM)
-import Control.Monad.IO.Class
+import Control.Monad(liftM)
+import Control.Monad.IO.Class(MonadIO, liftIO)
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import Prelude
 import Text.Printf (printf)
 
 time :: MonadIO m => m a -> m (Double, a)

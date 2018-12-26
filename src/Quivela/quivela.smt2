@@ -1,7 +1,7 @@
 ;; Begin Prelude
 
-(set-option :smt.auto-config false) ; disable automatic self configuration
-(set-option :smt.mbqi false) ; disable model-based quantifier instantiation
+(set-option :smt.auto-config false) ; disable automatic self configuration in favor of pattern/trigger-based instantiation
+(set-option :smt.mbqi false) ; disable model-based quantifier instantiation in favor of pattern/trigger-based instantiation
 
 (declare-datatypes ((Value 0) (Values 0))
                    (((VInt (val Int))
@@ -16,15 +16,17 @@
                    ((nils (conss (hds Values) (tls Valuess)))))
 
 (declare-fun deref (Value String) Value)
+
+;; Trying to call any method on the empty message (0) always results in 0.
 (assert (forall ((s String))
                 (= (deref (VInt 0) s) (VInt 0))))
 
-;; Addresses can be potentially coerced to any value
+;; Addresses can be potentially coerced to any value...
 (declare-fun vref (Int) Value)
 
-;; as long they don't collide with previous addresses
-;; Trick to avoid quadratic number of trigger instantiantions that
-;; would result from a conventional encoding of injectivity
+;; as long they don't collide with previous addresses.
+;; This is a trick to avoid the quadratic number of trigger instantiations that
+;; would result from a conventional encoding of injectivity.
 (declare-fun vref-inv (Value) Int)
 (assert (forall ((a Int))
                 (! (= (vref-inv (vref a)) a)
@@ -35,7 +37,6 @@
 ;; they are never the empty bitstring (i.e. (VInt 0))
 (assert (forall ((a Int))
                 (not (= (vref a) (VInt 0)))))
-
 
 ;; Maps:
 
@@ -106,7 +107,6 @@
 
 ;; Adversary values:
 (declare-fun adversary (Valuess) Value)
-
 
 ;; Zeroing out messages:
 ;; We assume this gives us a value representing a bitstring of n zeroes

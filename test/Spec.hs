@@ -3,35 +3,37 @@
 {-# LANGUAGE NamedFieldPuns, QuasiQuotes, ScopedTypeVariables,
   TemplateHaskell #-}
 
-import qualified Control.DeepSeq as DS
-import Control.Exception (SomeException, catch)
+import qualified Control.DeepSeq as DeepSeq
+import qualified Control.Exception as Exception
+import Control.Exception (SomeException)
 import qualified Data.Map as M
-import qualified Quivela.Language as L
-import Quivela.Language (ProofPart(..))
-import Quivela.Language
+import Prelude
+import qualified Quivela as Q
+import Quivela
   ( Context(..)
   , Expr(..)
   , Proof(..)
   , ProofHint(..)
+  , ProofPart(..)
   , SymValue(..)
   , Type(..)
   , Value(..)
+  , (≈)
+  , fieldEqual
+  , fieldsEqual
   , nop
+  , parseExpr
+  , parseProofPart
+  , prog
+  , prog'
+  , prove'
   )
-import qualified Quivela.Parse as P
-import Quivela.Parse (parseExpr, parseProofPart)
-import qualified Quivela.QuasiQuote as Q
-import Quivela.QuasiQuote (prog, prog', prove')
-import qualified Quivela.SymEval as S
-import qualified Quivela.Util as U
-import qualified Quivela.Verify as V
-import Quivela.Verify ((≈), fieldEqual, fieldsEqual)
-import qualified System.Environment as E
+import qualified System.Environment as Environment
 import qualified Test.HUnit as T
 import Test.HUnit (Assertion, Counts(..), Test(TestCase, TestList), (~:))
 
 -- Don't print garbage during tests.  If a test fails, debug it separately.
-env = S.emptyVerifyEnv {S._debugFlag = False}
+env = Q.emptyVerifyEnv {Q._debugFlag = False}
 
 assertVerified :: String -> Expr -> Proof -> Test
 assertVerified msg prefix proof =
@@ -44,8 +46,8 @@ assertError :: String -> IO a -> Test
 assertError msg x =
   let t = do
         errored <-
-          fmap DS.force $
-          catch (x >> pure False) (\(_ :: SomeException) -> return True)
+          fmap DeepSeq.force $
+          Exception.catch (x >> pure False) (\(_ :: SomeException) -> return True)
         if not errored
           then T.assertFailure $ "Should have failed: " ++ msg
           else T.assertBool "true" True
@@ -53,25 +55,25 @@ assertError msg x =
 
 assertEvalError :: String -> Expr -> Test
 assertEvalError msg e =
-  assertError msg . V.runVerify env $ S.symEval (e, L.emptyCtx, [])
+  assertError msg . Q.runVerify env $ Q.symEval (e, Q.emptyCtx, [])
 
 assertEvalResult' :: String -> Context -> Expr -> Value -> Test
 assertEvalResult' msg ctx e v =
   let a = do
         (res, _, _) <-
-          S.singleResult <$> (V.runVerify env $ (S.symEval (e, ctx, [])))
+          Q.singleResult <$> (Q.runVerify env $ (Q.symEval (e, ctx, [])))
         T.assertEqual msg res v
    in msg ~: TestCase a
 
 assertEvalResult :: String -> Expr -> Value -> Test
-assertEvalResult msg e v = assertEvalResult' msg L.emptyCtx e v
+assertEvalResult msg e v = assertEvalResult' msg Q.emptyCtx e v
 
 assertVerifyError :: String -> Expr -> Proof -> Test
 assertVerifyError msg prefix proof = assertError msg $ prove' env prefix proof
 
 assertParses :: String -> String -> Expr -> Test
 assertParses msg progText e =
-  msg ~: TestCase (T.assertEqual msg (P.parseExpr progText) e)
+  msg ~: TestCase (T.assertEqual msg (Q.parseExpr progText) e)
 
 doesntVerify :: String -> Expr -> Proof -> Test
 doesntVerify msg prefix proof =
@@ -81,7 +83,7 @@ doesntVerify msg prefix proof =
    in msg ~: TestCase a
 
 parserTests =
-  map (U.uncurry3 assertParses) $
+  map (Q.uncurry3 assertParses) $
   [ ("integer constants", "23", EConst (VInt 23))
   , ("empty map literal", "map", EConst (VMap M.empty))
   , ( "unqualified function call"
@@ -184,7 +186,7 @@ parserTests =
                              { _lhs = EVar "x"
                              , _rhs = ETuple [EConst (VInt 1), EConst (VInt 2)]
                              }
-                       , _emethodKind = L.NormalMethod
+                       , _emethodKind = Q.NormalMethod
                        })
                     ENop
               }
@@ -355,12 +357,12 @@ a.x.y |]
       (Sym (Add (Sym (Ref 1)) (Sym (Ref 2))))
   , assertEvalResult'
       "Decreasing allocation strategy should yield negative addresses"
-      (L.emptyCtx {_ctxAllocStrategy = L.Decrease})
-      (P.parseExpr "<new() {}, new() {}>")
+      (Q.emptyCtx {_ctxAllocStrategy = Q.Decrease})
+      (Q.parseExpr "<new() {}, new() {}>")
       (VTuple [Sym {_symVal = Ref (-1)}, Sym {_symVal = Ref (-2)}])
   , assertEvalResult'
       "Decreasing allocation allows allocating objects in methods"
-      L.emptyCtxRHS
+      Q.emptyCtxRHS
       [prog'|
 (new() {
 method f(x) { obj = (new() { method g(m) { 1 } }), obj.g(x) & 1 }
@@ -775,7 +777,7 @@ new() {
 
 main :: IO ()
 main = do
-  args <- E.getArgs
+  args <- Environment.getArgs
   let t =
         case args of
           [] -> tests

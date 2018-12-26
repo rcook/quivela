@@ -11,16 +11,16 @@ module Quivela.QuasiQuote
   , rewrite
   ) where
 
-import qualified Control.Arrow
-import qualified Control.Monad as M
+import qualified Control.Monad as Monad
+import qualified Data.List as L
 import qualified Language.Haskell.TH as TH
-import qualified Language.Haskell.TH.Quote as Q
+import qualified Language.Haskell.TH.Quote as TH
+import qualified Quivela.Language as Q
+import qualified Quivela.Parse as Q
+import Quivela.Prelude
+import qualified Quivela.SymEval as Q
+import qualified Quivela.Verify as Q
 import qualified System.Timer as Timer
-
-import qualified Quivela.Language as L
-import qualified Quivela.Parse as P
-import qualified Quivela.SymEval as E
-import qualified Quivela.Verify as V
 
 -- | Construct a term that parses the given string as a quivela expression
 -- and return it as a 'ProofPart'.
@@ -32,51 +32,44 @@ quivelaParse' :: String -> TH.ExpQ
 quivelaParse' s = [|parseExpr $(TH.litE $ TH.StringL s)|]
 
 -- | A quasiquoter for expressions as proof steps.
-prog :: Q.QuasiQuoter
-prog = Q.QuasiQuoter quivelaParse undefined undefined undefined
+prog :: TH.QuasiQuoter
+prog = TH.QuasiQuoter quivelaParse undefined undefined undefined
 
 -- | Another quasiquoter for programs outside of proof steps.
-prog' :: Q.QuasiQuoter
-prog' = Q.QuasiQuoter quivelaParse' undefined undefined undefined
+prog' :: TH.QuasiQuoter
+prog' = TH.QuasiQuoter quivelaParse' undefined undefined undefined
 
 -- | Run the given quivela proof at compile time. We allow running this
 -- at compile time to avoid having to manually invoke the verification
 -- after loading the file into ghci.
-prove :: E.VerifyEnv -> L.Expr -> [L.ProofPart] -> TH.Q [TH.Dec]
+prove :: Q.VerifyEnv -> Q.Expr -> [Q.ProofPart] -> TH.Q [TH.Dec]
 prove env prefix steps = do
   unverified <- TH.runIO $ prove' env prefix steps
-  M.when (unverified > 0) $
+  Monad.when (unverified > 0) $
     TH.reportError (show unverified ++ " unverified VCs")
   return []
 
 -- | A non-compile-time version of 'prove'.
-prove' :: E.VerifyEnv -> L.Expr -> [L.ProofPart] -> IO Int
+prove' :: Q.VerifyEnv -> Q.Expr -> [Q.ProofPart] -> IO Int
 prove' env prefix steps = do
-  (t, results) <- Timer.time $ mapM doCheck (V.toSteps steps)
-  return $ sum results
+  (_, results) <- Timer.time $ Monad.mapM doCheck (Q.toSteps steps)
+  return $ L.sum results
   where
-    doCheck = V.runVerify env . V.proveStep prefix
+    doCheck = Q.runVerify env . Q.proveStep prefix
 
 -- | Fail at first failure.  Return 0 if all succeed, 1 if there's a failure
-proveFailFast :: E.VerifyEnv -> L.Expr -> [L.ProofPart] -> IO Int
+proveFailFast :: Q.VerifyEnv -> Q.Expr -> [Q.ProofPart] -> IO Int
 proveFailFast env prefix steps =
-  M.foldM
+  Monad.foldM
     (\c s ->
        if c > 0
          then return c
          else doCheck s)
     0
-    (V.toSteps steps)
+    (Q.toSteps steps)
   where
-    doCheck = V.runVerify env . V.proveStep prefix
+    doCheck = Q.runVerify env . Q.proveStep prefix
 
 -- | A shorthand for rewriting using quivela terms written in concrete syntax.
-rewrite :: String -> String -> L.ProofHint
-rewrite e1 e2 = L.Rewrite (P.parseExpr e1) (P.parseExpr e2)
-
-heredocExpr :: String -> TH.ExpQ
-heredocExpr s = [|$(TH.litE $ TH.StringL s)|]
-
--- | QuasiQuoter for multi-line string literals
-heredoc :: Q.QuasiQuoter
-heredoc = Q.QuasiQuoter heredocExpr undefined undefined undefined
+rewrite :: String -> String -> Q.ProofHint
+rewrite e1 e2 = Q.Rewrite (Q.parseExpr e1) (Q.parseExpr e2)

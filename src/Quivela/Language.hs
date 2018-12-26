@@ -5,6 +5,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Quivela.Language
   ( Addr
@@ -29,6 +30,10 @@ module Quivela.Language
   , Value(..)
   , pattern VRef
   , Var
+  , bindingConst
+  , callArgs
+  , callName
+  , callObj
   , comprPred
   , comprValue
   , comprVar
@@ -43,6 +48,9 @@ module Quivela.Language
   , ctxTypeDecls
   , efunDeclArgs
   , efunDeclName
+  , emethodArgs
+  , emethodBody
+  , emethodKind
   , emethodName
   , emptyCtx
   , emptyCtxRHS
@@ -55,11 +63,14 @@ module Quivela.Language
   , localImmutable
   , localType
   , localValue
+  , lhs
   , methodBody
   , methodFormals
   , methodKind
   , methodName
   , newBody
+  , newConstrArgs
+  , newConstrName
   , newFields
   , nop
   , objAdversary
@@ -69,25 +80,24 @@ module Quivela.Language
   , placeConst
   , placeLens
   , placeType
+  , rhs
   , symVal
   , typedeclBody
   , typedeclFormals
+  , typedeclName
   , typedeclValues
   , valMap
+  , valSet
   , varBindings
   ) where
 
-import Control.Applicative ((<$>))
-import Control.Arrow (second)
-import qualified Control.Lens as C
-import Control.Lens ((^.), set)
-import Data.Data (Data)
+import qualified Control.Lens as Lens
+import Control.Lens ((<&>), (^.))
+import qualified Control.Monad as Monad
+import qualified Data.List as L
 import qualified Data.Map as M
-import Data.Serialize (Serialize, get)
-import Data.Set (Set, difference, union)
 import qualified Data.Set as S
-import Data.Typeable (Typeable)
-import GHC.Generics (Generic)
+import Quivela.Prelude
 
 {- Lenses
 
@@ -103,9 +113,7 @@ type Addr = Integer
 
 type Var = String
 
-type Scope = M.Map Var (Value, Type)
-
-type Env = M.Map Var Value
+type Scope = Map Var (Value, Type)
 
 data Type
   = TInt
@@ -115,7 +123,7 @@ data Type
   | TAny
   | TSet Type
   | TNamed String
-  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+  deriving (Eq, Show, Ord, Data, Generic)
 
 -- | Symbolic values representing unknowns and operations on them
 -- Calls to the adversary are also symbolic.
@@ -168,21 +176,31 @@ data SymValue
   | Z Value
   | Call String
          [Value] -- ^ Calls to declared, but not defined, functions
-  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+  deriving (Eq, Show, Ord, Data, Generic)
+
+-- Define how to insert into a symbolic value via a lens:
+type instance Lens.Index SymValue = Value
+
+type instance Lens.IxValue SymValue = Value
+
+instance Lens.Ixed SymValue where
+  ix k f m = f (Sym $ Lookup k (Sym m)) <&> \v' -> Insert k v' (Sym m)
 
 -- Since we pattern-match repeatedly on references in various places, we define
 -- a pattern synonym that handles the fact that references are actually symbolic
+pattern VRef :: Addr -> Value
+
 pattern VRef a = Sym (Ref a)
 
 -- | Quivela values
 data Value
   = VInt Integer
-  | VMap { _valMap :: M.Map Value Value }
+  | VMap { _valMap :: Map Value Value }
   | VTuple [Value]
   | VNil
   | VSet { _valSet :: Set Value }
   | Sym { _symVal :: SymValue }
-  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+  deriving (Eq, Show, Ord, Data, Generic)
 
 -- | Data type for field initializers
 data Field = Field
@@ -190,13 +208,13 @@ data Field = Field
   , _fieldInit :: Expr -- ^ Expression to initialize the field with
   , _fieldType :: Type
   , _immutable :: Bool -- ^ Is the field constant?
-  } deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+  } deriving (Eq, Show, Ord, Data, Generic)
 
 data MethodKind
   = NormalMethod
   | LocalMethod
   | Invariant
-  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+  deriving (Eq, Show, Ord, Data, Generic)
 
 data Expr
   = ENop
@@ -254,7 +272,7 @@ data Expr
   | EFunDecl { _efunDeclName :: String
              , _efunDeclArgs :: [Var] -- uninterpreted functions
               }
-  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+  deriving (Eq, Show, Ord, Data, Generic)
 
 instance Serialize SymValue
 
@@ -275,26 +293,22 @@ data Local = Local
   { _localValue :: Value
   , _localType :: Type
   , _localImmutable :: Bool
-  } deriving (Eq, Read, Show, Ord, Data, Typeable)
+  } deriving (Eq, Show, Ord, Data)
 
 data Method = Method
   { _methodName :: String
   , _methodFormals :: [(String, Type)]
   , _methodBody :: Expr
   , _methodKind :: MethodKind
-  } deriving (Eq, Read, Show, Ord, Data, Typeable)
+  } deriving (Eq, Show, Ord, Data)
 
 data Object = Object
-  { _objLocals :: M.Map Var Local
-  , _objMethods :: M.Map Var Method
+  { _objLocals :: Map Var Local
+  , _objMethods :: Map Var Method
   , _objType :: Type
                      -- ^ Type of the object if it was constructed with a named type constructor
   , _objAdversary :: Bool -- ^ Is the object an adversary?
-  } deriving (Eq, Read, Show, Ord, Data, Typeable)
-
--- | Named types are identifiers of more complex types whose semantics are given
--- as Haskell expressions.
-type TypeName = String
+  } deriving (Eq, Show, Ord, Data)
 
 -- | To make our lives easier reasoning about equivalences that require
 -- new to be commutative, we would like the address identifiers used on the left-hand
@@ -304,27 +318,27 @@ type TypeName = String
 data AllocStrategy
   = Increase
   | Decrease
-  deriving (Eq, Read, Show, Ord, Data, Typeable)
+  deriving (Eq, Show, Ord, Data)
 
 data Context = Context
-  { _ctxObjs :: M.Map Addr Object
+  { _ctxObjs :: Map Addr Object
   , _ctxThis :: Addr
   , _ctxScope :: Scope
     -- ^ Keeps track of local variables and arguments in a method call.
   , _ctxAdvCalls :: [[Value]]
     -- ^ All adversary calls so far
-  , _ctxTypeDecls :: M.Map Var Expr
+  , _ctxTypeDecls :: Map Var Expr
     -- ^ Map from type names to typedecl expressions (all values in this
     -- map can be assumed to be of the form (ETypeDecl ...)
   , _ctxAllocStrategy :: AllocStrategy
   , _ctxAssumptions :: [(Expr, Expr)]
-  , _ctxFunDecls :: M.Map String FunDecl
-  } deriving (Eq, Read, Show, Ord, Data, Typeable)
+  , _ctxFunDecls :: Map String FunDecl
+  } deriving (Eq, Show, Ord, Data)
 
 data FunDecl = FunDecl
   { _funDeclName :: String
   , _funDeclArgs :: [Var]
-  } deriving (Eq, Read, Show, Ord, Data, Typeable)
+  } deriving (Eq, Show, Ord, Data)
 
 data Place = Place
   { _placeLens :: (forall f. Applicative f =>
@@ -344,12 +358,12 @@ data Prop
   | Prop :&: Prop
   | PTrue
   | PFalse
-  deriving (Eq, Read, Show, Ord, Data, Typeable, Generic)
+  deriving (Eq, Show, Ord, Data, Generic)
 
 conjunction :: [Prop] -> Prop
 conjunction [] = PTrue
 conjunction [p] = p
-conjunction ps = foldr1 (:&:) ps
+conjunction ps = L.foldr1 (:&:) ps
 
 -- | A path condition is a list of propositions that all hold on a given path
 -- These could be stored as just one big conjunction instead, but representing
@@ -359,7 +373,7 @@ type PathCond = [Prop]
 data Binding = Binding
   { _bindingName :: Var
   , _bindingConst :: Bool
-  } deriving (Eq, Ord, Show, Read)
+  } deriving (Eq, Ord, Show)
 
 -- | Proof hints. These include relational invariants, use of assumptions
 -- and controlling convenience features such as automatic inference of relational
@@ -372,10 +386,9 @@ data ProofHint
             Expr
   | NoInfer -- ^ turn off proof hint inference for this step
   | IgnoreCache -- ^ Don't use verification cache when checking this step
-  | Admit
-  -- ^ Don't check this step
+  | Admit -- ^ Don't check this step
   | NoAddressBijection -- ^ Don't try to remap addresses and instead hope that they get allocated in the same order
-  | UseAddressBijection (M.Map Addr Addr) -- ^ Start from explicit bijection of addresses
+  | UseAddressBijection (Map Addr Addr) -- ^ Start from explicit bijection of addresses
   | Note String
   deriving (Generic)
 
@@ -384,7 +397,7 @@ data Diff
   | DeleteField Var
   | OverrideMethod Expr -- assumes expr is an EMethod
   | DeleteMethod Var
-  deriving (Read, Show, Eq, Ord)
+  deriving (Show, Eq, Ord)
 
 -- | One part of a quivela proof, which is either an expression, or a proof hint.
 -- An followed by a hint and another expression is verified using that hint,
@@ -403,9 +416,9 @@ instance Show ProofPart where
   show (PDiff d) = "Diff:\n" ++ show d
   show _ = "<invariant>"
 
-concat <$>
-  mapM
-    C.makeLenses
+L.concat <$>
+  Monad.mapM
+    Lens.makeLenses
     [ ''Method
     , ''Object
     , ''Context
@@ -427,15 +440,15 @@ concat <$>
 -- where the rest can be siblings of the assignment to the right in the AST
 varBindings :: Expr -> (Set Var, Set Binding)
 varBindings ENop = (S.empty, S.empty)
-varBindings (EFunDecl name args) = (S.empty, S.empty)
+varBindings (EFunDecl _ _) = (S.empty, S.empty)
 varBindings (EAssume e1 e2) = combine e1 e2
 varBindings (EVar x) = (S.singleton x, S.empty)
 varBindings (EConst _) = (S.empty, S.empty)
-varBindings (EAssign (EVar x) rhs) =
-  let (freeRhs, boundRhs) = varBindings rhs
+varBindings (EAssign (EVar x) eRhs) =
+  let (freeRhs, boundRhs) = varBindings eRhs
    in ( freeRhs
       , S.insert (Binding {_bindingName = x, _bindingConst = False}) boundRhs)
-varBindings (EAssign lhs rhs) = varBindings lhs `bindingSeq` varBindings rhs
+varBindings (EAssign eLhs eRhs) = varBindings eLhs `bindingSeq` varBindings eRhs
 varBindings (ESeq e1 e2) = combine e1 e2
 varBindings (EIn e1 e2) = combine e1 e2
 varBindings (EUnion e1 e2) = combine e1 e2
@@ -447,32 +460,32 @@ varBindings (ESetCompr x v p) =
 varBindings (EMapCompr x v p) =
   let (free, bound) = combine v p
    in (S.delete x free, bound) -- TODO: should we remove bindings for `x` from `bound`?
-varBindings (ECall obj name args) =
+varBindings (ECall obj _name args) =
   let (freeObj, boundObj) = varBindings obj
    in varBindingsList (freeObj, boundObj) args
 -- Note that anything assigned to in the body will end in a local scope of the object,
 -- so the body cannot introduce new bound variables
 varBindings (ENew fields body) =
-  let (fieldsFree, fieldsBound) =
-        varBindingsList (S.empty, S.empty) $ map (^. fieldInit) fields
-      (bodyFree, bodyBound) = varBindings body
-   in ( bodyFree `difference`
-        (S.fromList (map (^. fieldName) fields) `union`
+  let (_fieldsFree, fieldsBound) =
+        varBindingsList (S.empty, S.empty) $ fmap (^. fieldInit) fields
+      (bodyFree, _bodyBound) = varBindings body
+   in ( bodyFree `S.difference`
+        (S.fromList (fmap (^. fieldName) fields) `S.union`
          S.map (^. bindingName) fieldsBound)
       , fieldsBound)
-varBindings (EProj eobj name) = varBindings eobj
+varBindings (EProj eobj _name) = varBindings eobj
 varBindings (EIdx base idx) = varBindings base `bindingSeq` varBindings idx
   -- Variables bound inside a method body are not visible outside:
-varBindings (EMethod name args body isInv) =
-  let (bodyFree, bodyBound) = varBindings body
-   in (bodyFree `difference` S.fromList (map fst args), S.empty)
+varBindings (EMethod _name args body _isInv) =
+  let (bodyFree, _bodyBound) = varBindings body
+   in (bodyFree `S.difference` S.fromList (fmap fst args), S.empty)
 varBindings (ETuple elts) = varBindingsList (S.empty, S.empty) elts
 varBindings (ETupleProj base idx) =
   varBindings base `bindingSeq` varBindings idx
-varBindings (ETypeDecl name formals values body) =
+varBindings (ETypeDecl _name formals values body) =
   varBindings
     (ENew
-       (map
+       (fmap
           (\(name, immut, typ) ->
              Field
                { _fieldName = name
@@ -481,7 +494,7 @@ varBindings (ETypeDecl name formals values body) =
                , _immutable = immut
                })
           formals ++
-        map
+        fmap
           (\(name, value) ->
              Field
                { _fieldName = name
@@ -491,14 +504,15 @@ varBindings (ETypeDecl name formals values body) =
                })
           values)
        body)
-varBindings (ENewConstr name values) =
-  varBindingsList (S.empty, S.empty) (map snd values)
+varBindings (ENewConstr _name values) =
+  varBindingsList (S.empty, S.empty) (fmap snd values)
 varBindings (EIf cnd thn els) =
   varBindings cnd `bindingSeq`
   (let (thnFree, thnBound) = varBindings thn
        (elsFree, elsBound) = varBindings els
-    in (thnFree `union` elsFree, thnBound `union` elsBound))
+    in (thnFree `S.union` elsFree, thnBound `S.union` elsBound))
 
+combine :: Expr -> Expr -> (Set Var, Set Binding)
 combine e1 e2 = varBindings e1 `bindingSeq` varBindings e2
 
 -- | Combine two pieces of binding information assuming that the second set of bindings
@@ -506,18 +520,18 @@ combine e1 e2 = varBindings e1 `bindingSeq` varBindings e2
 bindingSeq ::
      (Set Var, Set Binding) -> (Set Var, Set Binding) -> (Set Var, Set Binding)
 bindingSeq (free1, bound1) (free2, bound2) =
-  ( free1 `union` (free2 `difference` S.map (^. bindingName) bound1)
-  , bound1 `union` bound2)
+  ( free1 `S.union` (free2 `S.difference` S.map (^. bindingName) bound1)
+  , bound1 `S.union` bound2)
 
 -- | Folds 'varBindings' over a list of expressions with a given set of initial bindings
 varBindingsList :: (Set Var, Set Binding) -> [Expr] -> (Set Var, Set Binding)
 varBindingsList init exprs =
-  foldl
+  L.foldl
     (\(freeAcc, boundAcc) expr ->
        let (freeExpr, boundExpr) = varBindings expr
-        in ( (freeAcc `union` freeExpr) `difference`
+        in ( (freeAcc `S.union` freeExpr) `S.difference`
              S.map (^. bindingName) boundAcc
-           , boundAcc `union` boundExpr))
+           , boundAcc `S.union` boundExpr))
     init
     exprs
 
@@ -544,7 +558,7 @@ emptyCtx =
     }
 
 emptyCtxRHS :: Context
-emptyCtxRHS = set ctxAllocStrategy Decrease emptyCtx
+emptyCtxRHS = Lens.set ctxAllocStrategy Decrease emptyCtx
 
 nop :: Expr
 nop = ENop

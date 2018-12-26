@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE CPP, QuasiQuotes #-}
 
+import Prelude
 import Quivela
 import qualified System.Exit as E
 #define FOO(x, y) <x, y>

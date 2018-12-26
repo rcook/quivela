@@ -4,60 +4,64 @@ module Quivela.Diff
   ( applyDiffs
   ) where
 
-import Control.Lens ((^.), iso, over)
-import qualified Quivela.Language as L
+import qualified Control.Lens as Lens
+import Control.Lens ((^.))
+import qualified Data.List as L
+import qualified Quivela.Language as Q
 import Quivela.Language (Diff, Expr, Field, Var)
+import Quivela.Prelude
 
-seqToList L.ENop = []
-seqToList (L.ESeq e1 e2) = e1 : seqToList e2
+seqToList :: Expr -> [Expr]
+seqToList Q.ENop = []
+seqToList (Q.ESeq e1 e2) = e1 : seqToList e2
 seqToList _ = error "Invalid argument to seqToList"
 
 replaceMethod :: Expr -> Expr -> Expr
 replaceMethod emtd ebody
-  | any
+  | L.any
      (\e ->
         case e of
-          mtd'@(L.EMethod {}) -> mtd' ^. L.emethodName == emtd ^. L.emethodName
+          mtd'@(Q.EMethod {}) -> mtd' ^. Q.emethodName == emtd ^. Q.emethodName
           _ -> False)
-     bodyExprs = foldr L.ESeq L.ENop $ map replace bodyExprs
+     bodyExprs = L.foldr Q.ESeq Q.ENop $ fmap replace bodyExprs
   where
-    replace mtd'@(L.EMethod {})
-      | mtd' ^. L.emethodName == emtd ^. L.emethodName = emtd
+    replace mtd'@(Q.EMethod {})
+      | mtd' ^. Q.emethodName == emtd ^. Q.emethodName = emtd
       | otherwise = mtd'
     replace e = e
     bodyExprs = seqToList ebody
-replaceMethod emtd ebody = foldr L.ESeq L.ENop (seqToList ebody ++ [emtd])
+replaceMethod emtd ebody = L.foldr Q.ESeq Q.ENop (seqToList ebody ++ [emtd])
 
 replaceField :: Field -> [Field] -> [Field]
 replaceField newField oldFields
-  | any
-     (\oldField -> oldField ^. L.fieldName == newField ^. L.fieldName)
-     oldFields = map replace oldFields
+  | L.any
+     (\oldField -> oldField ^. Q.fieldName == newField ^. Q.fieldName)
+     oldFields = fmap replace oldFields
   where
     replace oldField
-      | oldField ^. L.fieldName == newField ^. L.fieldName = newField
+      | oldField ^. Q.fieldName == newField ^. Q.fieldName = newField
       | otherwise = oldField
 replaceField newField oldFields = oldFields ++ [newField]
 
 deleteMethod :: Var -> Expr -> Expr
 deleteMethod mtdName body =
-  over
-    (iso seqToList (foldr L.ESeq L.ENop))
-    (filter
+  Lens.over
+    (Lens.iso seqToList (L.foldr Q.ESeq Q.ENop))
+    (L.filter
        (\e ->
           case e of
-            oldMtd@L.EMethod {} -> oldMtd ^. L.emethodName /= mtdName
+            oldMtd@Q.EMethod {} -> oldMtd ^. Q.emethodName /= mtdName
             _ -> True))
     body
 
 applyDiff :: Diff -> Expr -> Expr
-applyDiff d en@(L.ENew {}) =
+applyDiff d en@(Q.ENew {}) =
   case d of
-    L.NewField f -> over L.newFields (replaceField f) en
-    L.DeleteField s -> over L.newFields (filter ((/= s) . (^. L.fieldName))) en
-    L.OverrideMethod em -> over L.newBody (replaceMethod em) en
-    L.DeleteMethod mname -> over L.newBody (deleteMethod mname) en
-applyDiff d e = error "Can only apply diffs to new expressions"
+    Q.NewField f -> Lens.over Q.newFields (replaceField f) en
+    Q.DeleteField s -> Lens.over Q.newFields (L.filter ((/= s) . (^. Q.fieldName))) en
+    Q.OverrideMethod em -> Lens.over Q.newBody (replaceMethod em) en
+    Q.DeleteMethod mname -> Lens.over Q.newBody (deleteMethod mname) en
+applyDiff _ _ = error "Can only apply diffs to new expressions"
 
 applyDiffs :: [Diff] -> Expr -> Expr
-applyDiffs ds e = foldl (flip applyDiff) e ds
+applyDiffs ds e = L.foldl (flip applyDiff) e ds
