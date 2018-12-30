@@ -77,6 +77,21 @@ import qualified System.Timer as Timer
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = Map Addr Addr
 
+maybeInsert :: (Ord k, Eq v) => k -> v -> Map k v -> Maybe (Map k v)
+maybeInsert k v m =
+  case M.lookup k m of
+    Just v' ->
+      if v == v'
+        then Just m
+        else Nothing
+    Nothing -> Just (M.insert k v m)
+
+tryInsert :: (Show k, Show v, Ord k, Eq v) => k -> v -> Map k v -> Map k v
+tryInsert k v m =
+  case maybeInsert k v m of
+    Just m' -> m'
+    Nothing -> error $ "Key " ++ show k ++ " already mapped in " ++ show m
+
 -- | Quivela proofs are a series of equivalent expressions and a list of
 -- invariants that are needed to verify this step.
 data Step = Step
@@ -401,24 +416,6 @@ universalInvariantAssms addr ctx pathCond =
               pathCondI
               (Not (res :=: VInt 0))
       return $ replaceAllRefs [Forall vs (Q.conjunction assms :=>: conseq)]
-
-maybeInsert :: (Ord k, Eq v) => k -> v -> M.Map k v -> Maybe (M.Map k v)
-maybeInsert k v m
-  | Just v' <- M.lookup k m =
-    if v == v'
-      then Just m
-      else Nothing
-  | otherwise =
-    case M.keys $ M.filterWithKey (\_ v' -> v' == v) m of
-      ks'
-        | not (L.all (== k) ks') -> Nothing
-      _ -> Just (M.insert k v m)
-
-tryInsert :: (Show k, Show v, Ord k, Eq v) => k -> v -> M.Map k v -> M.Map k v
-tryInsert k v m =
-  case maybeInsert k v m of
-    Just m' -> m'
-    Nothing -> error $ "Key " ++ show k ++ " already remapped in " ++ show m
 
 -- | Try to find a mapping for addresses that may make the two values equal.
 unifyAddrs :: Value -> Value -> AddrBijection -> AddrBijection
@@ -1189,15 +1186,6 @@ rewriteExpr from to e = Generics.everywhere (Generics.mkT replace) e
       | e' == from = to
       | otherwise = e'
 
--- | Convenience function for expression that both sides agree on looking
--- up a series of fields. @[a, b, c]@ represents looking up field @a.b.c@.
-fieldsEqual :: [Var] -> [Var] -> ProofHint
-fieldsEqual fieldsL fieldsR = EqualInv (getField fieldsL) (getField fieldsR)
-
--- | Like 'fieldsEqual' but looking up the same fields on both sides.
-fieldEqual :: [Var] -> ProofHint
-fieldEqual fields = fieldsEqual fields fields
-
 commonVars :: [Var] -> Addr -> Context -> Addr -> Context -> [[Var]]
 commonVars prefixFields addrL ctxL addrR ctxR
   | Just objL <- ctxL ^. Q.ctxObjs . Lens.at addrL
@@ -1244,6 +1232,14 @@ inferInvariants prefix step@Step {lhs, hints, rhs}
     Q.debug $ "Inferred equality invariants on fields: " ++ show comVars
     return $ step {hints = hints ++ map fieldEqual comVars}
 
+-- | Convenience function for expression that both sides agree on looking
+-- up a series of fields. @[a, b, c]@ represents looking up field @a.b.c@.
+fieldsEqual :: [Var] -> [Var] -> ProofHint
+fieldsEqual fieldsL fieldsR = EqualInv (getField fieldsL) (getField fieldsR)
+
+-- | Like 'fieldsEqual' but looking up the same fields on both sides.
+fieldEqual :: [Var] -> ProofHint
+fieldEqual fields = fieldsEqual fields fields
 
 -- | Convert a series of proof parts into a sequence of steps
 toSteps :: [ProofPart] -> [Step]
