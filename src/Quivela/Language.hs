@@ -10,6 +10,7 @@
 module Quivela.Language
   ( Addr
   , AllocStrategy(..)
+  , Config
   , Context(..)
   , Diff(..)
   , Expr(..)
@@ -25,6 +26,8 @@ module Quivela.Language
   , ProofHint(..)
   , ProofPart(..)
   , Prop(..)
+  , Result
+  , Results
   , SymValue(..)
   , Type(..)
   , Value(..)
@@ -98,17 +101,8 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Quivela.Prelude
+import Quivela.Util(PartialEq(..))
 
-{- Lenses
-
-Since interpreting quivela programs uses a lot of nested records, we use
-the lens library to read and write inside nested records. A lens can
-be thought of a combined getter and setter than can be passed around
-as a first-class value and also extends to reading and writing inside
-Maps.
-
-See https://github.com/ekmett/lens/wiki for details.
--}
 type Addr = Integer
 
 type Var = String
@@ -124,6 +118,8 @@ data Type
   | TSet Type
   | TNamed String
   deriving (Eq, Show, Ord, Data, Generic)
+
+instance Serialize Type
 
 -- | Symbolic values representing unknowns and operations on them
 -- Calls to the adversary are also symbolic.
@@ -178,6 +174,8 @@ data SymValue
          [Value] -- ^ Calls to declared, but not defined, functions
   deriving (Eq, Show, Ord, Data, Generic)
 
+instance Serialize SymValue
+
 -- Define how to insert into a symbolic value via a lens:
 type instance Lens.Index SymValue = Value
 
@@ -185,12 +183,6 @@ type instance Lens.IxValue SymValue = Value
 
 instance Lens.Ixed SymValue where
   ix k f m = f (Sym $ Lookup k (Sym m)) <&> \v' -> Insert k v' (Sym m)
-
--- Since we pattern-match repeatedly on references in various places, we define
--- a pattern synonym that handles the fact that references are actually symbolic
-pattern VRef :: Addr -> Value
-
-pattern VRef a = Sym (Ref a)
 
 -- | Quivela values
 data Value
@@ -202,6 +194,14 @@ data Value
   | Sym { _symVal :: SymValue }
   deriving (Eq, Show, Ord, Data, Generic)
 
+instance Serialize Value
+
+-- Since we pattern-match repeatedly on references in various places, we define
+-- a pattern synonym that handles the fact that references are actually symbolic
+pattern VRef :: Addr -> Value
+
+pattern VRef a = Sym (Ref a)
+
 -- | Data type for field initializers
 data Field = Field
   { _fieldName :: String
@@ -210,11 +210,15 @@ data Field = Field
   , _immutable :: Bool -- ^ Is the field constant?
   } deriving (Eq, Show, Ord, Data, Generic)
 
+instance Serialize Field
+
 data MethodKind
   = NormalMethod
   | LocalMethod
   | Invariant
   deriving (Eq, Show, Ord, Data, Generic)
+
+instance Serialize MethodKind
 
 data Expr
   = ENop
@@ -274,19 +278,10 @@ data Expr
               }
   deriving (Eq, Show, Ord, Data, Generic)
 
-instance Serialize SymValue
-
-instance Serialize Value
-
-instance Serialize Type
-
-instance Serialize Field
-
-instance Serialize MethodKind
-
 instance Serialize Expr
 
-instance Serialize Prop
+nop :: Expr
+nop = ENop
 
 -- | The value of a field of an object in the heap
 data Local = Local
@@ -360,6 +355,8 @@ data Prop
   | PFalse
   deriving (Eq, Show, Ord, Data, Generic)
 
+instance Serialize Prop
+
 conjunction :: [Prop] -> Prop
 conjunction [] = PTrue
 conjunction [p] = p
@@ -384,13 +381,37 @@ data ProofHint
   -- ^ Equality of a value from the LHS and RHS contexts
   | Rewrite Expr
             Expr
-  | NoInfer -- ^ turn off proof hint inference for this step
-  | IgnoreCache -- ^ Don't use verification cache when checking this step
-  | Admit -- ^ Don't check this step
-  | NoAddressBijection -- ^ Don't try to remap addresses and instead hope that they get allocated in the same order
-  | UseAddressBijection (Map Addr Addr) -- ^ Start from explicit bijection of addresses
+  | NoInfer
+  -- ^ turn off proof hint inference for this step
+  | IgnoreCache
+  -- ^ Don't use verification cache when checking this step
+  | Admit
+  -- ^ Don't check this step
+  | NoAddressBijection
+  -- ^ Don't try to remap addresses and instead hope that they get allocated in the same order
+  | UseAddressBijection (Map Addr Addr)
+  -- ^ Start from explicit bijection of addresses
   | Note String
   deriving (Generic)
+
+instance PartialEq ProofHint where
+  NoInfer === NoInfer = Just True
+  NoInfer === _ = Just False
+  _ === NoInfer = Just False
+  Rewrite e1 e2 === Rewrite e1' e2' = Just (e1 == e1' && e2 == e2')
+  Rewrite _ _ === _ = Just False
+  Admit === Admit = Just True
+  Admit === _ = Just False
+  EqualInv _ _ === EqualInv _ _ = Nothing
+  EqualInv _ _ === _ = Just False
+  IgnoreCache === IgnoreCache = Just True
+  IgnoreCache === _ = Just False
+  Note s === Note s' = Just (s == s')
+  Note _ === _ = Just False
+  NoAddressBijection === NoAddressBijection = Just True
+  NoAddressBijection === _ = Just False
+  UseAddressBijection m === UseAddressBijection m' = Just (m == m')
+  UseAddressBijection _ === _ = Just False
 
 data Diff
   = NewField Field
@@ -560,5 +581,8 @@ emptyCtx =
 emptyCtxRHS :: Context
 emptyCtxRHS = Lens.set ctxAllocStrategy Decrease emptyCtx
 
-nop :: Expr
-nop = ENop
+type Config = (Expr, Context, PathCond)
+
+type Result = (Value, Context, PathCond)
+
+type Results = [Result]

@@ -3,8 +3,11 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -49,6 +52,8 @@ import Quivela.Language
   , ProofHint(..)
   , ProofPart(..)
   , Prop(..)
+  , Result
+  , Results
   , SymValue(..)
   , Type(..)
   , pattern VRef
@@ -57,8 +62,9 @@ import Quivela.Language
   )
 import Quivela.Prelude
 import qualified Quivela.SymEval as Q
-import Quivela.SymEval (Result, Results, Verify, VerifyEnv, VerifyState(..))
+import Quivela.SymEval (Verify, VerifyEnv, VerifyState(..))
 import qualified Quivela.Util as Q
+import Quivela.Util (PartialEq((===)))
 import qualified Quivela.VerifyPreludes as Q
 import qualified System.Directory as Directory
 import qualified System.IO as IO
@@ -66,30 +72,6 @@ import qualified System.IO.Temp as Temp
 import qualified System.Process as Proc
 import qualified System.Timer as Timer
 
--- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
--- then the boolean x indicates that a and b are equal/unequal. Otherwise, it cannot be determined
--- if the two values are equal
-class PartialEq a where
-  (===) :: a -> a -> Maybe Bool
-
-instance PartialEq ProofHint where
-  NoInfer === NoInfer = Just True
-  NoInfer === _ = Just False
-  _ === NoInfer = Just False
-  Rewrite e1 e2 === Rewrite e1' e2' = Just (e1 == e1' && e2 == e2')
-  Rewrite _ _ === _ = Just False
-  Admit === Admit = Just True
-  Admit === _ = Just False
-  EqualInv _ _ === EqualInv _ _ = Nothing
-  EqualInv _ _ === _ = Just False
-  IgnoreCache === IgnoreCache = Just True
-  IgnoreCache === _ = Just False
-  Note s === Note s' = Just (s == s')
-  Note _ === _ = Just False
-  NoAddressBijection === NoAddressBijection = Just True
-  NoAddressBijection === _ = Just False
-  UseAddressBijection m === UseAddressBijection m' = Just (m == m')
-  UseAddressBijection _ === _ = Just False
 
 -- | Verification conditions
 data VC = VC

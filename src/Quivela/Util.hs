@@ -3,13 +3,17 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.Util
-  ( foreachM
+  ( PartialEq(..)
+  , foreachM
   , heredoc
+  , intercept
   , readFileCompileTime
   , uncurry3
   ) where
 
 import qualified Control.Monad as Monad
+import qualified Control.Monad.Writer.Class as MonadWriter
+import Control.Monad.Writer.Class (MonadWriter)
 import qualified Data.List as L
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH (Exp, Q)
@@ -20,6 +24,14 @@ import qualified System.Directory as Directory
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
 import qualified System.IO as IO
+
+-- | A type class for types that only support equality partially. Whenever @(a === b) == Just x@,
+-- then the boolean x indicates that a and b are equal/unequal. Otherwise, it cannot be determined
+-- if the two values are equal
+class PartialEq a where
+  (===) :: a -> a -> Maybe Bool
+  elemPartial :: a -> [a] -> Bool
+  elemPartial x ys = L.any ((== Just True) . (=== x)) ys
 
 heredocExpr :: String -> Q Exp
 heredocExpr s = TH.litE . TH.StringL $ s
@@ -56,3 +68,8 @@ foreachM s act = do
 
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
 uncurry3 f (a, b, c) = f a b c
+
+-- | Runs an action in a writer monad, but suppresses its output and instead
+-- returns it in the results
+intercept :: MonadWriter w m => m a -> m (a, w)
+intercept action = MonadWriter.censor (const mempty) (MonadWriter.listen action)

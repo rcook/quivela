@@ -6,9 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.SymEval
-  ( Result
-  , Results
-  , Verify(..)
+  ( Verify(..)
   , VerifyEnv(..)
   , VerifyState(..)
   , alreadyVerified
@@ -42,6 +40,7 @@ import qualified Quivela.Language as Q
 import Quivela.Language
   ( Addr
   , AllocStrategy(..)
+  , Config
   , Context
   , Expr(..)
   , Field(..)
@@ -53,6 +52,8 @@ import Quivela.Language
   , PathCond
   , Place(..)
   , Prop(..)
+  , Result
+  , Results
   , SymValue(..)
   , Type(..)
   , pattern VRef
@@ -127,11 +128,8 @@ freshVar prefix = do
       RWS.modify (nextVar . Lens.at prefix ?~ 0)
       freshVar prefix
 
-type Config = (Expr, Context, PathCond)
 
-type Result = (Value, Context, PathCond)
 
-type Results = [Result]
 
 -- | Throws an error if there is more than one result in the list. Used for
 -- evaluating programs that are not supposed to have more than one result.
