@@ -20,12 +20,14 @@ module Quivela.Prelude
   , Monoid
   , Num
   , Ord
+  , Semigroup
   , Serialize
   , Set
   , Show
   , String
   , Typeable
   , ($)
+  , (&)
   , (&&)
   , (+)
   , (++)
@@ -47,6 +49,7 @@ module Quivela.Prelude
   , error
   , flip
   , fmap
+  , foldMap
   , fromInteger
   , fromIntegral
   , fst
@@ -65,6 +68,7 @@ module Quivela.Prelude
   ) where
 
 import Data.Data (Data)
+import Data.Function ((&))
 import Data.Map (Map)
 import Data.Serialize (Serialize)
 import Data.Set (Set)
