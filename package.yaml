@@ -62,7 +62,7 @@ library:
   - time
 
 tests:
-  quivela-test:
+  spec:
     main: Spec.hs
     source-dirs: test
     ghc-options:
