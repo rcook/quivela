@@ -4,7 +4,7 @@
 
 import Prelude
 import Quivela
-import System.Exit as E
+import qualified System.Exit as E
 
 program =
   prove'

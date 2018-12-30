@@ -7,7 +7,7 @@ import Quivela
 import qualified System.Exit as E
 #define FOO(x, y) <x, y>
 program =
-  prove' emptyVerifyEnv nop $
+  prove' emptyVerifyEnv [prog'|{}|] $
   [prog| new (x=0) { method f() { FOO(a, _) = FOO(x, x) & a } } |] ≈
   Hint [fieldsEqual ["x"] ["y"]] :
   [prog| new (y=0) { method f() { FOO(b, _) = FOO(y, y) & b } } |] : []
