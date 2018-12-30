@@ -77,6 +77,26 @@ import qualified System.Timer as Timer
 -- | Type synonym for building up bijections between addresses
 type AddrBijection = Map Addr Addr
 
+-- | Quivela proofs are a series of equivalent expressions and a list of
+-- invariants that are needed to verify this step.
+data Step = Step
+  { lhs :: Expr
+  , hints :: [ProofHint]
+  , rhs :: Expr
+  }
+
+stepNote :: Step -> String
+stepNote Step {hints} =
+  let noteText =
+        L.concatMap
+          (\hint ->
+             case hint of
+               Note n -> n
+               _ -> "")
+          hints
+   in if noteText == ""
+        then ""
+        else noteText ++ ": "
 
 -- | Verification conditions
 data VC = VC
@@ -1065,12 +1085,12 @@ checkVCs vcs = do
     ")"
   return vcs'
 
-checkEqv :: Bool -> Expr -> [ProofHint] -> Expr -> Expr -> Verify [(Var, [VC])]
-checkEqv _ _ hints lhs rhs
-  | L.any ((== Just True) . (=== Admit)) hints = do
+checkEqv :: Expr -> Step -> Verify [(Var, [VC])]
+checkEqv _ Step {lhs, hints, rhs}
+  | Q.elemPartial Admit hints = do
     Q.debug $ "Skipping proof step: " ++ show lhs ++ " ~ " ++ show rhs
     return []
-checkEqv _ prefix [Rewrite from to] lhs rhs = do
+checkEqv prefix Step {lhs, rhs, hints = [Rewrite from to]} = do
   (_, prefixCtx, _) <-
     fmap Q.singleResult . Q.symEval $ (prefix, Q.emptyCtx, [])
   Monad.unless
@@ -1086,22 +1106,12 @@ checkEqv _ prefix [Rewrite from to] lhs rhs = do
     else error $ "Invalid rewrite step:\n" ++ show lhs' ++ "\n/=\n" ++ show rhs
   where
     lhs' = rewriteExpr from to lhs
-checkEqv useSolvers prefix hintsIn lhs rhs = do
+checkEqv prefix step@Step {lhs, hints = hintsIn, rhs} = do
   cached <- S.member (lhs, rhs) <$> Lens.use Q.alreadyVerified
-  (_, hints, _) <- inferInvariants prefix (lhs, hintsIn, rhs)
+  step'@Step {hints} <- inferInvariants prefix step
   withCache <- Q.useCache
-  let noteText =
-        L.concatMap
-          (\hint ->
-             case hint of
-               Note n -> n
-               _ -> "")
-          hints
-      note =
-        if noteText == ""
-          then ""
-          else noteText ++ ": "
-  if cached && not (L.any ((== Just True) . (=== IgnoreCache)) hints) &&
+  let note = stepNote step'
+  if cached && not (Q.elemPartial IgnoreCache hintsIn) &&
      withCache
     then do
       Q.debug $ note ++ "Skipping cached verification step"
@@ -1146,10 +1156,7 @@ checkEqv useSolvers prefix hintsIn lhs rhs = do
           (args, _, _) <- Q.symArgs ctx1 (mtd ^. Q.methodFormals)
           -- TODO: double-check that we don't need path condition here.
           vcs <- methodEquivalenceVCs mtd hints args res1 res1'
-          verificationResult <-
-            if useSolvers
-              then checkVCs vcs
-              else return vcs
+          verificationResult <- checkVCs vcs
           return (mtd ^. Q.methodName, verificationResult)
       if (not . L.all (L.null . snd) $ remainingVCs)
         then do
@@ -1171,10 +1178,6 @@ cacheVerified lhs rhs = do
       Q.alreadyVerified %= S.insert (lhs, rhs)
       verified <- Lens.use Q.alreadyVerified
       Monad.liftIO $ ByteString.writeFile f' (Serialize.encode verified)
-
--- | Quivela proofs are a series of equivalent expressions and a list of
--- invariants that are needed to verify this step.
-type Step = (Expr, [ProofHint], Expr)
 
 -- | @'rewriteExpr' from to e@ rewrites all occurrences of @from@ in @e@ by @to@
 -- FIXME: This is unsound.  It must take bound variables into account.
@@ -1231,15 +1234,16 @@ commonVars prefixFields addrL ctxL addrR ctxR
   | otherwise = error "commonVars called with invalid addresses"
 
 inferInvariants :: Expr -> Step -> Verify Step
-inferInvariants prefix step@(lhs, invs, rhs)
-  | L.any (\x -> (x === NoInfer) == Just True) invs = return step
+inferInvariants prefix step@Step {lhs, hints, rhs}
+  | L.any (\x -> (x === NoInfer) == Just True) hints = return step
   | otherwise = do
     (_, prefixCtx, _) <- Q.singleResult <$> Q.symEval (prefix, Q.emptyCtx, [])
     (VRef addrL, ctxL, _) <- Q.singleResult <$> Q.symEval (lhs, prefixCtx, [])
     (VRef addrR, ctxR, _) <- Q.singleResult <$> Q.symEval (rhs, prefixCtx, [])
     let comVars = commonVars [] addrL ctxL addrR ctxR
     Q.debug $ "Inferred equality invariants on fields: " ++ show comVars
-    return (lhs, invs ++ map fieldEqual comVars, rhs)
+    return $ step {hints = hints ++ map fieldEqual comVars}
+
 
 -- | Convert a series of proof parts into a sequence of steps
 toSteps :: [ProofPart] -> [Step]
@@ -1250,13 +1254,13 @@ toSteps (Prog lhs:PDiff diffs:steps') =
 toSteps (Prog lhs:Hint h:PDiff diffs:steps') =
   toSteps (Prog lhs : Hint h : Prog (Q.applyDiffs diffs lhs) : steps')
 toSteps (Prog lhs:Prog rhs:steps') =
-  (lhs, [], rhs) : toSteps (Prog rhs : steps')
-toSteps (Prog lhs:Hint invs:Prog rhs:steps') =
-  (lhs, invs, rhs) : toSteps (Prog rhs : steps')
+  Step lhs [] rhs : toSteps (Prog rhs : steps')
+toSteps (Prog lhs:Hint hints:Prog rhs:steps') =
+  Step lhs hints rhs : toSteps (Prog rhs : steps')
 toSteps _ = error "Invalid sequence of steps"
 
 -- | Return the number of remaining verification conditions
 proveStep :: Expr -> Step -> Verify Int
-proveStep prefix (lhs, invs, rhs) = do
-  remaining <- checkEqv True prefix invs lhs rhs
+proveStep prefix step = do
+  remaining <- checkEqv prefix step
   return . L.sum . map (L.length . snd) $ remaining
