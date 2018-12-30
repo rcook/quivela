@@ -11,8 +11,7 @@
 {-# LANGUAGE TupleSections #-}
 
 module Quivela.Verify
-  ( (≈)
-  , fieldEqual
+  ( fieldEqual
   , fieldsEqual
   , proveStep
   , runVerify
@@ -1283,9 +1282,3 @@ proveStep :: Expr -> Step -> Verify Int
 proveStep prefix (lhs, invs, rhs) = do
   remaining <- checkEqv True prefix invs lhs rhs
   return . L.sum . map (L.length . snd) $ remaining
-
--- | Like '~~' but using a nicer-looking unicode operator instead.
-(≈) :: a -> [a] -> [a]
-x ≈ y = x : y
-
-infixr 5 ≈

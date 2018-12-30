@@ -8,8 +8,8 @@ import qualified Control.Exception as Exception
 import Control.Exception (SomeException)
 import qualified Data.Map as M
 import Prelude
-import qualified Quivela as Q
 import Quivela
+import Quivela.Language
   ( Context(..)
   , Expr(..)
   , Proof(..)
@@ -17,17 +17,12 @@ import Quivela
   , ProofPart(..)
   , SymValue(..)
   , Type(..)
-  , Value(..)
-  , (≈)
-  , fieldEqual
-  , fieldsEqual
-  , nop
-  , parseExpr
-  , parseProofPart
-  , prog
-  , prog'
-  , prove'
-  )
+  , Value(..))
+import qualified Quivela.Language as Q
+import qualified Quivela.Parse as Q
+import qualified Quivela.SymEval as Q
+import qualified Quivela.Util as Q
+import qualified Quivela.Verify as Q
 import qualified System.Environment as Environment
 import qualified Test.HUnit as T
 import Test.HUnit (Assertion, Counts(..), Test(TestCase, TestList), (~:))
@@ -240,7 +235,7 @@ parserTests =
 
 invalidCases =
   map
-    (uncurry (`doesntVerify` nop))
+    (uncurry (`doesntVerify` Q.nop))
     [ ( "trivial contradiction"
       , [prog| new() { method f() { 1 } } |] ≈
         [prog| new() { method f() { 2 } } |] :
@@ -262,7 +257,7 @@ invalidCases =
 failingTests :: Test
 failingTests =
   TestList
-    [ assertVerified "map comprehension to modify existing map" nop $
+    [ assertVerified "map comprehension to modify existing map" Q.nop $
       [prog|
 new(i:int=0) {
   method f(y) { m = 0, m[y] = i, i++, m = [x ↦ m[x]+1 | m[x]], m[y] }
@@ -372,43 +367,43 @@ method f(x) { obj = (new() { method g(m) { 1 } }), obj.g(x) & 1 }
       (VInt 1)
   , assertVerifyError
       "verification should detect extraneous methods on one side"
-      nop $
+      Q.nop $
     [prog| new() { method f() { 1 } } |] ≈ [prog| new() { } |] : []
-  , doesntVerify "if expression equivalence differing on one branch" nop $
+  , doesntVerify "if expression equivalence differing on one branch" Q.nop $
     [prog| new() { method f(x) { if (x) { 7 } else { 8 } } } |] ≈
     [prog| new() { method f(x) { if (x) { 7 } else { 9 } } } |] :
     []
-  , assertVerified "<= works" nop $
+  , assertVerified "<= works" Q.nop $
     [prog| new() { method f() { x <= x } } |] ≈
     [prog| new() { method f() { 1 } } |] :
     []
-  , assertVerified "& well-behaved" nop $
+  , assertVerified "& well-behaved" Q.nop $
     [prog| new() { method f(x, y) { 1 & x & y & 1 } } |] ≈
     [prog| new() { method f(x, y) { 1 & y & x & 1 } } |] ≈
     [prog| new() { method f(x, y) { y & x & 1 } } |] :
     []
-  , assertVerified "simple equality invariant" nop $
+  , assertVerified "simple equality invariant" Q.nop $
     [prog| new (x=0) { method f() { <x, x> } } |] ≈
     Hint [fieldsEqual ["x"] ["y"]] :
     [prog| new (y=0) { method f() { <y, y> } } |] : []
-  , assertVerified "simple const annotation" nop $
+  , assertVerified "simple const annotation" Q.nop $
     [prog| new (const x=0) { method f() { x } } |] ≈
     [prog| new (const x=0) { method f() { 0 } } |] :
     []
-  , assertVerified "addition is commutative and 0 is identity" nop $
+  , assertVerified "addition is commutative and 0 is identity" Q.nop $
     [prog| new () { method f(x, y) { 0 + x + 1 + y } } |] ≈
     [prog| new () { method f(x, y) { y + x + 1 } } |] :
     []
-  , assertVerified "multiplication example" nop $
+  , assertVerified "multiplication example" Q.nop $
     [prog| new () { method f(x, y) { x * 3 * y } } |] ≈
     [prog| new () { method f(x, y) { (x + x + x) * y } } |] ≈
     [prog| new () { method f(x, y) { x * (y + y + y) } } |] :
     []
-  , assertVerified "arithmetic example" nop $
+  , assertVerified "arithmetic example" Q.nop $
     [prog| new () { method f(x:int, y, z) { x / 2 + y * z - x / 2 } } |] ≈
     [prog| new () { method f(x:int, y, z) { y * z } } |] :
     []
-  , assertVerified "assignment to local variable" nop $
+  , assertVerified "assignment to local variable" Q.nop $
     [prog|
 new() {
   method f(x) { c = x & c }
@@ -418,7 +413,7 @@ new() {
   method f(x) { x }
 } |] :
     []
-  , assertVerified "tupling never returns 0" nop $
+  , assertVerified "tupling never returns 0" Q.nop $
     [prog|
 new() {
   method f(m) { <m> & 5 }
@@ -428,43 +423,43 @@ new() {
   method f(m) { 5 }
 }|] :
     []
-  , assertVerified "if-else with symbolic condition" nop $
+  , assertVerified "if-else with symbolic condition" Q.nop $
     [prog| new () { method f(x) { if (x) { 5 } else { 6 } } } |] ≈
     [prog| new () { method f(x) { if (!x) { 6 } else { 5 } } } |] :
     []
-  , assertVerified "if-else with same value in both branches" nop $
+  , assertVerified "if-else with same value in both branches" Q.nop $
     [prog| new () { method f() { if (x) 5 else 5 } } |] ≈
     [prog| new () { method f() { 5 } } |] :
     []
-  , assertVerified "if-else with true guard" nop $
+  , assertVerified "if-else with true guard" Q.nop $
     [prog| new () { method f() { if (1) 7 else 8 } } |] ≈
     [prog| new () { method f() { 7 } } |] :
     []
-  , assertVerified "if-else with false guard" nop $
+  , assertVerified "if-else with false guard" Q.nop $
     [prog| new() { method f() { if (2 < 1) 7 else 8 } } |] ≈
     [prog| new() { method f() { 8 } } |] :
     []
-  , assertVerified "post-increment example 1" nop $
+  , assertVerified "post-increment example 1" Q.nop $
     [prog| new () { method f() { x = 0 , x++ , x } } |] ≈
     [prog| new () { method f() { 1 } } |] :
     []
-  , assertVerified "post-increment example 2" nop $
+  , assertVerified "post-increment example 2" Q.nop $
     [prog| new () { method f(x) { x++ } } |] ≈
     [prog| new () { method f(x) { y = x , x = x + 1 , y } } |] :
     []
-  , assertVerified "post-increment example 3" nop $
+  , assertVerified "post-increment example 3" Q.nop $
     [prog| new () { method f() { x = 0 , x++ } } |] ≈
     [prog| new () { method f() { 0 } } |] :
     []
-  , assertVerified "post-increment in a map index" nop $
+  , assertVerified "post-increment in a map index" Q.nop $
     [prog| new (m=0) { method f() { x = 0, m = 0, m[x++] = 42, m[0] } } |] ≈
     [prog| new () { method f() { 42 } } |] :
     []
-  , assertVerified "less-than operator example" nop $
+  , assertVerified "less-than operator example" Q.nop $
     [prog| new () { method f(x:int, y:int) { !(x < y) | !(x == y) } } |] ≈
     [prog| new () { method f(x:int, y:int) { 1 } } |] :
     []
-  , assertVerified "Z(..) is idempotent" nop $
+  , assertVerified "Z(..) is idempotent" Q.nop $
     [prog|
 new() {
   method f(m) { Z(Z(m)) }
@@ -474,7 +469,7 @@ new() {
   method f(m) { Z(m) }
 }|] :
     []
-  , assertVerified "call on symbolic object" nop $
+  , assertVerified "call on symbolic object" Q.nop $
     [prog|
 type T = new() { method f() { 5 } }
 new (x: T = new T()) {
@@ -486,7 +481,7 @@ new () {
   method g() { 5 }
 }|] :
     []
-  , assertVerified "call on symbolic map value" nop $
+  , assertVerified "call on symbolic map value" Q.nop $
     [prog|
 type T = new() { method f() { 5 } }
 new (x: map int T=map) {
@@ -503,7 +498,7 @@ new (x: map int T = map) {
   }
 } |] :
     []
-  , assertVerified "object maps with an invariant" nop $
+  , assertVerified "object maps with an invariant" Q.nop $
     [prog|
 type T = new(p) { method f() { p } }
 new (x: map * T = map) {
@@ -529,7 +524,7 @@ new (x: map * T = map) {
   }
 }|] :
     []
-  , assertVerified "object maps with invariant using field access" nop $
+  , assertVerified "object maps with invariant using field access" Q.nop $
     [prog|
 type T = new(p: *) { method f() { p } }
 new (x: map * T = map) {
@@ -555,7 +550,7 @@ new (x: map * T = map) {
   }
 }|] :
     []
-  , assertVerified "commute two new(){} expressions used in result" nop $
+  , assertVerified "commute two new(){} expressions used in result" Q.nop $
     [prog|
 new () { method f() { x = new() {}, y = new() {}, <x, y> } } |] ≈
     [prog|
@@ -563,63 +558,63 @@ new () { method f() { x = new() {}, y = new() {}, <y, x> } } |] :
     []
   , assertVerified
       "commute two new(){} expressions with an extra new on one side"
-      nop $
+      Q.nop $
     [prog|
 new () { method f() { new() {} } } |] ≈
     Hint [IgnoreCache] :
     [prog|
 new () { method f() { x = new() {}, y = new() {}, if (x) { y } else { y } } }|] :
     []
-  , assertVerified "reason about new()s used only in path condition" nop $
+  , assertVerified "reason about new()s used only in path condition" Q.nop $
     [prog|
 new () { method f() { if (new(){}) { 5 } else { 6 } } }|] ≈
     Hint [IgnoreCache] :
     [prog|
 new () { method f() { if (new(){}) { 5 } else { 6 } } }|] :
     []
-  , assertVerified "syntactic sugar rnd() also commutes" nop $
+  , assertVerified "syntactic sugar rnd() also commutes" Q.nop $
     [prog| new() { method f() { x = rnd(), y = rnd(), <x, y> } } |] ≈
     Hint [IgnoreCache] :
     [prog| new() { method f() { x = rnd(), y = rnd(), <y, x> } } |] : []
-  , assertVerified "basic set literals and membership" nop $
+  , assertVerified "basic set literals and membership" Q.nop $
     [prog| new() { method f() { 1 ∈ {1} } } |] ≈
     [prog| new() { method f() { 1 } } |] :
     []
-  , assertVerified "set membership in singleton set" nop $
+  , assertVerified "set membership in singleton set" Q.nop $
     [prog| new() { method f(x) { x ∈ {1} } } |] ≈
     [prog| new() { method f(x) { x == 1 } } |] :
     []
-  , assertVerified "trivial set comprehension" nop $
+  , assertVerified "trivial set comprehension" Q.nop $
     [prog| new() { method f(y) { y ∈ {x | x ∈ {1}, 1} } } |] ≈
     [prog| new() { method f(y) { y == 1 } } |] :
     []
-  , assertVerified "constant map comprehension" nop $
+  , assertVerified "constant map comprehension" Q.nop $
     [prog| new() { method f() { ([x ↦ 1 | 1])[5] } } |] ≈
     [prog| new() { method f() { 1 } } |] :
     []
-  , assertVerified "map comprehension with another map in predicate" nop $
+  , assertVerified "map comprehension with another map in predicate" Q.nop $
     [prog| new() { method f() { (m = map, m[1] = 42), ([x ↦ 42 | m[x]])[1] } } |] ≈
     [prog| new() { method f() { 42 } } |] :
     []
   , assertVerified
       "map comprehension using another map in predicate and mapping function"
-      nop $
+      Q.nop $
     [prog| new() { method f() { (m = map, m[1] = 42), ([x ↦ m[x]+1 | m[x]])[1] } } |] ≈
     [prog| new() { method f() { 43 } } |] :
     []
-  , assertVerified "⊆ operation on concrete values" nop $
+  , assertVerified "⊆ operation on concrete values" Q.nop $
     [prog|
 new() { method f() { m = 0, m[0] = 1, m[1] = 1, n = 0, n[0] = 1, n ⊆ m } } |] ≈
     [prog|
 new() { method f() { 1 } } |] :
     []
-  , assertVerified "⊆ operation on symbolic maps and indices" nop $
+  , assertVerified "⊆ operation on symbolic maps and indices" Q.nop $
     [prog|
 new(m: map * *) { method f(x) { n = m, n[x] = 1, m ⊆ n } } |] ≈
     [prog|
 new() { method f(x) { 1 } } |] :
     []
-  , assertVerified "local method" nop $
+  , assertVerified "local method" Q.nop $
     [prog|
 new() {
   local f() { 5 }
@@ -630,7 +625,7 @@ new() {
   method g() { 5 }
 } |] :
     []
-  , assertVerified "Pattern-matching behaves like tuple projection" nop $
+  , assertVerified "Pattern-matching behaves like tuple projection" Q.nop $
     [prog|
 new() {
   method f(x) { <a, b> = x, <b, a> }
@@ -640,7 +635,7 @@ new() {
   method f(x) { <x`1, x`0> }
 }|] :
     []
-  , assertVerified "Pattern-matching remembers tuple size" nop $
+  , assertVerified "Pattern-matching remembers tuple size" Q.nop $
     [prog|
 new() {
   method f(x) { <a, b> = x, <a, b> }
@@ -650,7 +645,7 @@ new() {
   method f(x) { x }
 } |] :
     []
-  , assertVerified "Nested symbolic objects" nop $
+  , assertVerified "Nested symbolic objects" Q.nop $
     [prog|
 type S = new() { method fs() { 42 } }
 type T = new(const s: S) { method ft() { s.fs() } }
@@ -662,7 +657,7 @@ new() {
   method f() { 42 }
 }|] :
     []
-  , assertVerified "Nested symbolic objects in maps" nop $
+  , assertVerified "Nested symbolic objects in maps" Q.nop $
     [prog|
 type S = new() { method fs() { 42 } }
 type T = new(const s: S) { method ft() { s.fs() } }
@@ -703,7 +698,7 @@ new() {
   method g() { f(2) }
 }|] :
       [])
-  , assertVerified "Type declaration with constant initializer" nop $
+  , assertVerified "Type declaration with constant initializer" Q.nop $
     [prog|
 type EncT = new (const d=42) { 1 }
 new () {
@@ -745,9 +740,9 @@ new (m: map * T, d = 0) {
            invariant i1(ek) { !ek | !m[ek] | (m[ek].p == d[ek]) }
            |] :
         [])
-  , assertVerified "Dropping a call to rnd()" nop $
+  , assertVerified "Dropping a call to rnd()" Q.nop $
     [prog|new() { x = rnd(), rnd() }|] ≈ [prog|new() { rnd() }|] : []
-  , assertVerified "uninitialized nested map" nop $
+  , assertVerified "uninitialized nested map" Q.nop $
     [prog|
 new() {
   method f(x, y) { a[x][y] = 5 & a[x][y] }

@@ -8,7 +8,6 @@ module Quivela.QuasiQuote
   , prove
   , prove'
   , proveFailFast
-  , rewrite
   ) where
 
 import qualified Control.Monad as Monad
@@ -16,7 +15,6 @@ import qualified Data.List as L
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as TH
 import qualified Quivela.Language as Q
-import qualified Quivela.Parse as Q
 import Quivela.Prelude
 import qualified Quivela.SymEval as Q
 import qualified Quivela.Verify as Q
@@ -69,7 +67,3 @@ proveFailFast env prefix steps =
     (Q.toSteps steps)
   where
     doCheck = Q.runVerify env . Q.proveStep prefix
-
--- | A shorthand for rewriting using quivela terms written in concrete syntax.
-rewrite :: String -> String -> Q.ProofHint
-rewrite e1 e2 = Q.Rewrite (Q.parseExpr e1) (Q.parseExpr e2)
