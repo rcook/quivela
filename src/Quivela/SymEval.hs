@@ -65,81 +65,82 @@ import qualified Quivela.Util as Q
 import System.IO (Handle)
 import System.Process (ProcessHandle)
 
--- | The fixed environment for symbolic evaluation.
-data VerifyEnv = VerifyEnv
-  { _cacheFile :: Maybe FilePath
-    -- ^ Proof cache location
-  , _debugFlag :: Bool
-    -- ^ print debugging information
-  , _splitEq :: Bool
-    -- ^ Split == operator into two paths during symbolic evaluation?
-  }
+------------------------------------------------------------
+-- * Util
 
--- | A monad for generating and discharging verification conditions, which
--- allows generating free variables and calling external solvers.
-newtype Verify a = Verify
-  { unVerify :: RWST VerifyEnv () VerifyState IO a
-  } deriving ( Monad
-             , MonadFail
-             , MonadState VerifyState
-             , MonadIO
-             , Applicative
-             , Functor
-             , MonadReader VerifyEnv
-             )
+isSymbolic :: Value -> Bool
+isSymbolic (Sym _) = True
+isSymbolic _ = False
 
-useCache :: Verify Bool
-useCache = (Maybe.isJust . _cacheFile) <$> RWS.ask
+-- | Value to use to initialize new variables:
+defaultValue :: Value
+defaultValue = VInt 0
 
--- Right now, we only need the same environment as symbolic evaluation, so we reuse
--- that type here.
--- | Keeps track of fresh variables and, a z3 process, and which conditions
--- we already verified successfully in the past.
-data VerifyState = VerifyState
-  { _alreadyVerified :: S.Set (Expr, Expr)
-    -- ^ A cache of steps that we already verified before
-    -- FIXME: Currently, we cannot serialize invariants, since they include functions as arguments
-    -- in some cases
-  , _nextVar :: M.Map String Integer
-    -- ^ Map of already used integers for fresh variable prefix
-  , _verifyPrefixCtx :: Context
-    -- ^ The context returned by the "prefix" program of a proof that defines constructors,
-    -- lists assumptions, etc.
-  , _z3Proc :: (Handle, Handle, ProcessHandle)
-    -- ^ For performance reasons, we spawn a Z3 process once and keep it around
-  }
-
--- Generate lenses for all types defined above:
-L.concat <$> Monad.mapM Lens.makeLenses [''VerifyEnv, ''VerifyState]
-
-debug :: String -> Verify ()
-debug msg =
-  Cond.ifM (Lens.view debugFlag) (RWS.liftIO (putStrLn msg)) (return ())
-
--- | Generate a fresh variable starting with a given prefix
-freshVar :: String -> Verify String
-freshVar prefix = do
-  last <- Lens.use (nextVar . Lens.at prefix)
-  case last of
-    Just n -> do
-      nextVar . Lens.ix prefix %= (+ 1)
-      return $ "?" ++ prefix ++ show n
-    Nothing -> do
-      RWS.modify (nextVar . Lens.at prefix ?~ 0)
-      freshVar prefix
-
-
-
+lookupInTuple :: Value -> Value -> Value
+lookupInTuple (VTuple vs) (VInt i)
+  | fromInteger i < L.length vs = vs !! fromInteger i
+  | otherwise = error "Invalid tuple index"
+lookupInTuple tup (Sym sidx) = Sym (Proj tup (Sym sidx))
+lookupInTuple (Sym sv) vidx = Sym (Proj (Sym sv) vidx)
+lookupInTuple _ _ = error "invalid tuple lookup"
 
 -- | Throws an error if there is more than one result in the list. Used for
 -- evaluating programs that are not supposed to have more than one result.
-singleResult :: [Result] -> Result
+singleResult :: Results -> Result
 singleResult [res@(_, _, _)] = res
 singleResult ress = error $ "Multiple results: " ++ show ress
 
+-- Debugging functions for printing out a context in a nicer way.
+-- | Turn a local into a human-readable string
+printLocal :: Var -> Local -> String
+printLocal name loc =
+  "\t\t" ++ name ++ " = " ++ show (loc ^. Q.localValue) ++ " : " ++
+  show (loc ^. Q.localType)
+
+-- | Turn a method into a human-readable string
+printMethod :: Var -> Method -> String
+printMethod name mtd =
+  L.unlines ["\t\t" ++ name ++ " { " ++ show (mtd ^. Q.methodBody) ++ " } "]
+
+-- | Turn an object into a human-readable string
+printObject :: Addr -> Object -> String
+printObject addr obj =
+  L.unlines $
+  [ "  " ++ show addr ++ " |-> "
+  , "\tAdversary?: " ++ show (obj ^. Q.objAdversary)
+  , "\tLocals:"
+  ] ++
+  (map (uncurry printLocal) (M.toList (obj ^. Q.objLocals))) ++
+  ["\tMethods:"] ++
+  (map (uncurry printMethod) (M.toList (obj ^. Q.objMethods)))
+
+-- | Turn a context into a human-readable string
+printContext :: Context -> String
+printContext ctx =
+  L.unlines
+    [ "this: " ++ show (ctx ^. Q.ctxThis)
+    , "scope: " ++ show (ctx ^. Q.ctxScope)
+    , "objects: " ++
+      L.intercalate
+        "\n"
+        (map (uncurry printObject) (M.toList (ctx ^. Q.ctxObjs)))
+    ]
+
+evalError :: String -> Context -> a
+evalError s ctx = error (s ++ "\nContext:\n" ++ printContext ctx)
+
+------------------------------------------------------------
+-- * Pure type inference.
+--
+-- The inference is pure in the sense that it does not use the ambient environment
+-- or state introduced later.  There are two methods:
+--   - typeOfX
+--   - XHasType
+-- where X ∈ {Value, SymValue}.
+
 -- | Infer type of a symbolic value. Will return 'TAny' for most operations
 -- except plain variables and inserting into a well-typed map.
-typeOfSymValue :: Context -> Q.SymValue -> Q.Type
+typeOfSymValue :: Context -> SymValue -> Type
 typeOfSymValue _ (SymVar _ t) = t
 typeOfSymValue _ (Proj _ _) = TAny
 -- we could have more precise type information here if the idx was constant
@@ -231,9 +232,79 @@ symValueHasType ctx (Insert k v m) (TMap tk tv)
     ]
 symValueHasType _ _ _ = False
 
--- | Value to use to initialize new variables:
-defaultValue :: Value
-defaultValue = VInt 0
+------------------------------------------------------------
+-- * The Verify Monad.
+--
+-- The monad is simply a newtype around RWST with custom read-only environment
+-- and read-write state.  The inner monad is IO, as we are constantly
+-- communicating with Z3 over a pipe.
+
+-- | The fixed environment for symbolic evaluation.
+data VerifyEnv = VerifyEnv
+  { _cacheFile :: Maybe FilePath
+    -- ^ Proof cache location
+  , _debugFlag :: Bool
+    -- ^ print debugging information
+  , _splitEq :: Bool
+    -- ^ Split == operator into two paths during symbolic evaluation?
+  }
+
+emptyVerifyEnv :: VerifyEnv
+emptyVerifyEnv =
+  VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False}
+
+-- Right now, we only need the same environment as symbolic evaluation, so we reuse
+-- that type here.
+-- | Keeps track of fresh variables and, a z3 process, and which conditions
+-- we already verified successfully in the past.
+data VerifyState = VerifyState
+  { _alreadyVerified :: Set (Expr, Expr)
+    -- ^ A cache of steps that we already verified before
+    -- FIXME: Currently, we cannot serialize invariants, since they include functions as arguments
+    -- in some cases
+  , _nextVar :: Map String Integer
+    -- ^ Map of already used integers for fresh variable prefix
+  , _verifyPrefixCtx :: Context
+    -- ^ The context returned by the "prefix" program of a proof that defines constructors,
+    -- lists assumptions, etc.
+  , _z3Proc :: (Handle, Handle, ProcessHandle)
+    -- ^ For performance reasons, we spawn a Z3 process once and keep it around
+  }
+
+-- Generate lenses for all types defined above:
+L.concat <$> Monad.mapM Lens.makeLenses [''VerifyEnv, ''VerifyState]
+
+-- | A monad for generating and discharging verification conditions, which
+-- allows generating free variables and calling external solvers.
+newtype Verify a = Verify
+  { unVerify :: RWST VerifyEnv () VerifyState IO a
+  } deriving ( Monad
+             , MonadFail
+             , MonadState VerifyState
+             , MonadIO
+             , Applicative
+             , Functor
+             , MonadReader VerifyEnv
+             )
+
+useCache :: Verify Bool
+useCache = (Maybe.isJust . _cacheFile) <$> RWS.ask
+
+debug :: String -> Verify ()
+debug msg =
+  Cond.ifM (Lens.view debugFlag) (RWS.liftIO (putStrLn msg)) (return ())
+
+-- | Generate a fresh variable starting with a given prefix
+freshVar :: String -> Verify String
+freshVar prefix = do
+  last <- Lens.use (nextVar . Lens.at prefix)
+  case last of
+    Just n -> do
+      nextVar . Lens.ix prefix %= (+ 1)
+      return $ "?" ++ prefix ++ show n
+    Nothing -> do
+      RWS.modify (nextVar . Lens.at prefix ?~ 0)
+      freshVar prefix
 
 -- | Find the location of a variable in the context. Since this may have to add
 -- a location for the variable in the scope or as a local, we also return an
@@ -394,45 +465,6 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
               ]
 findLValue expr _ _ = error $ "invalid l-value: " ++ show expr
 
--- Debugging functions for printing out a context in a nicer way.
--- | Turn a local into a human-readable string
-printLocal :: Var -> Local -> String
-printLocal name loc =
-  "\t\t" ++ name ++ " = " ++ show (loc ^. Q.localValue) ++ " : " ++
-  show (loc ^. Q.localType)
-
--- | Turn a method into a human-readable string
-printMethod :: Var -> Method -> String
-printMethod name mtd =
-  L.unlines ["\t\t" ++ name ++ " { " ++ show (mtd ^. Q.methodBody) ++ " } "]
-
--- | Turn an object into a human-readable string
-printObject :: Addr -> Object -> String
-printObject addr obj =
-  L.unlines $
-  [ "  " ++ show addr ++ " |-> "
-  , "\tAdversary?: " ++ show (obj ^. Q.objAdversary)
-  , "\tLocals:"
-  ] ++
-  (map (uncurry printLocal) (M.toList (obj ^. Q.objLocals))) ++
-  ["\tMethods:"] ++
-  (map (uncurry printMethod) (M.toList (obj ^. Q.objMethods)))
-
--- | Turn a context into a human-readable string
-printContext :: Context -> String
-printContext ctx =
-  L.unlines
-    [ "this: " ++ show (ctx ^. Q.ctxThis)
-    , "scope: " ++ show (ctx ^. Q.ctxScope)
-    , "objects: " ++
-      L.intercalate
-        "\n"
-        (map (uncurry printObject) (M.toList (ctx ^. Q.ctxObjs)))
-    ]
-
-evalError :: String -> Context -> a
-evalError s ctx = error (s ++ "\nContext:\n" ++ printContext ctx)
-
 lookupVar :: Var -> Context -> Value
 lookupVar x ctx
   | Just (place, ctx', _) <- findVar x ctx
@@ -499,21 +531,19 @@ findMethod addr name ctx =
 
 callMethod :: Addr -> Method -> [Value] -> Context -> PathCond -> Verify Results
 callMethod addr mtd args ctx pathCond =
-  let scope =
-        M.fromList
-          (L.zip
-             (map fst (mtd ^. Q.methodFormals))
-             (L.zip args (map snd (mtd ^. Q.methodFormals))))
+  let (vars, typs) = L.unzip (mtd ^. Q.methodFormals)
+      scope = M.fromList (L.zip vars (L.zip args typs))
       ctx' = Lens.set Q.ctxThis addr (Lens.set Q.ctxScope scope ctx)
-   in Q.foreachM (symEval (mtd ^. Q.methodBody, ctx', pathCond)) $ \(val, ctx'', pathCond') ->
-        return
-          [ ( val
-            , Lens.set
-                Q.ctxThis
-                (ctx ^. Q.ctxThis)
-                (Lens.set Q.ctxScope (ctx ^. Q.ctxScope) ctx'')
-            , pathCond')
-          ]
+   in do results <- symEval (mtd ^. Q.methodBody, ctx', pathCond)
+         return $ results &
+           map
+             (\(val, ctx'', pathCond') ->
+                ( val
+                , Lens.set
+                    Q.ctxThis
+                    (ctx ^. Q.ctxThis)
+                    (Lens.set Q.ctxScope (ctx ^. Q.ctxScope) ctx'')
+                , pathCond'))
 
 -- | Produce a list of symbolic values to use for method calls.
 symArgs :: Context -> [(Var, Type)] -> Verify ([Value], Context, PathCond)
@@ -521,15 +551,15 @@ symArgs ctx args =
   Monad.foldM
     (\(vals, ctx', pathCond) (name, typ) -> do
        (val, ctx'', pathCond') <- typedValue name typ ctx'
-       return (vals ++ [val], ctx'', pathCond' ++ pathCond))
+       return (vals ++ [val], ctx'', pathCond' ++ pathCond) -- FIXME: vals ++ [val] is quadratic.  Also weird that path conditions are in reverse order from values.
+     )
     ([], ctx, [])
     args
 
--- symArgs args = mapM (uncurry typedValue) args
 typedValue :: Var -> Type -> Context -> Verify (Value, Context, PathCond)
 typedValue name (TTuple ts) ctx = do
   (vals, ctx', pathCond') <- symArgs ctx (L.zip (L.repeat name) ts)
-  return $ (VTuple vals, ctx', pathCond')
+  return (VTuple vals, ctx', pathCond')
 typedValue _ (TNamed t) ctx
   | Just tdecl <- ctx ^? Q.ctxTypeDecls . Lens.ix t = do
     (args, ctx', pathCond') <-
@@ -563,8 +593,8 @@ typedValue name t ctx = do
 
 -- | Introduce path split for values that can be simplified further
 -- with additional assumptions in the path condition:
-force :: Value -> Context -> PathCond -> Verify [Result]
-force e@(Sym (Lookup k m)) ctx pathCond
+force :: Value -> Context -> PathCond -> Verify Results
+force v@(Sym (Lookup k m)) ctx pathCond
   | TMap tk tv <- typeOfValue ctx m
   , valueHasType ctx k tk
   -- If we are trying to call a method on a symbolic map lookup, we split the
@@ -574,24 +604,18 @@ force e@(Sym (Lookup k m)) ctx pathCond
    = do
     (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
     return
-      [ (VInt 0, ctx, (e :=: VInt 0) : pathCond)
-      , (fv, ctx', (e :=: fv) : Not (e :=: VInt 0) : pathCond' ++ pathCond)
+      [ (VInt 0, ctx, (v :=: VInt 0) : pathCond)
+      , (fv, ctx', (v :=: fv) : Not (v :=: VInt 0) : pathCond' ++ pathCond)
       ]
-force (symVal@(Sym (SymVar _ (TNamed t)))) ctx _pathCond
+force (v@(Sym (SymVar _ (TNamed t)))) ctx _pathCond
   -- Allocate a new object of the required type
  = do
   (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
-  return [(VRef a', ctx', symVal :=: VRef a' : pathCond')]
+  return [(VRef a', ctx', v :=: VRef a' : pathCond')]
 force v ctx pathCond = return [(v, ctx, pathCond)]
 
 -- | `symEvalCall obj name args ...` symbolically evaluates a method call to method name on object obj
-symEvalCall ::
-     Value
-  -> Var
-  -> [Value]
-  -> Context
-  -> PathCond
-  -> Verify [(Value, Context, PathCond)]
+symEvalCall :: Value -> Var -> [Value] -> Context -> PathCond -> Verify Results
 symEvalCall (VRef addr) name args ctx pathCond
   | Just obj <- ctx ^. Q.ctxObjs . Lens.at addr
   , obj ^. Q.objAdversary =
@@ -700,23 +724,6 @@ symEvalCall (VInt 0) _ _ ctx pathCond = return [((VInt 0), ctx, pathCond)]
 symEvalCall obj name _ ctx _ =
   error $ "Bad method call[" ++ show obj ++ "]: " ++ name ++ "\n" ++ show ctx
 
-lookupInTuple :: Value -> Value -> Value
-lookupInTuple (VTuple vs) (VInt i)
-  | fromInteger i < L.length vs = vs !! fromInteger i
-  | otherwise = error "Invalid tuple index"
-lookupInTuple tup (Sym sidx) = Sym (Proj tup (Sym sidx))
-lookupInTuple (Sym sv) vidx = Sym (Proj (Sym sv) vidx)
-lookupInTuple _ _ = error "invalid tuple lookup"
-
-isSymbolic :: Value -> Bool
-isSymbolic (Sym _) = True
-isSymbolic _ = False
-
--- | Returns the name of the variable for variable expressions, and @Nothing@ if not.
-fromEVar :: Expr -> Maybe String
-fromEVar (EVar x) = Just x
-fromEVar _ = Nothing
-
 -- | Evaluate a pattern-match expression with list of variables on LHS and another expression
 -- on the right-hand side. This corresponds to writing @<x1, .., xn> = rhs@. Currently,
 -- this does not support nested patterns.
@@ -754,6 +761,9 @@ symEvalPatternMatch pat rhs ctx pathCond
   | otherwise =
     error $ "Nested patterns not supported yet: " ++ show pat ++ " = " ++
     show rhs
+  where
+    fromEVar (EVar x) = Just x
+    fromEVar _ = Nothing
 
 symEval :: Config -> Verify Results
 symEval (ENop, ctx, pathCond) = return [(VNil, ctx, pathCond)]
@@ -1087,7 +1097,3 @@ symEval (EIntersect e1 e2, ctx, pathCond) = do
                _ ->
                  error $ "Tried to union non-set values: " ++ show v1 ++ " ∪ " ++
                  show v2
-
-emptyVerifyEnv :: VerifyEnv
-emptyVerifyEnv =
-  VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False}
