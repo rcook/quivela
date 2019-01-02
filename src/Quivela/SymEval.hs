@@ -6,39 +6,36 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.SymEval
-  ( Verify(..)
-  , runVerify
     -- * VerifyEnv
-  , VerifyEnv(..)
-    -- lenses
+  ( VerifyEnv
   , cacheFile
   , debugFlag
   , writeAllVCsToFile
     -- empty
   , emptyVerifyEnv
-
-  , debug
-  , freshVar
-  , symArgs
-  , symEval
-  , useCache
-
     -- * VerifyState
-  , VerifyState(..)
-    -- lenses
+  , VerifyState
   , alreadyVerified
   , verifyPrefixCtx
   , z3Proc
     -- empty
   , newVerifyState
+    -- * Verify
+  , Verify
+  , debug
+  , freshVar
+  , runVerify
+  , useCache
+    -- * Symbolic evaluation
+  , symArgs
+  , symEval
   ) where
 
-import qualified Control.Arrow as Arrow
 import qualified Control.Conditional as Cond
 import qualified Control.Lens as Lens
 import Control.Lens ((%=), (.~), (?~), (^.), (^?))
-import qualified Control.Monad.RWS.Strict as Monad
 import Control.Monad.Fail (MonadFail)
+import qualified Control.Monad.RWS.Strict as Monad
 import qualified Control.Monad.RWS.Strict as RWS
 import Control.Monad.RWS.Strict (MonadIO, MonadReader, MonadState, RWST)
 import qualified Data.ByteString as ByteString
@@ -51,7 +48,6 @@ import qualified Data.Set as S
 import qualified Quivela.Language as Q
 import Quivela.Language
   ( Addr
-  , AllocStrategy(..)
   , Config
   , Context
   , Expr(..)
@@ -59,11 +55,12 @@ import Quivela.Language
   , FunDecl(..)
   , Local(..)
   , Method(..)
-  , MethodKind(..)
   , Object(..)
   , PathCond
+  , PathCtx
   , Place(..)
   , Prop(..)
+  , Result
   , Results
   , SymValue(..)
   , Type(..)
@@ -81,79 +78,20 @@ import qualified System.Process as Proc
 import System.Process (ProcessHandle)
 
 -- ----------------------------------------------------------------------------
--- Util
+-- Pure type inference
 -- ----------------------------------------------------------------------------
-
-isSymbolic :: Value -> Bool
-isSymbolic (Sym _) = True
-isSymbolic _ = False
-
--- | Value to use to initialize new variables:
-defaultValue :: Value
-defaultValue = VInt 0
-
-lookupInTuple :: Value -> Value -> Value
-lookupInTuple (VTuple vs) (VInt i)
-  | fromInteger i < L.length vs = vs !! fromInteger i
-  | otherwise = error "Invalid tuple index"
-lookupInTuple tup (Sym sidx) = Sym (Proj tup (Sym sidx))
-lookupInTuple (Sym sv) vidx = Sym (Proj (Sym sv) vidx)
-lookupInTuple _ _ = error "invalid tuple lookup"
-
--- Debugging functions for printing out a context in a nicer way.
--- | Turn a local into a human-readable string
-printLocal :: Var -> Local -> String
-printLocal name loc =
-  "\t\t" ++ name ++ " = " ++ show (loc ^. Q.localValue) ++ " : " ++
-  show (loc ^. Q.localType)
-
--- | Turn a method into a human-readable string
-printMethod :: Var -> Method -> String
-printMethod name mtd =
-  L.unlines ["\t\t" ++ name ++ " { " ++ show (mtd ^. Q.methodBody) ++ " } "]
-
--- | Turn an object into a human-readable string
-printObject :: Addr -> Object -> String
-printObject addr obj =
-  L.unlines $
-  [ "  " ++ show addr ++ " |-> "
-  , "\tAdversary?: " ++ show (obj ^. Q.objAdversary)
-  , "\tLocals:"
-  ] ++
-  (map (uncurry printLocal) (M.toList (obj ^. Q.objLocals))) ++
-  ["\tMethods:"] ++
-  (map (uncurry printMethod) (M.toList (obj ^. Q.objMethods)))
-
--- | Turn a context into a human-readable string
-printContext :: Context -> String
-printContext ctx =
-  L.unlines
-    [ "this: " ++ show (ctx ^. Q.ctxThis)
-    , "scope: " ++ show (ctx ^. Q.ctxScope)
-    , "objects: " ++
-      L.intercalate
-        "\n"
-        (map (uncurry printObject) (M.toList (ctx ^. Q.ctxObjs)))
-    ]
-
-evalError :: String -> Context -> a
-evalError s ctx = error (s ++ "\nContext:\n" ++ printContext ctx)
-
-------------------------------------------------------------
--- * Pure type inference.
 --
 -- The inference is pure in the sense that it does not use the ambient environment
 -- or state introduced later.  There are two methods:
 --   - typeOfX
 --   - XHasType
 -- where X ∈ {Value, SymValue}.
-
 -- | Infer type of a symbolic value. Will return 'TAny' for most operations
 -- except plain variables and inserting into a well-typed map.
 typeOfSymValue :: Context -> SymValue -> Type
 typeOfSymValue _ (SymVar _ t) = t
 typeOfSymValue _ (Proj _ _) = TAny
--- we could have more precise type information here if the idx was constant
+  -- we could have more precise type information here if the idx was constant
 typeOfSymValue ctx (Insert key val m)
   | TMap tk tv <- typeOfValue ctx m =
     let tk' =
@@ -165,7 +103,8 @@ typeOfSymValue ctx (Insert key val m)
             then tv
             else TAny
      in TMap tk' tv'
-  | otherwise = TMap (typeOfValue ctx key) (typeOfValue ctx val) -- Insert always calls turns 'map' into an actual TMap
+  | otherwise = TMap (typeOfValue ctx key) (typeOfValue ctx val)
+      -- Insert always turns 'map' into an actual TMap
 typeOfSymValue _ (Lookup _ _) = TAny
   -- we don't know if idx is going to be in the map, so
   -- we can't give more precise type information here.
@@ -175,7 +114,7 @@ typeOfSymValue ctx (Add v1 v2)
   | otherwise = TAny
 typeOfSymValue ctx (Ref a)
   -- If the reference points to an object, use that object's type of the reference
-  -- I'm not sure if we shouldn't instead distinguish between a reference to a typed
+  -- schoepe@: I'm not sure if we shouldn't instead distinguish between a reference to a typed
   -- object and that typed object instead on the type level.
   | Just obj <- ctx ^. Q.ctxObjs . Lens.at a = obj ^. Q.objType
   | otherwise = TAny
@@ -185,9 +124,9 @@ typeOfSymValue _ctx v = error $ "Not implemented: typeOfSymValue: " ++ show v
 -- | Infer the type of a value. 'TAny' is returned when the inference can't
 -- figure out anything more precise.
 typeOfValue :: Context -> Value -> Type
-typeOfValue _ctx (VInt 0) = TAny
-typeOfValue _ctx (VInt _) = TInt
-typeOfValue _ctx VNil = TAny
+typeOfValue _ (VInt 0) = TAny
+typeOfValue _ (VInt _) = TInt
+typeOfValue _ VNil = TAny
 typeOfValue ctx (Sym sv) = typeOfSymValue ctx sv
 typeOfValue ctx (VTuple vs) = TTuple $ map (typeOfValue ctx) vs
 typeOfValue ctx (VSet vs) = TSet tv
@@ -198,8 +137,8 @@ typeOfValue ctx (VSet vs) = TSet tv
       | otherwise = TAny
 typeOfValue ctx (VMap vs) = TMap tk tv
   where
-    keyTypes = map (typeOfValue ctx) . M.keys $ vs
-    valueTypes = map (typeOfValue ctx) . M.elems $ vs
+    keyTypes = map (typeOfValue ctx) $ M.keys vs
+    valueTypes = map (typeOfValue ctx) $ M.elems vs
     tk
       | [t] <- L.nub keyTypes = t -- all keys have same type
       | otherwise = TAny
@@ -249,7 +188,6 @@ symValueHasType _ _ _ = False
 -- The monad is simply a newtype around RWST with custom read-only environment
 -- and read-write state.  The inner monad is IO, as we are constantly
 -- communicating with Z3 over a pipe.
-
 -- | The fixed environment for symbolic evaluation.
 data VerifyEnv = VerifyEnv
   { _cacheFile :: Maybe FilePath
@@ -264,12 +202,13 @@ data VerifyEnv = VerifyEnv
 
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv =
-  VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False, _writeAllVCsToFile = False}
+  VerifyEnv
+    { _cacheFile = Nothing
+    , _debugFlag = True
+    , _splitEq = False
+    , _writeAllVCsToFile = False
+    }
 
--- right now, we only need the same environment as symbolic evaluation, so we reuse
--- that type here.
--- | Keeps track of fresh variables and, a z3 process, and which conditions
--- we already verified successfully in the past.
 data VerifyState = VerifyState
   { _alreadyVerified :: Set (Expr, Expr)
     -- ^ A cache of steps that we already verified before
@@ -361,14 +300,16 @@ freshVar prefix = do
       RWS.modify (nextVar . Lens.at prefix ?~ 0)
       freshVar prefix
 
+-- ----------------------------------------------------------------------------
+-- Variables
+-- ----------------------------------------------------------------------------
 -- | Find the location of a variable in the context. Since this may have to add
 -- a location for the variable in the scope or as a local, we also return an
 -- updated context to use with the returned 'Place'. The 'Bool' component of the
 -- result indicates if the context had to be modified.
-findVar :: Var -> Context -> Maybe (Place, Context, Bool)
+findVar :: Var -> Context -> (Place, Context, Bool)
 findVar x ctx
   | Just (_, t) <- M.lookup x (ctx ^. Q.ctxScope) =
-    Just $
     ( Place
         { _placeLens = Q.ctxScope . Lens.ix x . Lens._1
         , _placeConst = False
@@ -378,7 +319,6 @@ findVar x ctx
     , False)
   | Just loc <-
      ctx ^? Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objLocals . Lens.ix x =
-    Just $
     ( Place
         { _placeLens =
             Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objLocals . Lens.ix x .
@@ -393,16 +333,14 @@ findVar x ctx
   -- FIXME: this should probably check if we are inside a method instead, but currently
   -- we don't store whether this is the case in the context.
   | ctx ^. Q.ctxThis /= 0 =
-    Just $
     ( Place
         { _placeLens = Q.ctxScope . Lens.ix x . Lens._1
         , _placeConst = False
         , _placeType = TAny
         }
-    , Lens.set (Q.ctxScope . Lens.at x) (Just (defaultValue, TAny)) ctx
+    , Lens.set (Q.ctxScope . Lens.at x) (Just (Q.defaultValue, TAny)) ctx
     , True)
   | otherwise =
-    Just $
     ( Place
         { _placeLens =
             Q.ctxObjs . Lens.ix 0 . Q.objLocals . Lens.ix x . Q.localValue
@@ -411,10 +349,13 @@ findVar x ctx
         }
     , Lens.set
         (Q.ctxObjs . Lens.ix 0 . Q.objLocals . Lens.at x)
-        (Just (Local defaultValue TAny False))
+        (Just (Local Q.defaultValue TAny False))
         ctx
     , True)
 
+-- ----------------------------------------------------------------------------
+-- LValues
+-- ----------------------------------------------------------------------------
 -- | Find or create the place of a valid l-value expression (i.e. a variable,
 -- a projection, or an indexing expression with an l-value to the left of the [.
 -- The result value has the same structure as the result of 'findVar', except
@@ -426,8 +367,9 @@ findLValue ::
   -> Verify [Maybe (Place, Context, PathCond, Bool)]
 findLValue (EVar x) ctx pathCond =
   return
-    [ fmap (\(place, ctx', created) -> (place, ctx', pathCond, created)) $
-      findVar x ctx
+    [ Just $
+      (\(place, ctx', created) -> (place, ctx', pathCond, created))
+        (findVar x ctx)
     ]
 findLValue (EProj obj name) ctx pathCond = do
   Q.foreachM (symEval (obj, ctx, pathCond)) $ \case
@@ -435,17 +377,18 @@ findLValue (EProj obj name) ctx pathCond = do
       | Just loc <-
          ctx' ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name ->
         return
-          [ Just $
-            ( Place
-                { _placeLens =
-                    Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name .
-                    Q.localValue
-                , _placeConst = loc ^. Q.localImmutable
-                , _placeType = loc ^. Q.localType
-                }
-            , ctx'
-            , pathCond'
-            , False)
+          [ Just
+              ( Place
+                  { _placeLens =
+                      Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name .
+                      Q.localValue
+                  , _placeConst = loc ^. Q.localImmutable
+                  , _placeType = loc ^. Q.localType
+                  }
+              , ctx'
+              , pathCond'
+              , False -- TODO: Are we sure about False here if ctx != ctx'?
+               )
           ]
     _ -> return [Nothing]
 findLValue expr@(EIdx obj idx) ctx pathCond =
@@ -462,7 +405,7 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
                       ( Place
                           { _placeLens =
                               (place ^. Q.placeLens) . Q.valMap . Lens.ix idxVal
-                          , _placeType = TAny -- FIXME
+                          , _placeType = TAny -- FIXME: Put the map value type here
                           , _placeConst = False
                           }
                       , ctx''
@@ -478,12 +421,12 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
                       ( Place
                           { _placeLens =
                               (place ^. Q.placeLens) . Q.valMap . Lens.ix idxVal
-                          , _placeType = TAny -- FIXME
+                          , _placeType = TAny -- FIXME: Put the map value type here
                           , _placeConst = False
                           }
                       , Lens.set
                           ((place ^. Q.placeLens) . Q.valMap . Lens.at idxVal)
-                          (Just defaultValue)
+                          (Just Q.defaultValue)
                           ctx''
                       , pathCond''
                       , True)
@@ -508,291 +451,98 @@ findLValue expr@(EIdx obj idx) ctx pathCond =
                   ( Place
                       { _placeLens =
                           (place ^. Q.placeLens) . Q.valMap . Lens.ix idxVal
-                      , _placeType = TAny -- FIXME
+                      , _placeType = TAny -- FIXME: Put the map value type here
                       , _placeConst = False
                       }
                   , Lens.set
                       (place ^. Q.placeLens)
-                      (VMap $ M.fromList [(idxVal, defaultValue)])
+                      (VMap $ M.fromList [(idxVal, Q.defaultValue)])
                       ctx''
                   , pathCond''
                   , True)
               ]
 findLValue expr _ _ = error $ "invalid l-value: " ++ show expr
 
-lookupVar :: Var -> Context -> Value
-lookupVar x ctx
-  | Just (place, ctx', _) <- findVar x ctx
-  , Just v <- ctx' ^? (place ^. Q.placeLens) = v
-  | otherwise = evalError ("No such variable: " ++ x) ctx
-
--- | Add a method definition to the context
-defineMethod :: Var -> [(Var, Type)] -> Expr -> MethodKind -> Context -> Context
-defineMethod name formals body kind ctx
-  | Just _obj <- ctx ^? Q.ctxObjs . Lens.at (ctx ^. Q.ctxThis) =
-    Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objMethods . Lens.at name ?~
-    (Method
-       { _methodName = name
-       , _methodFormals = formals
-       , _methodBody = body
-       , _methodKind = kind
-       }) $
-    ctx
-  | otherwise = error "failed to define method"
-
--- | Symbolically evaluate a list of field initializations in a given context and path condition
--- and return a list of possible executions of this list. Each element in the result is a list
--- of the same length where each field is evaluated, together with a context
-symEvalFields ::
-     [Field]
-  -> Context
-  -> PathCond
-  -> Verify [([(Var, (Value, Type, Bool))], Context, PathCond)]
-symEvalFields [] ctx pathCond = return [([], ctx, pathCond)]
-symEvalFields (field:fields) ctx pathCond =
-  Q.foreachM (symEval (field ^. Q.fieldInit, ctx, pathCond)) $ \(fieldVal, ctx', pathCond') -> do
-    Cond.unless (valueHasType ctx' fieldVal (field ^. Q.fieldType)) $ do
-      error $ "Ill-typed argument for field initialization: " ++ show fieldVal ++
-        " is not a subtype of " ++
-        show (field ^. Q.fieldType)
-    Q.foreachM (symEvalFields fields ctx' pathCond') $ \(evaledFields, ctx'', pathCond'') ->
-      return
-        [ ( ( field ^. Q.fieldName
-            , (fieldVal, field ^. Q.fieldType, field ^. Q.immutable)) :
-            evaledFields
-          , ctx''
-          , pathCond'')
-        ]
-
-symEvalList ::
-     [Expr] -> Context -> PathCond -> Verify [([Value], Context, PathCond)]
-symEvalList [] ctx pathCond = return [([], ctx, pathCond)]
-symEvalList (e:es) ctx pathCond =
-  Q.foreachM (symEval (e, ctx, pathCond)) $ \(val, ctx', pathCond') ->
-    Q.foreachM (symEvalList es ctx' pathCond') $ \(evaledList, ctx'', pathCond'') ->
-      return [(val : evaledList, ctx'', pathCond'')]
-
--- | Return an unused address in the current context
-nextAddr :: Context -> Addr
-nextAddr ctx =
-  case ctx ^. Q.ctxAllocStrategy of
-    Increase -> L.maximum (M.keys (ctx ^. Q.ctxObjs)) + 1
-    Decrease -> L.minimum (M.keys (ctx ^. Q.ctxObjs)) - 1
-
--- | Try to find a method of the given name in the object at that address
-findMethod :: Addr -> Var -> Context -> Maybe Method
-findMethod addr name ctx =
-  ctx ^? Q.ctxObjs . Lens.ix addr . Q.objMethods . Lens.ix name
-
-callMethod :: Addr -> Method -> [Value] -> Context -> PathCond -> Verify Results
-callMethod addr mtd args ctx pathCond =
-  let (vars, typs) = L.unzip (mtd ^. Q.methodFormals)
-      scope = M.fromList (L.zip vars (L.zip args typs))
-      ctx' = Lens.set Q.ctxThis addr (Lens.set Q.ctxScope scope ctx)
-   in do results <- symEval (mtd ^. Q.methodBody, ctx', pathCond)
-         return $ results &
-           map
-             (\(val, ctx'', pathCond') ->
-                ( val
-                , Lens.set
-                    Q.ctxThis
-                    (ctx ^. Q.ctxThis)
-                    (Lens.set Q.ctxScope (ctx ^. Q.ctxScope) ctx'')
-                , pathCond'))
-
--- | Produce a list of symbolic values to use for method calls.
-symArgs :: Context -> [(Var, Type)] -> Verify ([Value], Context, PathCond)
-symArgs ctx args =
-  Monad.foldM
-    (\(vals, ctx', pathCond) (name, typ) -> do
-       (val, ctx'', pathCond') <- typedValue name typ ctx'
-       return (vals ++ [val], ctx'', pathCond' ++ pathCond) -- FIXME: vals ++ [val] is quadratic.  Also weird that path conditions are in reverse order from values.
-     )
-    ([], ctx, [])
-    args
-
-typedValue :: Var -> Type -> Context -> Verify (Value, Context, PathCond)
-typedValue name (TTuple ts) ctx = do
-  (vals, ctx', pathCond') <- symArgs ctx (L.zip (L.repeat name) ts)
-  return (VTuple vals, ctx', pathCond')
-typedValue _ (TNamed t) ctx
-  | Just tdecl <- ctx ^? Q.ctxTypeDecls . Lens.ix t = do
-    (args, ctx', pathCond') <-
-      symArgs
-        ctx
-        (map
-           (\(name', _immut, typ) -> (name', typ))
-           (tdecl ^. Q.typedeclFormals))
-    (val, ctx'', pathCond'') <-
-      Q.singleResult <$>
-      symEval
-        ( ENewConstr
-            t
-            (L.zip
-               (map (\(name', _, _) -> name') (tdecl ^. Q.typedeclFormals))
-               (map EConst args))
-        , ctx'
-        , pathCond')
-    let pathCondEqs =
-          L.zipWith
-            (\(name', _typ) argVal -> Sym (Deref val name') :=: argVal)
-            (map
-               (\(name', _immut, typ) -> (name', typ))
-               (tdecl ^. Q.typedeclFormals))
-            args
-    return (val, ctx'', pathCondEqs ++ pathCond'')
-  | otherwise = error $ "No such type: " ++ t
-typedValue name t ctx = do
-  freshName <- freshVar name
-  return (Sym (SymVar freshName t), ctx, [])
-
--- | Introduce path split for values that can be simplified further
--- with additional assumptions in the path condition:
-force :: Value -> Context -> PathCond -> Verify Results
-force v@(Sym (Lookup k m)) ctx pathCond
-  | TMap tk tv <- typeOfValue ctx m
-  , valueHasType ctx k tk
-  -- If we are trying to call a method on a symbolic map lookup, we split the
-  -- path into a successful lookup and a failing one. If we have enough type
-  -- information on the map, hopefully the call will be resolved to a type for
-  -- which we know the method body.
-   = do
-    (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
-    return
-      [ (VInt 0, ctx, (v :=: VInt 0) : pathCond)
-      , (fv, ctx', (v :=: fv) : Not (v :=: VInt 0) : pathCond' ++ pathCond)
-      ]
-force (v@(Sym (SymVar _ (TNamed t)))) ctx _pathCond
-  -- Allocate a new object of the required type
- = do
-  (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
-  return [(VRef a', ctx', v :=: VRef a' : pathCond')]
-force v ctx pathCond = return [(v, ctx, pathCond)]
-
--- | `symEvalCall obj name args ...` symbolically evaluates a method call to method name on object obj
-symEvalCall :: Value -> Var -> [Value] -> Context -> PathCond -> Verify Results
-symEvalCall (VRef addr) name args ctx pathCond
-  | Just obj <- ctx ^. Q.ctxObjs . Lens.at addr
-  , obj ^. Q.objAdversary =
-    let newCalls = args : (ctx ^. Q.ctxAdvCalls)
-     in return
-          [ ( Sym (AdversaryCall newCalls)
-            , Lens.set Q.ctxAdvCalls newCalls ctx
-            , pathCond)
-          ]
-  | Just mtd <- findMethod addr name ctx = callMethod addr mtd args ctx pathCond
-  | otherwise =
-    evalError
-      ("Called non-existent method: " ++ name ++ "[" ++ show addr ++ "]")
-      ctx
-symEvalCall VNil "Z" [m] ctx pathCond = return [(Sym (Z m), ctx, pathCond)]
-symEvalCall VNil "rnd" [] ctx pathCond = symEval (ENew [] ENop, ctx, pathCond)
-symEvalCall VNil "+" [arg1, arg2] ctx pathCond
-  | isSymbolic arg1 || isSymbolic arg2 =
-    return [(Sym (Add arg1 arg2), ctx, pathCond)]
-  | VInt n <- arg1
-  , VInt m <- arg2 = return [(VInt (n + m), ctx, pathCond)]
-  | otherwise =
-    error $ "Addition of non-symbolic non-integers: " ++ show (arg1, arg2)
-symEvalCall VNil "-" [arg1, arg2] ctx pathCond
-  | isSymbolic arg1 || isSymbolic arg2 =
-    return [(Sym (Sub arg1 arg2), ctx, pathCond)]
-  | VInt n <- arg1
-  , VInt m <- arg2 = return [(VInt (n - m), ctx, pathCond)]
-  | otherwise =
-    error $ "Subtraction of non-symbolic non-integers: " ++ show (arg1, arg2)
-symEvalCall VNil "*" [arg1, arg2] ctx pathCond
-  | isSymbolic arg1 || isSymbolic arg2 =
-    return [(Sym (Mul arg1 arg2), ctx, pathCond)]
-  | VInt n <- arg1
-  , VInt m <- arg2 = return [(VInt (n * m), ctx, pathCond)]
-  | otherwise =
-    error $ "Multiplication of non-symbolic non-integers: " ++ show (arg1, arg2)
-symEvalCall VNil "/" [arg1, arg2] ctx pathCond
-  | isSymbolic arg1 || isSymbolic arg2 =
-    return [(Sym (Div arg1 arg2), ctx, pathCond)]
-  | VInt n <- arg1
-  , VInt m <- arg2 =
-    if m == 0
-      then return [((VInt 0), ctx, pathCond)]
-      else return [(VInt (n `div` m), ctx, pathCond)]
-  | otherwise =
-    error $ "Division of non-symbolic non-integers: " ++ show (arg1, arg2)
-symEvalCall VNil "<" [arg1, arg2] ctx pathCond
-  | isSymbolic arg1 || isSymbolic arg2 =
-    return [(Sym (Lt arg1 arg2), ctx, pathCond)]
-  | VInt n <- arg1
-  , VInt m <- arg2 =
-    return
-      [ ( if n < m
-            then VInt 1
-            else VInt 0
-        , ctx
-        , pathCond)
-      ]
-  | otherwise =
-    error $ "Comparison of non-symbolic non-integers: " ++ show (arg1, arg2)
-symEvalCall VNil "<=" [arg1, arg2] ctx pathCond
-  | isSymbolic arg1 || isSymbolic arg2 =
-    return [(Sym (Le arg1 arg2), ctx, pathCond)]
-  | VInt n <- arg1
-  , VInt m <- arg2 =
-    return
-      [ ( if n <= m
-            then VInt 1
-            else VInt 0
-        , ctx
-        , pathCond)
-      ]
-  | otherwise =
-    error $ "Comparison of non-symbolic non-integers: " ++ show (arg1, arg2)
-symEvalCall VNil name args ctx pathCond
-  | Just mtd <- findMethod (ctx ^. Q.ctxThis) name ctx =
-    callMethod (ctx ^. Q.ctxThis) mtd args ctx pathCond
-  | Just mtd <- findMethod 0 name ctx = callMethod 0 mtd args ctx pathCond
-  | Just funDecl <- ctx ^? Q.ctxFunDecls . Lens.ix name = do
-    Cond.unless (L.length args == L.length (funDecl ^. Q.funDeclArgs)) $ error $
-      "Wrong number of arguments in call to uninterpreted function: " ++
-      show (name, args)
-    return [(Sym (Call name args), ctx, pathCond)]
-  | otherwise = error $ "Call to non-existent method: " ++ name
-symEvalCall (Sym sv) name args ctx pathCond = do
-  forced <- force (Sym sv) ctx pathCond
-  if forced == [(Sym sv, ctx, pathCond)]
-    then do
-      debug $ "Not implemented: calls on untyped symbolic objects: (" ++ show sv ++
-        ")." ++
-        name ++
-        "(" ++
-        show args ++
-        ")"
-       -- we return a fresh variable here to encode that we have no information
-       -- about the returned value; FIXME: we should also havoc everything
-       -- the base object may have access to.
-       -- This case can still yield a provable verification condition
-       -- if the path condition is contradictory
-      fv <- freshVar "untyped_symcall"
-      return [(Sym (SymVar fv TAny), ctx, pathCond)]
-    else Q.foreachM (return forced) $ \(val, ctx', pathCond') -> do
-           symEvalCall val name args ctx' pathCond'
-symEvalCall (VInt 0) _ _ ctx pathCond = return [((VInt 0), ctx, pathCond)]
-symEvalCall obj name _ ctx _ =
-  error $ "Bad method call[" ++ show obj ++ "]: " ++ name ++ "\n" ++ show ctx
-
--- | Evaluate a pattern-match expression with list of variables on LHS and another expression
--- on the right-hand side. This corresponds to writing @<x1, .., xn> = rhs@. Currently,
--- this does not support nested patterns.
-symEvalPatternMatch :: [Expr] -> Expr -> Context -> PathCond -> Verify Results
-symEvalPatternMatch pat rhs ctx pathCond
+-- ----------------------------------------------------------------------------
+-- Symbolic evaluation
+-- ----------------------------------------------------------------------------
+symEval :: Config -> Verify Results
+symEval (ENop, ctx, pathCond) = return [(VNil, ctx, pathCond)]
+symEval (EConst v, ctx, pathCond) = return [(v, ctx, pathCond)]
+symEval (EVar x, ctx, pathCond) = return [(var, ctx, pathCond)]
+  where
+    var
+      | (place, ctx', _) <- findVar x ctx
+      , Just v <- ctx' ^? (place ^. Q.placeLens) = v
+      | otherwise = evalError ("No such variable: " ++ x) ctx
+symEval (ETuple es, ctx, pathCond) =
+  Q.foreachM (symEvalList (es, ctx, pathCond)) $ \(vs, ctx', pathCond') ->
+    return [(VTuple vs, ctx', pathCond')]
+symEval (ETupleProj etup eidx, ctx, pathCond) =
+  Q.foreachM (symEval (etup, ctx, pathCond)) $ \(vtup, ctx', pathCond') ->
+    Q.foreachM (symEval (eidx, ctx', pathCond')) $ \(vidx, ctx'', pathCond'') ->
+      return [(lookupInTuple vtup vidx, ctx'', pathCond'')]
+  where
+    lookupInTuple :: Value -> Value -> Value
+    lookupInTuple (VTuple vs) (VInt i)
+      | fromInteger i < L.length vs = vs !! fromInteger i
+      | otherwise = error "Invalid tuple index"
+    lookupInTuple tup i@(Sym _) = Sym (Proj tup i)
+    lookupInTuple tup@(Sym _) i = Sym (Proj tup i)
+    lookupInTuple _ _ = error "Invalid tuple lookup"
+symEval (EProj obj name, ctx, pathCond) =
+  Q.foreachM (symEval (obj, ctx, pathCond)) $ \(val, ctx', pathCond') ->
+    case val of
+      VRef addr
+        | Just loc <-
+           ctx' ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name ->
+          return [(loc ^. Q.localValue, ctx', pathCond')]
+      Sym sv
+        -- we might be able to make progress from here by forcing
+        -- the receiver value to something more concrete:
+       -> do
+        forced <- force (Sym sv, ctx, pathCond)
+        if forced == [(val, ctx', pathCond')]
+          then return [(Sym (Deref val name), ctx', pathCond')]
+          else Q.foreachM (pure forced) $ \(val', ctx'', pathCond'') -> do
+                 symEval (EProj (EConst val') name, ctx'', pathCond'')
+      _ -> return [(Sym (Deref val name), ctx', pathCond')]
+symEval (EIdx base idx, ctx, pathCond) =
+  Q.foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
+    Q.foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
+      case baseVal of
+        VInt 0 -> return [(VInt 0, ctx'', pathCond'')] -- 0 is the empty map
+        VMap vals ->
+          if Q.isSym idxVal
+            then return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
+            else case M.lookup idxVal vals of
+                   Just val -> return [(val, ctx'', pathCond'')]
+                   Nothing -- if we can't find the value in the map, keep the lookup symbolic:
+                    ->
+                     if Q.isSym idxVal
+                       then return
+                              [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
+                       else return [((VInt 0), ctx'', pathCond'')]
+        Sym _ -> return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
+        _ -> return [((VInt 0), ctx'', pathCond'')]
+symEval (EAssign (ETuple pat) rhs, ctx, pathCond)
+  -- Evaluate a pattern-match expression with list of variables on LHS and another expression
+  -- on the right-hand side. This corresponds to writing @<x1, .., xn> = rhs@. Currently,
+  -- this does not support nested patterns.
   -- check that all elements of the pattern are just simple variables
-  | Just vars <- Monad.sequence $ map fromEVar pat =
+  | Just vars <-
+     Monad.sequence $
+     map
+       (\case
+          EVar x -> Just x
+          _ -> Nothing)
+       pat =
     Q.foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, _ctx', _pathCond') ->
       let (lvalues, ctx'') =
             L.foldr
               (\var (places, cx) ->
                  case findVar var cx of
-                   Just (place, cx', _) -> (place : places, cx')
-                   Nothing -> error $ "Not a valid l-value: " ++ show var)
+                   (place, cx', _) -> (place : places, cx'))
               ([], ctx)
               vars
           (rhsVals, projEq) =
@@ -816,58 +566,6 @@ symEvalPatternMatch pat rhs ctx pathCond
   | otherwise =
     error $ "Nested patterns not supported yet: " ++ show pat ++ " = " ++
     show rhs
-  where
-    fromEVar (EVar x) = Just x
-    fromEVar _ = Nothing
-
-symEval :: Config -> Verify Results
-symEval (ENop, ctx, pathCond) = return [(VNil, ctx, pathCond)]
-symEval (EConst v, ctx, pathCond) = return [(v, ctx, pathCond)]
-symEval (EVar x, ctx, pathCond) = return [(lookupVar x ctx, ctx, pathCond)]
-symEval (ETuple es, ctx, pathCond) =
-  Q.foreachM (symEvalList es ctx pathCond) $ \(vs, ctx', pathCond') ->
-    return [(VTuple vs, ctx', pathCond')]
-symEval (ETupleProj etup eidx, ctx, pathCond) =
-  Q.foreachM (symEval (etup, ctx, pathCond)) $ \(vtup, ctx', pathCond') ->
-    Q.foreachM (symEval (eidx, ctx', pathCond')) $ \(vidx, ctx'', pathCond'') ->
-      return [(lookupInTuple vtup vidx, ctx'', pathCond'')]
-symEval ((EProj obj name), ctx, pathCond) =
-  Q.foreachM (symEval (obj, ctx, pathCond)) $ \(val, ctx', pathCond') ->
-    case val of
-      VRef addr
-        | Just loc <-
-           ctx' ^? Q.ctxObjs . Lens.ix addr . Q.objLocals . Lens.ix name ->
-          return [(loc ^. Q.localValue, ctx', pathCond')]
-      Sym sv
-        -- we might be able to make progress from here by forcing
-        -- the receiver value to something more concrete:
-       -> do
-        forced <- force (Sym sv) ctx pathCond
-        if forced == [(val, ctx', pathCond')]
-          then return [(Sym (Deref val name), ctx', pathCond')]
-          else Q.foreachM (pure forced) $ \(val', ctx'', pathCond'') -> do
-                 symEval (EProj (EConst val') name, ctx'', pathCond'')
-      _ -> return [(Sym (Deref val name), ctx', pathCond')]
-symEval (EIdx base idx, ctx, pathCond) =
-  Q.foreachM (symEval (base, ctx, pathCond)) $ \(baseVal, ctx', pathCond') ->
-    Q.foreachM (symEval (idx, ctx', pathCond')) $ \(idxVal, ctx'', pathCond'') ->
-      case baseVal of
-        VInt 0 -> return [(VInt 0, ctx'', pathCond'')] -- 0 is the empty map
-        VMap vals ->
-          if isSymbolic idxVal
-            then return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
-            else case M.lookup idxVal vals of
-                   Just val -> return [(val, ctx'', pathCond'')]
-                   Nothing -- if we can't find the value in the map, keep the lookup symbolic:
-                    ->
-                     if isSymbolic idxVal
-                       then return
-                              [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
-                       else return [((VInt 0), ctx'', pathCond'')]
-        Sym _ -> return [(Sym (Lookup idxVal baseVal), ctx'', pathCond'')]
-        _ -> return [((VInt 0), ctx'', pathCond'')]
-symEval (EAssign (ETuple pat) rhs, ctx, pathCond) =
-  symEvalPatternMatch pat rhs ctx pathCond
 symEval (EAssign lhs rhs, ctx, pathCond) =
   Q.foreachM (symEval (rhs, ctx, pathCond)) $ \(rhsVal, ctx', pathCond') ->
     Q.foreachM (findLValue lhs ctx' pathCond') $ \case
@@ -885,18 +583,24 @@ symEval (EAssign lhs rhs, ctx, pathCond) =
 symEval (EIf cnd thn els, ctx, pathCond) = do
   Q.foreachM (symEval (cnd, ctx, pathCond)) handle
   where
-    handle (cndVal, ctx', pathCond')
-      | isSymbolic cndVal = do
-        thnPaths <- symEval (thn, ctx', Not (cndVal :=: (VInt 0)) : pathCond')
-        elsPaths <- symEval (els, ctx', cndVal :=: (VInt 0) : pathCond')
+    handle (cndVal, c, p)
+      | Q.isSym cndVal = do
+        thnPaths <- symEval (thn, c, Not (cndVal :=: VInt 0) : p)
+        elsPaths <- symEval (els, c, cndVal :=: VInt 0 : p)
         return $ thnPaths ++ elsPaths
-      | cndVal == VInt 0 = symEval (els, ctx', pathCond')
-      | otherwise = symEval (thn, ctx', pathCond')
+      | cndVal == VInt 0 = symEval (els, c, p)
+      | otherwise = symEval (thn, c, p)
 symEval (ESeq e1 e2, ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(_, ctx', pathCond') ->
     symEval (e2, ctx', pathCond')
-symEval (EMethod name formals body mtdKind, ctx, pathCond) = do
-  return [(VNil, defineMethod name formals body mtdKind ctx, pathCond)]
+symEval (EMethod name formals body kind, ctx, pathCond) =
+  let ctx'
+        | Just _ <- ctx ^? Q.ctxObjs . Lens.at (ctx ^. Q.ctxThis) =
+          Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objMethods . Lens.at name ?~
+          (Method name formals body kind) $
+          ctx
+        | otherwise = error "failed to define method"
+   in return [(VNil, ctx', pathCond)]
 symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
   Q.foreachM (findLValue lval ctx pathCond) $ \case
     Just (place, ctx', pathCond', False)
@@ -906,14 +610,13 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
             ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
             , ctx'
             , pathCond')
-        return . map (\(_, ctx'', pathCond'') -> (oldVal, ctx'', pathCond'')) $
-          updPaths
+        return $ map (\(_, c, p) -> (oldVal, c, p)) updPaths
     _ -> error $ "Invalid l-value in post-increment: " ++ show lval
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     Q.foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
       doSplit <- Lens.view splitEq
-      if (isSymbolic v1 || isSymbolic v2) && (v1 /= v2)
+      if (Q.isSym v1 || Q.isSym v2) && (v1 /= v2)
         then if doSplit
                then return
                       [ (VInt 0, ctx'', Not (v1 :=: v2) : pathCond'')
@@ -924,7 +627,7 @@ symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
                         , ctx''
                         , pathCond'')
                       ]
-        else if v1 == v2
+        else if v1 == v2 -- FIXME: Is this sound?  If the values are Haskell-equal, 1 makes sense, but it's not obvious to me that non-Haskell-equal values are definitely not Quivela-equal.
                then return [(VInt 1, ctx'', pathCond'')]
                else return [(VInt 0, ctx'', pathCond'')]
 symEval (ECall (EConst VNil) "!" [e], ctx, pathCond) = do
@@ -935,65 +638,50 @@ symEval (ECall (EConst VNil) "!" [e], ctx, pathCond) = do
           [ (VInt 1, ctx', v :=: VInt 0 : pathCond')
           , (VInt 0, ctx', Not (v :=: (VInt 0)) : pathCond')
           ]
-      (VInt 0) -> return [(VInt 1, ctx', pathCond')]
+      VInt 0 -> return [(VInt 1, ctx', pathCond')]
       _ -> return [((VInt 0), ctx', pathCond')]
 symEval (ECall (EConst VNil) "&" [e1, e2], ctx, pathCond) = do
-  Q.foreachM (symEval (e1, ctx, pathCond)) handleCase
-  where
-    handleCase ((VInt 0), ctx', pathCond') =
-      return [((VInt 0), ctx', pathCond')]
-    handleCase (Sym sv, ctx', pathCond')
-      -- TODO: ask verifier if v can be proven to be Error/not-Error
-     = do
-      cfgs <- symEval (e2, ctx', Not (Sym sv :=: VInt 0) : pathCond')
-      return $ ((VInt 0), ctx', Sym sv :=: VInt 0 : pathCond') : cfgs
-    handleCase (_, ctx', pathCond') = symEval (e2, ctx', pathCond')
+  Q.foreachM (symEval (e1, ctx, pathCond)) $ \case
+    ((VInt 0), ctx', pathCond') -> return [((VInt 0), ctx', pathCond')]
+    (v1, ctx', pathCond')
+      | Q.isSym v1
+      -- TODO: ask verifier if v can be proven to be 0/non-0
+       -> do
+        results <- symEval (e2, ctx', Not (v1 :=: VInt 0) : pathCond')
+        return $ ((VInt 0), ctx', v1 :=: VInt 0 : pathCond') : results
+    (_, ctx', pathCond') -> symEval (e2, ctx', pathCond')
 symEval (ECall (EConst VNil) "|" [e1, e2], ctx, pathCond) = do
-  Q.foreachM (symEval (e1, ctx, pathCond)) handleCase
-  where
-    handleCase ((VInt 0), ctx', pathCond') = symEval (e2, ctx', pathCond')
-    handleCase (Sym sv, ctx', pathCond') = do
-      cfgs <- symEval (e2, ctx', (Sym sv :=: VInt 0) : pathCond')
-      return $ (Sym sv, ctx', Not (Sym sv :=: VInt 0) : pathCond') : cfgs
-    handleCase (v, ctx', pathCond') = return [(v, ctx', pathCond')]
-symEval (ECall (EConst VNil) "adversary" [], ctx, pathCond) = do
+  Q.foreachM (symEval (e1, ctx, pathCond)) $ \case
+    ((VInt 0), ctx', pathCond') -> symEval (e2, ctx', pathCond')
+    (v1, ctx', pathCond')
+      | Q.isSym v1 -> do
+        results <- symEval (e2, ctx', (v1 :=: VInt 0) : pathCond')
+        return $ (v1, ctx', Not (v1 :=: VInt 0) : pathCond') : results
+    (v, ctx', pathCond') -> return [(v, ctx', pathCond')]
+symEval (ECall (EConst VNil) "adversary" [], ctx, pathCond) =
   return
-    [ ( VRef (nextAddr ctx)
-      , Q.ctxObjs . Lens.at (nextAddr ctx) ?~
-        (Object
-           { _objLocals = M.empty
-           , _objMethods = M.empty
-           , _objType = TAny
-           , _objAdversary = True
-           }) $
-        ctx
+    [ ( VRef (Q.nextAddr ctx)
+      , Q.ctxObjs . Lens.at (Q.nextAddr ctx) ?~ Q.adversary $ ctx
       , pathCond)
     ]
 symEval (ECall obj name args, ctx, pathCond) =
   Q.foreachM (symEval (obj, ctx, pathCond)) $ \(vobj, ctx', pathCond') ->
-    Q.foreachM (symEvalList args ctx' pathCond') $ \(evaledArgs, ctx'', pathCond'') ->
-      symEvalCall vobj name evaledArgs ctx'' pathCond''
+    Q.foreachM (symEvalList (args, ctx', pathCond')) $ \(evaledArgs, ctx'', pathCond'') ->
+      symEvalCall vobj name (evaledArgs, ctx'', pathCond'')
 symEval (ENew fields body, ctx, pathCond) =
-  Q.foreachM (symEvalFields fields ctx pathCond) $ \(evaledFields, ctx', pathCond') ->
-    let locals = M.fromList (map (Arrow.second (Q.uncurry3 Local)) evaledFields)
+  Q.foreachM (symEvalFields (fields, ctx, pathCond)) $ \(locals, ctx', pathCond') ->
+    let next = Q.nextAddr ctx'
         ctx'' =
-          Q.ctxObjs . Lens.at (nextAddr ctx') ?~
-          Object
-            { _objLocals = locals
-            , _objMethods = M.empty
-            , _objType = TAny
-            , _objAdversary = False
-            } $
-          ctx'
-        ctx''' = Lens.set Q.ctxThis (nextAddr ctx') ctx''
+          Q.ctxObjs . Lens.at next ?~ Q.emptyObject {_objLocals = locals} $ ctx'
+        ctx''' = Lens.set Q.ctxThis next ctx''
      in Q.foreachM (symEval (body, ctx''', pathCond')) $ \(_, ctx'''', pathCond'') ->
           return
-            [ ( VRef (nextAddr ctx')
+            [ ( VRef next
               , Lens.set Q.ctxThis (ctx' ^. Q.ctxThis) ctx''''
               , pathCond'')
             ]
 symEval (tdecl@(ETypeDecl name _ _ _), ctx, pathCond)
-  | name `L.elem` M.keys (ctx ^. Q.ctxTypeDecls) =
+  | L.elem name $ M.keys (ctx ^. Q.ctxTypeDecls) =
     error $ "Duplicate type declaration: " ++ name
   | otherwise =
     return [(VNil, Q.ctxTypeDecls . Lens.at name ?~ tdecl $ ctx, pathCond)]
@@ -1022,7 +710,7 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
                Field
                  { _fieldName = name
                  , _fieldInit = EConst val
-                 , _immutable = False -- FIXME
+                 , _immutable = False -- FIXME:
                  , _fieldType = typeOfValue ctx val
                  })
             (tdecl ^. Q.typedeclValues)
@@ -1036,7 +724,7 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
               , Q.ctxObjs . Lens.ix addr . Q.objType .~ TNamed typeName $ ctx'
               , pathCond')
             ]
-        _ -> return [(val, ctx', pathCond')] -- object creation may have returned an error
+        _ -> return [(val, ctx', pathCond')] -- schoepe@: object creation may have returned 0.  FIXME: Check this
   | otherwise = error $ "No such type: " ++ typeName
 symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
   let x = setCompr ^. Q.comprVar
@@ -1091,7 +779,7 @@ symEval (mapCompr@EMapCompr {}, ctx, pathCond) = do
 symEval (EIn elt s, ctx, pathCond) = do
   Q.foreachM (symEval (elt, ctx, pathCond)) $ \(velt, ctx', pathCond') ->
     Q.foreachM (symEval (s, ctx', pathCond')) $ \(vset, ctx'', pathCond'') -> do
-      if (isSymbolic velt || isSymbolic vset)
+      if (Q.isSym velt || Q.isSym vset)
         then return [(Sym (In velt vset), ctx'', pathCond'')]
         else case vset of
                VSet vals ->
@@ -1105,7 +793,7 @@ symEval (EIn elt s, ctx, pathCond) = do
 symEval (ESubmap e1 e2, ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     Q.foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
-      if isSymbolic v1 || isSymbolic v2
+      if Q.isSym v1 || Q.isSym v2
         then return [(Sym (Submap v1 v2), ctx'', pathCond'')]
         else case (v1, v2) of
                (VMap m1, VMap m2) ->
@@ -1119,20 +807,19 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
 symEval (EAssume e1 e2, ctx, pathCond) =
   return [(VNil, Lens.over Q.ctxAssumptions ((e1, e2) :) ctx, pathCond)]
 symEval (funDecl@EFunDecl {}, ctx, pathCond) =
-  return
-    [ ( VNil
-      , Lens.over
-          Q.ctxFunDecls
-          (M.insert funName (FunDecl funName (funDecl ^. Q.efunDeclArgs)))
-          ctx
-      , pathCond)
-    ]
-  where
-    funName = funDecl ^. Q.efunDeclName
+  let funName = funDecl ^. Q.efunDeclName
+   in return
+        [ ( VNil
+          , Lens.over
+              Q.ctxFunDecls
+              (M.insert funName (FunDecl funName (funDecl ^. Q.efunDeclArgs)))
+              ctx
+          , pathCond)
+        ]
 symEval (EUnion e1 e2, ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     Q.foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
-      if (isSymbolic v1 || isSymbolic v2)
+      if (Q.isSym v1 || Q.isSym v2)
         then return [(Sym (Union v1 v2), ctx'', pathCond'')]
         else case (v1, v2) of
                (VSet vals1, VSet vals2) ->
@@ -1143,7 +830,7 @@ symEval (EUnion e1 e2, ctx, pathCond) = do
 symEval (EIntersect e1 e2, ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     Q.foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
-      if (isSymbolic v1 || isSymbolic v2)
+      if (Q.isSym v1 || Q.isSym v2)
         then return [(Sym (Intersect v1 v2), ctx'', pathCond'')]
         else case (v1, v2) of
                (VSet vals1, VSet vals2) ->
@@ -1152,3 +839,249 @@ symEval (EIntersect e1 e2, ctx, pathCond) = do
                _ ->
                  error $ "Tried to union non-set values: " ++ show v1 ++ " ∪ " ++
                  show v2
+
+symEvalList :: PathCtx [Expr] -> Verify [PathCtx [Value]]
+symEvalList ([], ctx, pathCond) = return [([], ctx, pathCond)]
+symEvalList (e:es, ctx, pathCond) =
+  Q.foreachM (symEval (e, ctx, pathCond)) $ \(val, ctx', pathCond') ->
+    Q.foreachM (symEvalList (es, ctx', pathCond')) $ \(evaledList, ctx'', pathCond'') ->
+      return [(val : evaledList, ctx'', pathCond'')]
+
+-- | Symbolically evaluate a list of field initializations in a given context and path condition
+-- and return a list of possible executions of this list. Each element in the result is a list
+-- of the same length where each field is evaluated, together with a context.
+symEvalFields :: PathCtx [Field] -> Verify [PathCtx (Map Var Local)]
+symEvalFields ([], ctx, pathCond) = return [(M.empty, ctx, pathCond)]
+symEvalFields (f:fs, ctx, pathCond) =
+  Q.foreachM (symEval (f ^. Q.fieldInit, ctx, pathCond)) $ \(fieldVal, ctx', pathCond') -> do
+    Cond.unless (valueHasType ctx' fieldVal (f ^. Q.fieldType)) $ do
+      error $ "Ill-typed argument for field initialization: " ++ show fieldVal ++
+        " is not a subtype of " ++
+        show (f ^. Q.fieldType)
+    Q.foreachM (symEvalFields (fs, ctx', pathCond')) $ \(evaledFields, ctx'', pathCond'') ->
+      return
+        [ ( M.insert
+              (f ^. Q.fieldName)
+              (Local fieldVal (f ^. Q.fieldType) (f ^. Q.immutable))
+              evaledFields
+          , ctx''
+          , pathCond'')
+        ]
+
+-- | `symEvalCall obj name args ...` symbolically evaluates a method call to method name on object obj
+symEvalCall :: Value -> Var -> PathCtx [Value] -> Verify Results
+symEvalCall (VRef addr) name (args, ctx, pathCond)
+  | Just obj <- ctx ^. Q.ctxObjs . Lens.at addr
+  , obj ^. Q.objAdversary =
+    let newCalls = args : (ctx ^. Q.ctxAdvCalls)
+     in return
+          [ ( Sym (AdversaryCall newCalls)
+            , Lens.set Q.ctxAdvCalls newCalls ctx
+            , pathCond)
+          ]
+  | Just mtd <- Q.findMethod addr name ctx =
+    callMethod addr mtd (args, ctx, pathCond)
+  | otherwise =
+    evalError
+      ("Called non-existent method: " ++ name ++ "[" ++ show addr ++ "]")
+      ctx
+symEvalCall VNil "Z" ([m], ctx, pathCond) = return [(Sym (Z m), ctx, pathCond)]
+symEvalCall VNil "rnd" ([], ctx, pathCond) = symEval (ENew [] ENop, ctx, pathCond)
+symEvalCall VNil "+" ([arg1, arg2], ctx, pathCond)
+  | Q.isSym arg1 || Q.isSym arg2 = return [(Sym (Add arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1
+  , VInt m <- arg2 = return [(VInt (n + m), ctx, pathCond)]
+  | otherwise =
+    error $ "Addition of non-symbolic non-integers: " ++ show (arg1, arg2)
+symEvalCall VNil "-" ([arg1, arg2], ctx, pathCond)
+  | Q.isSym arg1 || Q.isSym arg2 = return [(Sym (Sub arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1
+  , VInt m <- arg2 = return [(VInt (n - m), ctx, pathCond)]
+  | otherwise =
+    error $ "Subtraction of non-symbolic non-integers: " ++ show (arg1, arg2)
+symEvalCall VNil "*" ([arg1, arg2], ctx, pathCond)
+  | Q.isSym arg1 || Q.isSym arg2 = return [(Sym (Mul arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1
+  , VInt m <- arg2 = return [(VInt (n * m), ctx, pathCond)]
+  | otherwise =
+    error $ "Multiplication of non-symbolic non-integers: " ++ show (arg1, arg2)
+symEvalCall VNil "/" ([arg1, arg2], ctx, pathCond)
+  | Q.isSym arg1 || Q.isSym arg2 = return [(Sym (Div arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1
+  , VInt m <- arg2 =
+    if m == 0
+      then return [((VInt 0), ctx, pathCond)]
+      else return [(VInt (n `div` m), ctx, pathCond)]
+  | otherwise =
+    error $ "Division of non-symbolic non-integers: " ++ show (arg1, arg2)
+symEvalCall VNil "<" ([arg1, arg2], ctx, pathCond)
+  | Q.isSym arg1 || Q.isSym arg2 = return [(Sym (Lt arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1
+  , VInt m <- arg2 =
+    return
+      [ ( if n < m
+            then VInt 1
+            else VInt 0
+        , ctx
+        , pathCond)
+      ]
+  | otherwise =
+    error $ "Comparison of non-symbolic non-integers: " ++ show (arg1, arg2)
+symEvalCall VNil "<=" ([arg1, arg2], ctx, pathCond)
+  | Q.isSym arg1 || Q.isSym arg2 = return [(Sym (Le arg1 arg2), ctx, pathCond)]
+  | VInt n <- arg1
+  , VInt m <- arg2 =
+    return
+      [ ( if n <= m
+            then VInt 1
+            else VInt 0
+        , ctx
+        , pathCond)
+      ]
+  | otherwise =
+    error $ "Comparison of non-symbolic non-integers: " ++ show (arg1, arg2)
+symEvalCall VNil name (args, ctx, pathCond)
+  | Just mtd <- Q.findMethod (ctx ^. Q.ctxThis) name ctx =
+    callMethod (ctx ^. Q.ctxThis) mtd (args, ctx, pathCond)
+  | Just mtd <- Q.findMethod 0 name ctx = callMethod 0 mtd (args, ctx, pathCond)
+  | Just funDecl <- ctx ^? Q.ctxFunDecls . Lens.ix name = do
+    Cond.unless (L.length args == L.length (funDecl ^. Q.funDeclArgs))
+      (error $ "Wrong number of arguments in call to uninterpreted function: " ++ show (name, args))
+    return [(Sym (Call name args), ctx, pathCond)]
+  | otherwise = error $ "Call to non-existent method: " ++ name
+symEvalCall (Sym sv) name (args, ctx, pathCond) = do
+  forced <- force (Sym sv, ctx, pathCond)
+  if forced == [(Sym sv, ctx, pathCond)]
+    then do
+      debug $ "Not implemented: calls on untyped symbolic objects: (" ++ show sv ++
+        ")." ++
+        name ++
+        "(" ++
+        show args ++
+        ")"
+       -- Return a fresh variable here to encode that we have no information about the returned value.
+       -- FIXME: we should also havoc everything the base object may have access to.
+       -- This case can still yield a provable verification condition if the path condition is contradictory
+      fv <- freshVar "untyped_symcall"
+      return [(Sym (SymVar fv TAny), ctx, pathCond)]
+    else Q.foreachM (return forced) $ \(val, ctx', pathCond') -> do
+           symEvalCall val name (args, ctx', pathCond')
+symEvalCall (VInt 0) _ (_, ctx, pathCond) = return [((VInt 0), ctx, pathCond)]
+symEvalCall obj name (_, ctx, _) =
+  error $ "Bad method call[" ++ show obj ++ "]: " ++ name ++ "\n" ++ show ctx
+
+-- ----------------------------------------------------------------------------
+-- Util
+-- ----------------------------------------------------------------------------
+callMethod :: Addr -> Method -> PathCtx [Value] -> Verify Results
+callMethod addr mtd (args, ctx, pathCond) =
+  let (vars, typs) = L.unzip (mtd ^. Q.methodFormals)
+      origThis = ctx ^. Q.ctxThis
+      origScope = ctx ^. Q.ctxScope
+      newScope = M.fromList (L.zip vars (L.zip args typs))
+      ctx' = Lens.set Q.ctxThis addr (Lens.set Q.ctxScope newScope ctx)
+   in do results <- symEval (mtd ^. Q.methodBody, ctx', pathCond)
+         return $
+           map
+             (\(val, ctx'', pathCond') ->
+                ( val
+                , Lens.set
+                    Q.ctxThis
+                    origThis
+                    (Lens.set Q.ctxScope origScope ctx'')
+                , pathCond'))
+             results
+
+-- | Introduce path split for values that can be simplified further
+-- with additional assumptions in the path condition:
+force :: Result -> Verify Results
+force (v@(Sym (Lookup k m)), ctx, pathCond)
+  | TMap tk tv <- typeOfValue ctx m
+  , valueHasType ctx k tk
+  -- If we are trying to call a method on a symbolic map lookup, we split the
+  -- path into a successful lookup and a failing one. If we have enough type
+  -- information on the map, hopefully the call will be resolved to a type for
+  -- which we know the method body.
+   = do
+    (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
+    return
+      [ (VInt 0, ctx, (v :=: VInt 0) : pathCond)
+      , (fv, ctx', (v :=: fv) : Not (v :=: VInt 0) : pathCond' ++ pathCond)
+      ]
+force (v@(Sym (SymVar _ (TNamed t))), ctx, _)
+  -- Allocate a new object of the required type
+ = do
+  (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
+  return [(VRef a', ctx', v :=: VRef a' : pathCond')]
+force (v, ctx, pathCond) = return [(v, ctx, pathCond)]
+
+-- | Produce a list of symbolic values to use for method calls.
+symArgs :: Context -> [(Var, Type)] -> Verify ([Value], Context, PathCond)
+symArgs ctx args =
+  Monad.foldM
+    (\(vals, ctx', pathCond) (name, typ) -> do
+       (val, ctx'', pathCond') <- typedValue name typ ctx'
+       return (vals ++ [val], ctx'', pathCond' ++ pathCond) -- FIXME: vals ++ [val] is quadratic.  Also weird that path conditions are in reverse order from values.
+     )
+    ([], ctx, [])
+    args
+
+typedValue :: Var -> Type -> Context -> Verify Result
+typedValue name (TTuple ts) ctx = do
+  (vals, ctx', pathCond') <- symArgs ctx (L.zip (L.repeat name) ts)
+  return (VTuple vals, ctx', pathCond')
+typedValue _ (TNamed typ) ctx
+  | Just tdecl <- ctx ^? Q.ctxTypeDecls . Lens.ix typ = do
+    (args, ctx', pathCond') <-
+      symArgs ctx (map (\(x, _, t) -> (x, t)) (tdecl ^. Q.typedeclFormals))
+    (val, ctx'', pathCond'') <-
+      Q.singleResult <$>
+      symEval
+        ( ENewConstr
+            typ
+            (L.zip
+               (map (\(x, _, _) -> x) (tdecl ^. Q.typedeclFormals))
+               (map EConst args))
+        , ctx'
+        , pathCond')
+    let pathCondEqs =
+          L.zipWith
+            (\(x, _, _) argVal -> Sym (Deref val x) :=: argVal)
+            (tdecl ^. Q.typedeclFormals)
+            args
+    return (val, ctx'', pathCondEqs ++ pathCond'')
+  | otherwise = error $ "No such type: " ++ typ
+typedValue name t ctx = do
+  freshName <- freshVar name
+  return (Sym (SymVar freshName t), ctx, [])
+
+evalError :: String -> Context -> a
+evalError s c = error (s ++ "\nContext:\n" ++ printContext c)
+  where
+    printLocal :: Var -> Local -> String
+    printLocal name loc =
+      "\t\t" ++ name ++ " = " ++ show (loc ^. Q.localValue) ++ " : " ++
+      show (loc ^. Q.localType)
+    printMethod :: Var -> Method -> String
+    printMethod name mtd =
+      L.unlines ["\t\t" ++ name ++ " { " ++ show (mtd ^. Q.methodBody) ++ " } "]
+    printObject :: Addr -> Object -> String
+    printObject addr obj =
+      L.unlines $
+      [ "  " ++ show addr ++ " |-> "
+      , "\tAdversary?: " ++ show (obj ^. Q.objAdversary)
+      , "\tLocals:"
+      ] ++
+      (map (uncurry printLocal) (M.toList (obj ^. Q.objLocals))) ++
+      ["\tMethods:"] ++
+      (map (uncurry printMethod) (M.toList (obj ^. Q.objMethods)))
+    printContext :: Context -> String
+    printContext ctx =
+      L.unlines
+        [ "this: " ++ show (ctx ^. Q.ctxThis)
+        , "scope: " ++ show (ctx ^. Q.ctxScope)
+        , "objects: " ++
+          L.intercalate
+            "\n"
+            (map (uncurry printObject) (M.toList (ctx ^. Q.ctxObjs)))
+        ]

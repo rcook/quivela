@@ -8,47 +8,14 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Quivela.Language
+    -- * Abbrevs
   ( Addr
-  , AllocStrategy(..)
   , Config
-  , Context(..)
-  , Diff(..)
-  , Expr(..)
-  , Field(..)
-  , FunDecl(..)
-  , Local(..)
-  , Method(..)
-  , MethodKind(..)
-  , Object(..)
-  , PathCond
-  , Place(..)
-  , Proof
-
-  , ProofHint(..)
-  , fieldEqual
-  , fieldsEqual
-
-  , ProofPart(..)
-  , Prop(..)
-
-    -- * Results
-  , Result
-  , Results
-  , singleResult
-
-  , SymValue(..)
-  , Type(..)
-  , Value(..)
-  , pattern VRef
+  , PathCtx
   , Var
-  , bindingConst
-  , callArgs
-  , callName
-  , callObj
-  , comprPred
-  , comprValue
-  , comprVar
-  , conjunction
+    -- * Context
+  , Context(..)
+  , AllocStrategy(..)
   , ctxAdvCalls
   , ctxAllocStrategy
   , ctxAssumptions
@@ -57,52 +24,111 @@ module Quivela.Language
   , ctxScope
   , ctxThis
   , ctxTypeDecls
+  , emptyCtx
+  , emptyCtxRHS
+  , findMethod
+  , nextAddr
+    -- * Diff
+  , Diff(..)
+    -- * Expr
+  , Expr(..)
+  , MethodKind(..)
+    -- ECall
+  , callArgs
+  , callName
+  , callObj
+    -- ESetCompr
+  , comprPred
+  , comprValue
+  , comprVar
+    -- EFunDecl
   , efunDeclArgs
   , efunDeclName
+    -- EMethod
   , emethodArgs
   , emethodBody
   , emethodKind
   , emethodName
-  , emptyCtx
-  , emptyCtxRHS
-  , exprsToSeq
-  , fieldInit
-  , fieldName
-  , fieldType
-  , funDeclArgs
-  , funDeclName
-  , immutable
-  , localImmutable
-  , localType
-  , localValue
+    -- EASsign
   , lhs
-  , methodBody
-  , methodFormals
-  , methodKind
-  , methodName
+  , rhs
+    -- ENew
   , newBody
+  , newFields
+    -- ENewConstr
   , newConstrArgs
   , newConstrName
-  , newFields
-  , nop
-  , normalMethods
-  , objAdversary
-  , objLocals
-  , objMethods
-  , objType
-  , placeConst
-  , placeLens
-  , placeType
-  , rhs
-  , seqToExprs
-  , symVal
+    -- ETypeDecl
   , typedeclBody
   , typedeclFormals
   , typedeclName
   , typedeclValues
+    -- Lists
+  , exprsToSeq
+  , seqToExprs
+    -- Methods
+  , nop
+  , varBindings
+    -- * Field
+  , Field(..)
+  , fieldInit
+  , fieldName
+  , fieldType
+  , immutable
+    -- * FunDecl
+  , FunDecl(..)
+  , funDeclArgs
+  , funDeclName
+    -- * Local
+  , Local(..)
+  , localImmutable
+  , localType
+  , localValue
+    -- * Method
+  , Method(..)
+  , methodBody
+  , methodFormals
+  , methodKind
+  , methodName
+   -- * Object
+  , Object(..)
+  , adversary
+  , emptyObject
+  , objAdversary
+  , objLocals
+  , objMethods
+  , objType
+  , normalMethods
+    -- * Place
+  , Place(..)
+  , placeConst
+  , placeLens
+  , placeType
+    -- * Proofs
+  , Proof
+  , ProofPart(..)
+  , ProofHint(..)
+  , fieldEqual
+  , fieldsEqual
+   -- * Prop
+  , Prop(..)
+  , PathCond
+  , conjunction
+    -- * Results
+  , Result
+  , Results
+  , singleResult
+    -- * Type
+  , Type(..)
+    -- * Value
+  , Value(..)
+  , SymValue(..)
+  , pattern VRef
+  , defaultValue
+  , isSym
+  , symVal
   , valMap
   , valSet
-  , varBindings
   ) where
 
 import qualified Control.Lens as Lens
@@ -112,7 +138,7 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Quivela.Prelude
-import Quivela.Util(PartialEq(..))
+import Quivela.Util (PartialEq(..))
 
 type Addr = Integer
 
@@ -164,7 +190,6 @@ type PathCond = [Prop]
 -- ----------------------------------------------------------------------------
 -- Expressions
 -- ----------------------------------------------------------------------------
-
 data Expr
   = ENop
   | EAssign { _lhs :: Expr
@@ -236,7 +261,6 @@ seqToExprs x = [x]
 exprsToSeq :: [Expr] -> Expr
 exprsToSeq = L.foldr ESeq ENop
 
-
 -- | Data type for field initializers
 data Field = Field
   { _fieldName :: String
@@ -256,7 +280,6 @@ data MethodKind
   deriving (Eq, Show, Ord, Data, Generic)
 
 instance Serialize MethodKind
-
 
 -- | Symbolic values representing unknowns and operations on them
 -- Calls to the adversary are also symbolic.
@@ -324,14 +347,22 @@ instance Lens.Ixed SymValue where
 -- | Quivela values
 data Value
   = VInt Integer
-  | VMap { _valMap :: Map Value Value }
+  | VMap { _valMap :: Map Value Value } -- TODO: Can any keys or elems be Syms?
   | VTuple [Value]
   | VNil
-  | VSet { _valSet :: Set Value }
+  | VSet { _valSet :: Set Value } -- TODO: Can any elems be Syms?
   | Sym { _symVal :: SymValue }
   deriving (Eq, Show, Ord, Data, Generic)
 
 instance Serialize Value
+
+-- | Value to use to initialize new variables:
+defaultValue :: Value
+defaultValue = VInt 0
+
+isSym :: Value -> Bool
+isSym (Sym _) = True
+isSym _ = False
 
 -- Since we pattern-match repeatedly on references in various places, we define
 -- a pattern synonym that handles the fact that references are actually symbolic
@@ -346,12 +377,16 @@ data Local = Local
   , _localImmutable :: Bool
   } deriving (Eq, Show, Ord, Data)
 
+Lens.makeLenses ''Local
+
 data Method = Method
   { _methodName :: String
   , _methodFormals :: [(String, Type)]
   , _methodBody :: Expr
   , _methodKind :: MethodKind
   } deriving (Eq, Show, Ord, Data)
+
+Lens.makeLenses ''Method
 
 data Object = Object
   { _objLocals :: Map Var Local
@@ -361,8 +396,15 @@ data Object = Object
   , _objAdversary :: Bool -- ^ Is the object an adversary?
   } deriving (Eq, Show, Ord, Data)
 
+emptyObject :: Object
+emptyObject = Object M.empty M.empty TAny False
+
+adversary :: Object
+adversary = emptyObject { _objAdversary = True }
+
 normalMethods :: Object -> [Method]
-normalMethods o = L.filter (\m -> _methodKind m == NormalMethod) (M.elems (_objMethods o))
+normalMethods o =
+  L.filter (\m -> _methodKind m == NormalMethod) (M.elems (_objMethods o))
 
 -- | To make our lives easier reasoning about equivalences that require
 -- new to be commutative, we would like the address identifiers used on the left-hand
@@ -374,6 +416,28 @@ data AllocStrategy
   | Decrease
   deriving (Eq, Show, Ord, Data)
 
+data FunDecl = FunDecl
+  { _funDeclName :: String
+  , _funDeclArgs :: [Var]
+  } deriving (Eq, Show, Ord, Data)
+
+Lens.makeLenses ''FunDecl
+
+data Binding = Binding
+  { _bindingName :: Var
+  , _bindingConst :: Bool
+  } deriving (Eq, Ord, Show)
+
+data Diff
+  = NewField Field
+  | DeleteField Var
+  | OverrideMethod Expr -- assumes expr is an EMethod
+  | DeleteMethod Var
+  deriving (Show, Eq, Ord)
+
+-- ----------------------------------------------------------------------------
+-- Context
+-- ----------------------------------------------------------------------------
 data Context = Context
   { _ctxObjs :: Map Addr Object
   , _ctxThis :: Addr
@@ -389,11 +453,50 @@ data Context = Context
   , _ctxFunDecls :: Map String FunDecl
   } deriving (Eq, Show, Ord, Data)
 
-data FunDecl = FunDecl
-  { _funDeclName :: String
-  , _funDeclArgs :: [Var]
-  } deriving (Eq, Show, Ord, Data)
+Lens.makeLenses ''Context
 
+emptyCtx :: Context
+emptyCtx =
+  Context
+    { _ctxObjs =
+        M.fromList
+          [ ( 0
+            , Object
+                { _objLocals = M.empty
+                , _objMethods = M.empty
+                , _objType = TAny
+                , _objAdversary = False
+                })
+          ]
+    , _ctxThis = 0
+    , _ctxAdvCalls = []
+    , _ctxScope = M.empty
+    , _ctxTypeDecls = M.empty
+    , _ctxAllocStrategy = Increase
+    , _ctxAssumptions = []
+    , _ctxFunDecls = M.empty
+    }
+
+emptyCtxRHS :: Context
+emptyCtxRHS = emptyCtx {_ctxAllocStrategy = Decrease}
+
+-- | Return an unused address in the current context
+nextAddr :: Context -> Addr
+nextAddr ctx =
+  case ctx ^. ctxAllocStrategy of
+    Increase -> L.maximum (M.keys (ctx ^. ctxObjs)) + 1
+    Decrease -> L.minimum (M.keys (ctx ^. ctxObjs)) - 1
+
+L.concat <$> Monad.mapM Lens.makeLenses [''Expr, ''Field, ''Object, ''Value]
+
+-- | Try to find a method of the given name in the object at that address
+findMethod :: Addr -> Var -> Context -> Maybe Method
+findMethod addr name ctx =
+  ctx ^? ctxObjs . Lens.ix addr . objMethods . Lens.ix name
+
+-- ----------------------------------------------------------------------------
+-- Place
+-- ----------------------------------------------------------------------------
 data Place = Place
   { _placeLens :: (forall f. Applicative f =>
                                ((Value -> f Value) -> Context -> f Context))
@@ -401,37 +504,11 @@ data Place = Place
   , _placeType :: Type
   }
 
-data Binding = Binding
-  { _bindingName :: Var
-  , _bindingConst :: Bool
-  } deriving (Eq, Ord, Show)
-
-data Diff
-  = NewField Field
-  | DeleteField Var
-  | OverrideMethod Expr -- assumes expr is an EMethod
-  | DeleteMethod Var
-  deriving (Show, Eq, Ord)
-
-L.concat <$>
-  Monad.mapM
-    Lens.makeLenses
-    [ ''Method
-    , ''Object
-    , ''Context
-    , ''Place
-    , ''FunDecl
-    , ''Binding
-    , ''Local
-    , ''Field
-    , ''Expr
-    , ''Value
-    ]
+Lens.makeLenses ''Place
 
 -- ----------------------------------------------------------------------------
 -- Proof hints
 -- ----------------------------------------------------------------------------
-
 -- | Proof hints include relational invariants, use of assumptions
 -- and controlling convenience features such as automatic inference of relational
 -- equalities.
@@ -482,13 +559,12 @@ fieldsEqual fieldsL fieldsR = EqualInv (getField fieldsL) (getField fieldsR)
     getField [] _ _ = error "Empty list of fields"
     getField [x] addr ctx
       | Just v <-
-         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x .
-         localValue = v
+         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x . localValue = v
       | otherwise = error $ "getField: No such field: " ++ x
     getField (x:xs) addr ctx
       | Just (VRef addr') <-
-         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x .
-         localValue = getField xs addr' ctx
+         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x . localValue =
+        getField xs addr' ctx
       | otherwise = error $ "Non-reference in field lookup"
 
 -- | Like 'fieldsEqual' but looking up the same fields on both sides.
@@ -552,7 +628,7 @@ varBindings (ENew fields body) =
       (bodyFree, _bodyBound) = varBindings body
    in ( bodyFree `S.difference`
         (S.fromList (fmap (^. fieldName) fields) `S.union`
-         S.map (^. bindingName) fieldsBound)
+         S.map _bindingName fieldsBound)
       , fieldsBound)
 varBindings (EProj eobj _name) = varBindings eobj
 varBindings (EIdx base idx) = varBindings base `bindingSeq` varBindings idx
@@ -601,7 +677,7 @@ combine e1 e2 = varBindings e1 `bindingSeq` varBindings e2
 bindingSeq ::
      (Set Var, Set Binding) -> (Set Var, Set Binding) -> (Set Var, Set Binding)
 bindingSeq (free1, bound1) (free2, bound2) =
-  ( free1 `S.union` (free2 `S.difference` S.map (^. bindingName) bound1)
+  ( free1 `S.union` (free2 `S.difference` S.map _bindingName bound1)
   , bound1 `S.union` bound2)
 
 -- | Folds 'varBindings' over a list of expressions with a given set of initial bindings
@@ -611,39 +687,16 @@ varBindingsList init exprs =
     (\(freeAcc, boundAcc) expr ->
        let (freeExpr, boundExpr) = varBindings expr
         in ( (freeAcc `S.union` freeExpr) `S.difference`
-             S.map (^. bindingName) boundAcc
+             S.map _bindingName boundAcc
            , boundAcc `S.union` boundExpr))
     init
     exprs
 
-emptyCtx :: Context
-emptyCtx =
-  Context
-    { _ctxObjs =
-        M.fromList
-          [ ( 0
-            , Object
-                { _objLocals = M.empty
-                , _objMethods = M.empty
-                , _objType = TAny
-                , _objAdversary = False
-                })
-          ]
-    , _ctxThis = 0
-    , _ctxAdvCalls = []
-    , _ctxScope = M.empty
-    , _ctxTypeDecls = M.empty
-    , _ctxAllocStrategy = Increase
-    , _ctxAssumptions = []
-    , _ctxFunDecls = M.empty
-    }
+type PathCtx a = (a, Context, PathCond)
 
-emptyCtxRHS :: Context
-emptyCtxRHS = Lens.set ctxAllocStrategy Decrease emptyCtx
+type Config = PathCtx Expr
 
-type Config = (Expr, Context, PathCond)
-
-type Result = (Value, Context, PathCond)
+type Result = PathCtx Value
 
 type Results = [Result]
 

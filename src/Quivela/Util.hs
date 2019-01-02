@@ -3,7 +3,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.Util
-  ( PartialEq(..)
+  ( PartialEq((===), elemPartial)
   , foreachM
   , heredoc
   , intercept

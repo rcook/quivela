@@ -42,7 +42,7 @@ assertVerified msg prefix proof =
 assertVerifiedDebug :: String -> Expr -> Proof -> Test
 assertVerifiedDebug msg prefix proof =
   let t = do
-        res <- prove' (Q.emptyVerifyEnv & Q.debugFlag .~ True) prefix proof
+        res <- prove' (Q.emptyVerifyEnv & Q.writeAllVCsToFile .~ True) prefix proof
         T.assertEqual msg 0 res
    in msg ~: TestCase t
 

@@ -156,7 +156,7 @@ Lens.makeLenses ''EmitterState
 -- TODO: merge with previous implementation
 freshEmitterVar :: String -> String -> Emitter String
 freshEmitterVar prefix' typ = do
-  let prefix = L.filter (`L.notElem` "?") prefix'
+  let prefix = L.filter (/= '?') prefix'
   last <- Lens.use (nextEmitterVar . Lens.at prefix)
   case last of
     Just n -> do
@@ -304,7 +304,7 @@ instance ToZ3 SymValue where
       ]
     return $ z3Call "VSet" [setVar]
   toZ3 (SetCompr _ _ _) = freshEmitterVar "setCompr" "Value"
-  -- set comprehensions with map not supported in z3 backend
+  -- ^ set comprehensions with map not supported in z3 backend
   toZ3 (MapCompr x val pred) = do
     mapVar <- freshEmitterVar ("mapcompr_" ++ x) "(Array Value Value)"
     emit $ "(declare-const " ++ mapVar ++ " (Array Value Value))"
@@ -865,15 +865,17 @@ methodEquivalenceVCs ::
 methodEquivalenceVCs mtd invs args (VRef a1, ctx1, pathCond1) (VRef a1', ctx1', pathCond1') = do
   ctxH1 <- havocContext ctx1
   ctxH1' <- havocContext ctx1'
+  let m = mtd ^. Q.methodName
+  let cs = map EConst args
   results <-
     Q.symEval
-      ( ECall (EConst (VRef a1)) (mtd ^. Q.methodName) (map EConst args)
+      ( ECall (EConst (VRef a1)) m cs
       , ctxH1
       , pathCond1)
   results' <-
     Q.symEval
-      ( ECall (EConst (VRef a1')) (mtd ^. Q.methodName) (map EConst args)
-      , if NoAddressBijection `Q.elemPartial` invs
+      ( ECall (EConst (VRef a1')) m cs
+      , if Q.elemPartial NoAddressBijection invs
           then ctxH1'
           else Lens.set Q.ctxAllocStrategy Q.Decrease ctxH1'
       , pathCond1')
@@ -884,14 +886,7 @@ methodEquivalenceVCs mtd invs args (VRef a1, ctx1, pathCond1) (VRef a1', ctx1', 
       results
       (VRef a1', ctxH1', pathCond1')
       results'
-  Monad.filterM
-    (\vc -> do
-       trivial <- triviallyTrue vc
-       if trivial
-         then do
-           return False
-         else return True)
-    vcs
+  Monad.filterM (\vc -> not <$> triviallyTrue vc) vcs
 methodEquivalenceVCs _ _ _ (v1, _, _) (v1', _, _) =
   error $ "methodEquivalenceVCs called with non-reference values: " ++
   show (v1, v1')
@@ -916,10 +911,10 @@ checkVCs vcs = do
       dir <- Monad.liftIO $ Temp.createTempDirectory tmp "vcs"
       prelude <- Monad.liftIO Q.z3Prelude
       pctx <- Lens.use Q.verifyPrefixCtx
-      ((), vcLines') <- runEmitter pctx (toZ3_ vc)
+      ((), vcLines) <- runEmitter pctx (toZ3_ vc)
       -- FIXME: This nub is required, but I have no idea why.  Remove it when you figure it out.
-      let vcLines = L.nub vcLines'
-      let lines = prelude : vcLines ++ ["(check-sat)"]
+      let _vcLines = L.nub vcLines
+      let lines = prelude : _vcLines ++ ["(check-sat)"]
       tempFile <-
         Monad.liftIO $ Temp.writeTempFile dir "z3-vc.smt2" (L.unlines lines)
       Q.debug ("Writing vc to file: " ++ tempFile)
@@ -928,11 +923,11 @@ checkVCs vcs = do
       write <- Lens.view Q.writeAllVCsToFile
       Monad.when write (writeToZ3File vc)
       pctx <- Lens.use Q.verifyPrefixCtx
-      ((), vcLines') <- runEmitter pctx (toZ3_ vc)
+      ((), vcLines) <- runEmitter pctx (toZ3_ vc)
       -- FIXME: This nub is required, but I have no idea why.  Remove it when you figure it out.
-      let vcLines = L.nub vcLines'
+      let _vcLines = L.nub vcLines
       sendToZ3 "(push)"
-      sendToZ3 (L.unlines vcLines)
+      sendToZ3 (L.unlines _vcLines)
       sendToZ3 "(check-sat)"
       answer <- readLineFromZ3
       sendToZ3 "(pop)"
@@ -1031,13 +1026,13 @@ checkEqv prefix step@Step {lhs, rhs} = do
           vcs <- methodEquivalenceVCs mtd hints args resL resR
           verificationResult <- checkVCs vcs
           return (mtd ^. Q.methodName, verificationResult)
-      if (not . L.all (L.null . snd) $ remainingVCs)
+      if L.all (L.null . snd) remainingVCs
         then do
-          Q.debug "Verification failed"
-          Q.debug $ show remainingVCs
-        else do
           cacheVerified
           Q.debug $ "Verification succeeded in " ++ Timer.formatSeconds t
+        else do
+          Q.debug "Verification failed"
+          Q.debug $ show remainingVCs
       return remainingVCs
   where
     cacheVerified :: Verify ()
