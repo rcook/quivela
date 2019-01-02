@@ -13,7 +13,6 @@ program =
 function skenc(k, a, m)
 function skdec(k, a, c)
 
-
 method Enc(e) { new (const e=e,d=0) {
    method enc(a,m)      { c = e.enc(a,Z(m)) & d[a][c] = <m> & c } // do we need to add the !d[a][c] check?
    method dec(a,c)      { d[a][c] }

@@ -7,34 +7,46 @@
 
 module Quivela.SymEval
   ( Verify(..)
+  , runVerify
+    -- * VerifyEnv
   , VerifyEnv(..)
-  , VerifyState(..)
-  , alreadyVerified
+    -- lenses
   , cacheFile
-  , debug
   , debugFlag
+  , writeAllVCsToFile
+    -- empty
   , emptyVerifyEnv
+
+  , debug
   , freshVar
-  , singleResult
   , symArgs
   , symEval
   , useCache
+
+    -- * VerifyState
+  , VerifyState(..)
+    -- lenses
+  , alreadyVerified
   , verifyPrefixCtx
   , z3Proc
+    -- empty
+  , newVerifyState
   ) where
 
 import qualified Control.Arrow as Arrow
 import qualified Control.Conditional as Cond
 import qualified Control.Lens as Lens
 import Control.Lens ((%=), (.~), (?~), (^.), (^?))
-import qualified Control.Monad as Monad
+import qualified Control.Monad.RWS.Strict as Monad
 import Control.Monad.Fail (MonadFail)
 import qualified Control.Monad.RWS.Strict as RWS
 import Control.Monad.RWS.Strict (MonadIO, MonadReader, MonadState, RWST)
+import qualified Data.ByteString as ByteString
 import qualified Data.List as L
 import Data.List ((!!))
 import qualified Data.Map as M
 import qualified Data.Maybe as Maybe
+import qualified Data.Serialize as Serialize
 import qualified Data.Set as S
 import qualified Quivela.Language as Q
 import Quivela.Language
@@ -52,7 +64,6 @@ import Quivela.Language
   , PathCond
   , Place(..)
   , Prop(..)
-  , Result
   , Results
   , SymValue(..)
   , Type(..)
@@ -62,11 +73,16 @@ import Quivela.Language
   )
 import Quivela.Prelude
 import qualified Quivela.Util as Q
+import qualified Quivela.VerifyPreludes as Q
+import qualified System.Directory as Directory
+import qualified System.IO as IO
 import System.IO (Handle)
+import qualified System.Process as Proc
 import System.Process (ProcessHandle)
 
-------------------------------------------------------------
--- * Util
+-- ----------------------------------------------------------------------------
+-- Util
+-- ----------------------------------------------------------------------------
 
 isSymbolic :: Value -> Bool
 isSymbolic (Sym _) = True
@@ -83,12 +99,6 @@ lookupInTuple (VTuple vs) (VInt i)
 lookupInTuple tup (Sym sidx) = Sym (Proj tup (Sym sidx))
 lookupInTuple (Sym sv) vidx = Sym (Proj (Sym sv) vidx)
 lookupInTuple _ _ = error "invalid tuple lookup"
-
--- | Throws an error if there is more than one result in the list. Used for
--- evaluating programs that are not supposed to have more than one result.
-singleResult :: Results -> Result
-singleResult [res@(_, _, _)] = res
-singleResult ress = error $ "Multiple results: " ++ show ress
 
 -- Debugging functions for printing out a context in a nicer way.
 -- | Turn a local into a human-readable string
@@ -232,8 +242,9 @@ symValueHasType ctx (Insert k v m) (TMap tk tv)
     ]
 symValueHasType _ _ _ = False
 
-------------------------------------------------------------
--- * The Verify Monad.
+-- ----------------------------------------------------------------------------
+-- The Verify Monad.
+-- ----------------------------------------------------------------------------
 --
 -- The monad is simply a newtype around RWST with custom read-only environment
 -- and read-write state.  The inner monad is IO, as we are constantly
@@ -247,13 +258,15 @@ data VerifyEnv = VerifyEnv
     -- ^ print debugging information
   , _splitEq :: Bool
     -- ^ Split == operator into two paths during symbolic evaluation?
+  , _writeAllVCsToFile :: Bool
+    -- ^ For debugging, write all VCs to file, even if they succeed
   }
 
 emptyVerifyEnv :: VerifyEnv
 emptyVerifyEnv =
-  VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False}
+  VerifyEnv {_cacheFile = Nothing, _debugFlag = True, _splitEq = False, _writeAllVCsToFile = False}
 
--- Right now, we only need the same environment as symbolic evaluation, so we reuse
+-- right now, we only need the same environment as symbolic evaluation, so we reuse
 -- that type here.
 -- | Keeps track of fresh variables and, a z3 process, and which conditions
 -- we already verified successfully in the past.
@@ -271,6 +284,41 @@ data VerifyState = VerifyState
     -- ^ For performance reasons, we spawn a Z3 process once and keep it around
   }
 
+-- | Return an initial state for the verifier monad
+newVerifyState :: VerifyEnv -> IO VerifyState
+newVerifyState env = do
+  (Just hin, Just hout, _, procHandle) <-
+    Proc.createProcess $
+    (Proc.proc "z3" ["-in"])
+      { Proc.std_out = Proc.CreatePipe
+      , Proc.std_in = Proc.CreatePipe
+      , Proc.std_err = Proc.CreatePipe
+      }
+  IO.hSetBuffering hin IO.NoBuffering
+  IO.hSetBuffering hout IO.NoBuffering
+  prelude <- Q.z3Prelude
+  IO.hPutStrLn hin prelude
+  verificationCache <-
+    case _cacheFile env of
+      Nothing -> return S.empty
+      Just f -> do
+        exists <- Directory.doesFileExist f
+        if not exists
+          then return S.empty
+          else do
+            maybeCache <-
+              Serialize.decode <$> Monad.liftIO (ByteString.readFile f)
+            case maybeCache of
+              Right cache -> return cache
+              Left _ -> error $ "Can't parse proof cache: " ++ f
+  return
+    VerifyState
+      { _alreadyVerified = verificationCache
+      , _nextVar = M.empty
+      , _verifyPrefixCtx = Q.emptyCtx
+      , _z3Proc = (hin, hout, procHandle)
+      }
+
 -- Generate lenses for all types defined above:
 L.concat <$> Monad.mapM Lens.makeLenses [''VerifyEnv, ''VerifyState]
 
@@ -286,6 +334,13 @@ newtype Verify a = Verify
              , Functor
              , MonadReader VerifyEnv
              )
+
+-- | Run a Verify action
+runVerify :: VerifyEnv -> Verify a -> IO a
+runVerify env action = do
+  initState <- newVerifyState env
+  (res, _, ()) <- Monad.runRWST (unVerify action) env initState
+  return res
 
 useCache :: Verify Bool
 useCache = (Maybe.isJust . _cacheFile) <$> RWS.ask
@@ -569,7 +624,7 @@ typedValue _ (TNamed t) ctx
            (\(name', _immut, typ) -> (name', typ))
            (tdecl ^. Q.typedeclFormals))
     (val, ctx'', pathCond'') <-
-      singleResult <$>
+      Q.singleResult <$>
       symEval
         ( ENewConstr
             t

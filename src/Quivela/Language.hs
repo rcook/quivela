@@ -23,11 +23,19 @@ module Quivela.Language
   , PathCond
   , Place(..)
   , Proof
+
   , ProofHint(..)
+  , fieldEqual
+  , fieldsEqual
+
   , ProofPart(..)
   , Prop(..)
+
+    -- * Results
   , Result
   , Results
+  , singleResult
+
   , SymValue(..)
   , Type(..)
   , Value(..)
@@ -57,6 +65,7 @@ module Quivela.Language
   , emethodName
   , emptyCtx
   , emptyCtxRHS
+  , exprsToSeq
   , fieldInit
   , fieldName
   , fieldType
@@ -76,6 +85,7 @@ module Quivela.Language
   , newConstrName
   , newFields
   , nop
+  , normalMethods
   , objAdversary
   , objLocals
   , objMethods
@@ -84,6 +94,7 @@ module Quivela.Language
   , placeLens
   , placeType
   , rhs
+  , seqToExprs
   , symVal
   , typedeclBody
   , typedeclFormals
@@ -95,7 +106,7 @@ module Quivela.Language
   ) where
 
 import qualified Control.Lens as Lens
-import Control.Lens ((<&>), (^.))
+import Control.Lens ((<&>), (^.), (^?))
 import qualified Control.Monad as Monad
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -120,6 +131,132 @@ data Type
   deriving (Eq, Show, Ord, Data, Generic)
 
 instance Serialize Type
+
+-- ----------------------------------------------------------------------------
+-- Propositions
+-- ----------------------------------------------------------------------------
+--
+-- These are used both to keep track of the path condition
+-- as well as for the verification conditions we generate later on.
+data Prop
+  = Value :=: Value
+  | Not Prop
+  | Forall [(Var, Type)]
+           Prop
+  | Prop :=>: Prop
+  | Prop :&: Prop
+  | PTrue
+  | PFalse
+  deriving (Eq, Show, Ord, Data, Generic)
+
+instance Serialize Prop
+
+conjunction :: [Prop] -> Prop
+conjunction [] = PTrue
+conjunction [p] = p
+conjunction ps = L.foldr1 (:&:) ps
+
+-- | A path condition is a list of propositions that all hold on a given path
+-- These could be stored as just one big conjunction instead, but representing
+-- them as a list simplifies reasoning about which paths are prefixes of others.
+type PathCond = [Prop]
+
+-- ----------------------------------------------------------------------------
+-- Expressions
+-- ----------------------------------------------------------------------------
+
+data Expr
+  = ENop
+  | EAssign { _lhs :: Expr
+            , _rhs :: Expr }
+  | EVar Var
+  | EConst Value
+  | EProj Expr
+          Var
+  | EIdx Expr
+         Expr
+  | ENew { _newFields :: [Field]
+         , _newBody :: Expr }
+  | ENewConstr { _newConstrName :: String
+               , _newConstrArgs :: [(Var, Expr)] }
+  | EMethod { _emethodName :: String
+            , _emethodArgs :: [(String, Type)]
+            , _emethodBody :: Expr
+            , _emethodKind :: MethodKind }
+  | ECall { _callObj :: Expr
+          , _callName :: String
+          , _callArgs :: [Expr] }
+  | ETuple [Expr]
+  | ETupleProj Expr
+               Expr
+  | ESeq Expr
+         Expr
+  | EIf Expr
+        Expr
+        Expr
+  | EIn Expr
+        Expr
+  | ESubmap Expr
+            Expr
+  | EUnion Expr
+           Expr
+  | EIntersect Expr
+               Expr
+  | ETypeDecl { _typedeclName :: String
+              , _typedeclFormals :: [(Var, Bool, Type)]
+              , _typedeclValues :: [(Var, Value)]
+              , _typedeclBody :: Expr }
+  -- { x + 1 | x ∈ y ∪ z, g(x) > f(x) }
+  | ESetCompr { _comprVar :: Var
+              , _comprValue :: Expr
+              , _comprPred :: Expr -- set comprehensions
+               }
+  -- [ x ↦ h(x, y) | x ∈ y ∪ z, g(x) > f(x) ]
+  | EMapCompr { _comprVar :: Var
+              , _comprValue :: Expr
+              , _comprPred :: Expr -- map comprehensions
+               }
+  | EAssume Expr
+            Expr
+  | EFunDecl { _efunDeclName :: String
+             , _efunDeclArgs :: [Var] -- uninterpreted functions
+              }
+  deriving (Eq, Show, Ord, Data, Generic)
+
+instance Serialize Expr
+
+nop :: Expr
+nop = ENop
+
+seqToExprs :: Expr -> [Expr]
+seqToExprs ENop = []
+seqToExprs (ESeq e1 e2) = seqToExprs e1 ++ seqToExprs e2
+seqToExprs x = [x]
+
+exprsToSeq :: [Expr] -> Expr
+exprsToSeq = L.foldr ESeq ENop
+
+
+-- | Data type for field initializers
+data Field = Field
+  { _fieldName :: String
+  , _fieldInit :: Expr
+    -- ^ Expression to initialize the field with
+  , _fieldType :: Type
+  , _immutable :: Bool
+    -- ^ Is the field constant?
+  } deriving (Eq, Show, Ord, Data, Generic)
+
+instance Serialize Field
+
+data MethodKind
+  = NormalMethod
+  | LocalMethod
+  | Invariant
+  deriving (Eq, Show, Ord, Data, Generic)
+
+instance Serialize MethodKind
+
 
 -- | Symbolic values representing unknowns and operations on them
 -- Calls to the adversary are also symbolic.
@@ -202,87 +339,6 @@ pattern VRef :: Addr -> Value
 
 pattern VRef a = Sym (Ref a)
 
--- | Data type for field initializers
-data Field = Field
-  { _fieldName :: String
-  , _fieldInit :: Expr -- ^ Expression to initialize the field with
-  , _fieldType :: Type
-  , _immutable :: Bool -- ^ Is the field constant?
-  } deriving (Eq, Show, Ord, Data, Generic)
-
-instance Serialize Field
-
-data MethodKind
-  = NormalMethod
-  | LocalMethod
-  | Invariant
-  deriving (Eq, Show, Ord, Data, Generic)
-
-instance Serialize MethodKind
-
-data Expr
-  = ENop
-  | EAssign { _lhs :: Expr
-            , _rhs :: Expr }
-  | EVar Var
-  | EConst Value
-  | EProj Expr
-          Var
-  | EIdx Expr
-         Expr
-  | ENew { _newFields :: [Field]
-         , _newBody :: Expr }
-  | ENewConstr { _newConstrName :: String
-               , _newConstrArgs :: [(Var, Expr)] }
-  | EMethod { _emethodName :: String
-            , _emethodArgs :: [(String, Type)]
-            , _emethodBody :: Expr
-            , _emethodKind :: MethodKind }
-  | ECall { _callObj :: Expr
-          , _callName :: String
-          , _callArgs :: [Expr] }
-  | ETuple [Expr]
-  | ETupleProj Expr
-               Expr
-  | ESeq Expr
-         Expr
-  | EIf Expr
-        Expr
-        Expr
-  | EIn Expr
-        Expr
-  | ESubmap Expr
-            Expr
-  | EUnion Expr
-           Expr
-  | EIntersect Expr
-               Expr
-  | ETypeDecl { _typedeclName :: String
-              , _typedeclFormals :: [(Var, Bool, Type)]
-              , _typedeclValues :: [(Var, Value)]
-              , _typedeclBody :: Expr }
-  -- { x + 1 | x ∈ y ∪ z, g(x) > f(x) }
-  | ESetCompr { _comprVar :: Var
-              , _comprValue :: Expr
-              , _comprPred :: Expr -- set comprehensions
-               }
-  -- [ x ↦ h(x, y) | x ∈ y ∪ z, g(x) > f(x) ]
-  | EMapCompr { _comprVar :: Var
-              , _comprValue :: Expr
-              , _comprPred :: Expr -- map comprehensions
-               }
-  | EAssume Expr
-            Expr
-  | EFunDecl { _efunDeclName :: String
-             , _efunDeclArgs :: [Var] -- uninterpreted functions
-              }
-  deriving (Eq, Show, Ord, Data, Generic)
-
-instance Serialize Expr
-
-nop :: Expr
-nop = ENop
-
 -- | The value of a field of an object in the heap
 data Local = Local
   { _localValue :: Value
@@ -301,9 +357,12 @@ data Object = Object
   { _objLocals :: Map Var Local
   , _objMethods :: Map Var Method
   , _objType :: Type
-                     -- ^ Type of the object if it was constructed with a named type constructor
+    -- ^ Type of the object if it was constructed with a named type constructor
   , _objAdversary :: Bool -- ^ Is the object an adversary?
   } deriving (Eq, Show, Ord, Data)
+
+normalMethods :: Object -> [Method]
+normalMethods o = L.filter (\m -> _methodKind m == NormalMethod) (M.elems (_objMethods o))
 
 -- | To make our lives easier reasoning about equivalences that require
 -- new to be commutative, we would like the address identifiers used on the left-hand
@@ -342,37 +401,38 @@ data Place = Place
   , _placeType :: Type
   }
 
--- | Propositions. These are used both to keep track of the path condition
--- as well as for the verification conditions we generate later on.
-data Prop
-  = Value :=: Value
-  | Not Prop
-  | Forall [(Var, Type)]
-           Prop
-  | Prop :=>: Prop
-  | Prop :&: Prop
-  | PTrue
-  | PFalse
-  deriving (Eq, Show, Ord, Data, Generic)
-
-instance Serialize Prop
-
-conjunction :: [Prop] -> Prop
-conjunction [] = PTrue
-conjunction [p] = p
-conjunction ps = L.foldr1 (:&:) ps
-
--- | A path condition is a list of propositions that all hold on a given path
--- These could be stored as just one big conjunction instead, but representing
--- them as a list simplifies reasoning about which paths are prefixes of others.
-type PathCond = [Prop]
-
 data Binding = Binding
   { _bindingName :: Var
   , _bindingConst :: Bool
   } deriving (Eq, Ord, Show)
 
--- | Proof hints. These include relational invariants, use of assumptions
+data Diff
+  = NewField Field
+  | DeleteField Var
+  | OverrideMethod Expr -- assumes expr is an EMethod
+  | DeleteMethod Var
+  deriving (Show, Eq, Ord)
+
+L.concat <$>
+  Monad.mapM
+    Lens.makeLenses
+    [ ''Method
+    , ''Object
+    , ''Context
+    , ''Place
+    , ''FunDecl
+    , ''Binding
+    , ''Local
+    , ''Field
+    , ''Expr
+    , ''Value
+    ]
+
+-- ----------------------------------------------------------------------------
+-- Proof hints
+-- ----------------------------------------------------------------------------
+
+-- | Proof hints include relational invariants, use of assumptions
 -- and controlling convenience features such as automatic inference of relational
 -- equalities.
 data ProofHint
@@ -413,12 +473,27 @@ instance PartialEq ProofHint where
   UseAddressBijection m === UseAddressBijection m' = Just (m == m')
   UseAddressBijection _ === _ = Just False
 
-data Diff
-  = NewField Field
-  | DeleteField Var
-  | OverrideMethod Expr -- assumes expr is an EMethod
-  | DeleteMethod Var
-  deriving (Show, Eq, Ord)
+-- | Convenience function for expression that both sides agree on looking
+-- up a series of fields. @[a, b, c]@ represents looking up field @a.b.c@.
+fieldsEqual :: [Var] -> [Var] -> ProofHint
+fieldsEqual fieldsL fieldsR = EqualInv (getField fieldsL) (getField fieldsR)
+  where
+    getField :: [Var] -> Addr -> Context -> Value
+    getField [] _ _ = error "Empty list of fields"
+    getField [x] addr ctx
+      | Just v <-
+         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x .
+         localValue = v
+      | otherwise = error $ "getField: No such field: " ++ x
+    getField (x:xs) addr ctx
+      | Just (VRef addr') <-
+         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x .
+         localValue = getField xs addr' ctx
+      | otherwise = error $ "Non-reference in field lookup"
+
+-- | Like 'fieldsEqual' but looking up the same fields on both sides.
+fieldEqual :: [Var] -> ProofHint
+fieldEqual fields = fieldsEqual fields fields
 
 -- | One part of a quivela proof, which is either an expression, or a proof hint.
 -- An followed by a hint and another expression is verified using that hint,
@@ -436,21 +511,6 @@ instance Show ProofPart where
   show (Prog e) = "Program:\n" ++ show e
   show (PDiff d) = "Diff:\n" ++ show d
   show _ = "<invariant>"
-
-L.concat <$>
-  Monad.mapM
-    Lens.makeLenses
-    [ ''Method
-    , ''Object
-    , ''Context
-    , ''Place
-    , ''FunDecl
-    , ''Binding
-    , ''Local
-    , ''Field
-    , ''Expr
-    , ''Value
-    ]
 
 -- | Returns a set of free variables in the expression and a set of bound identifiers
 -- that may be bound by execution of the expression. Note that some executions may not
@@ -586,3 +646,9 @@ type Config = (Expr, Context, PathCond)
 type Result = (Value, Context, PathCond)
 
 type Results = [Result]
+
+-- | Throws an error if there is more than one result in the list. Used for
+-- evaluating programs that are not supposed to have more than one result.
+singleResult :: Results -> Result
+singleResult [res@(_, _, _)] = res
+singleResult ress = error $ "Multiple results: " ++ show ress

@@ -1,5 +1,7 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
+{-# LANGUAGE LambdaCase #-}
+
 module Quivela.Diff
   ( applyDiffs
   ) where
@@ -11,48 +13,41 @@ import qualified Quivela.Language as Q
 import Quivela.Language (Diff, Expr, Field, Var)
 import Quivela.Prelude
 
-seqToList :: Expr -> [Expr]
-seqToList Q.ENop = []
-seqToList (Q.ESeq e1 e2) = e1 : seqToList e2
-seqToList _ = error "Invalid argument to seqToList"
-
 replaceMethod :: Expr -> Expr -> Expr
-replaceMethod emtd ebody
-  | L.any
-     (\e ->
-        case e of
-          mtd'@(Q.EMethod {}) -> mtd' ^. Q.emethodName == emtd ^. Q.emethodName
-          _ -> False)
-     bodyExprs = L.foldr Q.ESeq Q.ENop $ fmap replace bodyExprs
+replaceMethod emtd ebody = Q.exprsToSeq (L.reverse exprs'')
   where
-    replace mtd'@(Q.EMethod {})
-      | mtd' ^. Q.emethodName == emtd ^. Q.emethodName = emtd
-      | otherwise = mtd'
-    replace e = e
-    bodyExprs = seqToList ebody
-replaceMethod emtd ebody = L.foldr Q.ESeq Q.ENop (seqToList ebody ++ [emtd])
+    f (True, exprs) expr = (True, expr : exprs)
+    f (False, exprs) expr@(Q.EMethod {})
+      | expr ^. Q.emethodName == emtd ^. Q.emethodName = (True, emtd : exprs)
+      | otherwise = (False, expr : exprs)
+    f (False, exprs) expr = (False, expr : exprs)
+    (changed, exprs') = L.foldl f (False, []) (Q.seqToExprs ebody)
+    exprs'' =
+      if changed
+        then exprs'
+        else emtd : exprs'
 
 replaceField :: Field -> [Field] -> [Field]
-replaceField newField oldFields
-  | L.any
-     (\oldField -> oldField ^. Q.fieldName == newField ^. Q.fieldName)
-     oldFields = fmap replace oldFields
+replaceField newField oldFields = L.reverse fields''
   where
-    replace oldField
-      | oldField ^. Q.fieldName == newField ^. Q.fieldName = newField
-      | otherwise = oldField
-replaceField newField oldFields = oldFields ++ [newField]
+    f (True, fields) field = (True, field : fields)
+    f (False, fields) field
+      | field ^. Q.fieldName == newFieldName = (True, newField : fields)
+      | otherwise = (False, field : fields)
+    (changed, fields') = L.foldl f (False, []) oldFields
+    fields'' =
+      if changed
+        then fields'
+        else newField : fields'
+    newFieldName = newField ^. Q.fieldName
 
 deleteMethod :: Var -> Expr -> Expr
-deleteMethod mtdName body =
-  Lens.over
-    (Lens.iso seqToList (L.foldr Q.ESeq Q.ENop))
-    (L.filter
-       (\e ->
-          case e of
+deleteMethod mtdName = Q.exprsToSeq . f . Q.seqToExprs
+  where
+    f = L.filter
+        (\case
             oldMtd@Q.EMethod {} -> oldMtd ^. Q.emethodName /= mtdName
-            _ -> True))
-    body
+            _ -> True)
 
 applyDiff :: Diff -> Expr -> Expr
 applyDiff d en@(Q.ENew {}) =

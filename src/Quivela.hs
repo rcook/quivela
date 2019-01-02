@@ -6,6 +6,7 @@ module Quivela
   , prog'
   , prove
   , prove'
+  , proveFailFast
   -- * Parsers.  Generally these will only be used by the quotations, but need to be in scope.
   , parseExpr
   , parseProofPart
@@ -15,10 +16,11 @@ module Quivela
   , (≈)
   -- * Proof hints
   , ProofHint(Admit, NoAddressBijection, NoInfer, Note)
-  , ProofPart(Hint)
   , fieldEqual
   , fieldsEqual
   , rewrite
+  -- * Proof parts
+  , ProofPart(Hint)
   ) where
 
 import Quivela.Language
@@ -26,7 +28,6 @@ import Quivela.Parse
 import Quivela.Prelude
 import Quivela.QuasiQuote
 import Quivela.SymEval
-import Quivela.Verify
 
 -- | Like '~~' but using a nicer-looking unicode operator instead.
 (≈) :: a -> [a] -> [a]

@@ -6,13 +6,15 @@
 import qualified Control.DeepSeq as DeepSeq
 import qualified Control.Exception as Exception
 import Control.Exception (SomeException)
+import qualified Control.Lens as Lens
+import Control.Lens((&), (.~))
 import qualified Data.Map as M
 import Prelude
 import Quivela
 import Quivela.Language
   ( Context(..)
   , Expr(..)
-  , Proof(..)
+  , Proof
   , ProofHint(..)
   , ProofPart(..)
   , SymValue(..)
@@ -28,12 +30,19 @@ import qualified Test.HUnit as T
 import Test.HUnit (Assertion, Counts(..), Test(TestCase, TestList), (~:))
 
 -- Don't print garbage during tests.  If a test fails, debug it separately.
-env = Q.emptyVerifyEnv {Q._debugFlag = False}
+env = Q.emptyVerifyEnv & Q.debugFlag .~ False
 
 assertVerified :: String -> Expr -> Proof -> Test
 assertVerified msg prefix proof =
   let t = do
         res <- prove' env prefix proof
+        T.assertEqual msg 0 res
+   in msg ~: TestCase t
+
+assertVerifiedDebug :: String -> Expr -> Proof -> Test
+assertVerifiedDebug msg prefix proof =
+  let t = do
+        res <- prove' (Q.emptyVerifyEnv & Q.debugFlag .~ True) prefix proof
         T.assertEqual msg 0 res
    in msg ~: TestCase t
 
@@ -285,6 +294,12 @@ new(i:int=0) {
       [prog| new () { method enc(m) { <t> = (<tg>=m & <tg>)  }} |] :
       []
     ]
+
+bug :: Test
+bug = assertVerifiedDebug "constant map comprehension" Q.nop $
+    [prog| new() { method f() { ([x ↦ 1 | 1])[5] } } |] ≈
+    [prog| new() { method f() { 1 } } |] :
+    []
 
 tests :: Test
 tests =
@@ -778,7 +793,8 @@ main = do
   let t =
         case args of
           [] -> tests
-          ["bug"] -> failingTests
+          ["bug"] -> bug
+          ["failing"] -> failingTests
           _ -> error "Illegal arguments"
   counts@Counts {cases, tried, errors, failures} <- T.runTestTT t
   if failures > 0 || errors > 0

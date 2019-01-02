@@ -73,6 +73,7 @@ tests:
     - HUnit
     - containers
     - deepseq
+    - lens
     - quivela
   cpp-example:
     main: examples/CppExample.hs

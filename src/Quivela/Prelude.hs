@@ -54,6 +54,7 @@ module Quivela.Prelude
   , fromIntegral
   , fst
   , id
+  , impossible
   , map
   , mempty
   , not
@@ -75,3 +76,6 @@ import Data.Set (Set)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import Prelude
+
+impossible :: a
+impossible = error "Impossible"
