@@ -2,13 +2,12 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE QuasiQuotes #-}
 
+import Control.Lens (set)
 import Prelude
 import Quivela
 import qualified System.Exit as E
 
-program =
-  prove'
-    emptyVerifyEnv
+program = prove' emptyVerifyEnv
     [prog'|
 function skenc(k, a, m)
 function skdec(k, a, c)

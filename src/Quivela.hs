@@ -7,11 +7,15 @@ module Quivela
   , prove
   , prove'
   , proveFailFast
+  , proveFailFast'
   -- * Parsers.  Generally these will only be used by the quotations, but need to be in scope.
   , parseExpr
   , parseProofPart
   -- * Environment
   , emptyVerifyEnv
+  , jobName
+  , tempDir
+  , writeAllVCsToFile
   -- * Proof steps
   , (≈)
   -- * Proof hints

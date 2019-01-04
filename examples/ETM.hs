@@ -84,7 +84,6 @@ assume CpaI(_e) ≈ CpaC(_e)
       cpa_d = fieldEqual ["cpa", "d"]
       d = fieldEqual ["d"]
       e_d = fieldEqual ["e", "d"]
-      cpa_h = fieldEqual ["cpa", "h"]
    in [prog| EtM(_e,_mac) |] ≈ Hint [Note "Unfold definition of EtM"] :
       [prog|
 new (const e=_e, const mac=_mac) {

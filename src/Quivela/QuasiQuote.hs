@@ -11,14 +11,15 @@ module Quivela.QuasiQuote
   , proveFailFast'
   ) where
 
+import qualified Control.Lens as Lens
 import qualified Control.Monad as Monad
 import qualified Data.List as L
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as TH
-import qualified Quivela.Language as Q
-import Quivela.Language(ProofPart(..))
-import Quivela.Prelude
 import qualified Quivela.Diff as Q
+import qualified Quivela.Language as Q
+import Quivela.Language (ProofPart(..))
+import Quivela.Prelude
 import qualified Quivela.SymEval as Q
 import qualified Quivela.Verify as Q
 import qualified System.Timer as Timer
@@ -52,11 +53,13 @@ prove env prefix steps = do
 
 -- | A non-compile-time version of 'prove'.
 prove' :: Q.VerifyEnv -> Q.Expr -> [Q.ProofPart] -> IO Int
-prove' env prefix steps = do
-  (_, results) <- Timer.time $ Monad.mapM doCheck (toSteps steps)
-  return $ L.sum results
-  where
-    doCheck = Q.runVerify env . Q.proveStep prefix
+prove' env prefix steps =
+  let doCheck (i, step) =
+        Q.runVerify (Lens.set Q.jobNote (Q.stepNote step) (Lens.set Q.jobStep i env)) (Q.proveStep prefix step)
+   in do (_, results) <-
+           Timer.time $
+           Monad.mapM doCheck (L.zip [(0 :: Int) ..] (toSteps steps))
+         return $ L.sum results
 
 -- | Fail at first failure.  Return 0 if all succeed, 1 if there's a failure
 proveFailFast :: Q.VerifyEnv -> Q.Expr -> [Q.ProofPart] -> TH.Q [TH.Dec]
@@ -68,15 +71,15 @@ proveFailFast env prefix steps = do
 
 proveFailFast' :: Q.VerifyEnv -> Q.Expr -> [Q.ProofPart] -> IO Int
 proveFailFast' env prefix steps =
-  Monad.foldM
-    (\c s ->
-       if c > 0
-         then return c
-         else doCheck s)
-    0
-    (toSteps steps)
-  where
-    doCheck = Q.runVerify env . Q.proveStep prefix
+  let doCheck (i, step) =
+        Q.runVerify (Lens.set Q.jobNote (Q.stepNote step) (Lens.set Q.jobStep i env)) (Q.proveStep prefix step)
+   in Monad.foldM
+        (\c s ->
+           if c > 0
+             then return c
+             else doCheck s)
+        0
+        (L.zip [(0 :: Int) ..] (toSteps steps))
 
 -- | Convert a series of proof parts into a sequence of steps
 toSteps :: [ProofPart] -> [Q.Step]

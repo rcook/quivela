@@ -66,6 +66,7 @@ module Quivela.Prelude
   , snd
   , uncurry
   , undefined
+  , writeFile
   ) where
 
 import Data.Data (Data)

@@ -44,10 +44,11 @@ replaceField newField oldFields = L.reverse fields''
 deleteMethod :: Var -> Expr -> Expr
 deleteMethod mtdName = Q.exprsToSeq . f . Q.seqToExprs
   where
-    f = L.filter
+    f =
+      L.filter
         (\case
-            oldMtd@Q.EMethod {} -> oldMtd ^. Q.emethodName /= mtdName
-            _ -> True)
+           oldMtd@Q.EMethod {} -> oldMtd ^. Q.emethodName /= mtdName
+           _ -> True)
 
 applyDiff :: Diff -> Expr -> Expr
 applyDiff d en@(Q.ENew {}) =

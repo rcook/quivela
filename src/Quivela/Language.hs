@@ -400,7 +400,7 @@ emptyObject :: Object
 emptyObject = Object M.empty M.empty TAny False
 
 adversary :: Object
-adversary = emptyObject { _objAdversary = True }
+adversary = emptyObject {_objAdversary = True}
 
 normalMethods :: Object -> [Method]
 normalMethods o =

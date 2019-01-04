@@ -16,12 +16,13 @@
 module Quivela.Verify
   ( Step(Step)
   , proveStep
+  , stepNote
   ) where
 
 import Control.Applicative ((<*>), (<|>))
 import qualified Control.Arrow as Arrow
 import qualified Control.Lens as Lens
-import Control.Lens ((%=), (.=), (?~), (^.), (^?))
+import Control.Lens ((%=), (+=), (.=), (?~), (^.), (^?))
 import qualified Control.Monad.RWS.Strict as Monad
 import Control.Monad.RWS.Strict (MonadIO, MonadState, MonadWriter, RWST, (=<<))
 import qualified Data.ByteString as ByteString
@@ -60,9 +61,11 @@ import qualified Quivela.SymEval as Q
 import Quivela.SymEval (Verify)
 import qualified Quivela.Util as Q
 import qualified Quivela.VerifyPreludes as Q
+import qualified System.Directory as Directory
 import qualified System.IO as IO
 import qualified System.IO.Temp as Temp
 import qualified System.Timer as Timer
+import Text.Printf (printf)
 
 -- ----------------------------------------------------------------------------
 -- Util
@@ -867,11 +870,7 @@ methodEquivalenceVCs mtd invs args (VRef a1, ctx1, pathCond1) (VRef a1', ctx1', 
   ctxH1' <- havocContext ctx1'
   let m = mtd ^. Q.methodName
   let cs = map EConst args
-  results <-
-    Q.symEval
-      ( ECall (EConst (VRef a1)) m cs
-      , ctxH1
-      , pathCond1)
+  results <- Q.symEval (ECall (EConst (VRef a1)) m cs, ctxH1, pathCond1)
   results' <-
     Q.symEval
       ( ECall (EConst (VRef a1')) m cs
@@ -907,17 +906,28 @@ checkVCs vcs = do
   where
     writeToZ3File :: VC -> Verify ()
     writeToZ3File vc = do
-      tmp <- Monad.liftIO Temp.getCanonicalTemporaryDirectory
-      dir <- Monad.liftIO $ Temp.createTempDirectory tmp "vcs"
+      job <- Lens.view Q.jobName
+      step <- Lens.view Q.jobStep
+      note <- Lens.view Q.jobNote
+      tempDir <- Lens.view Q.tempDir
+      tmp <-
+        Maybe.maybe
+          (Monad.liftIO Temp.getCanonicalTemporaryDirectory)
+          return
+          tempDir
+      let dir = tmp ++ "/quivela/" ++ job ++ "/" ++ printf "step-%04d-%s" step note
+      Monad.liftIO $ Directory.createDirectoryIfMissing True dir
       prelude <- Monad.liftIO Q.z3Prelude
       pctx <- Lens.use Q.verifyPrefixCtx
       ((), vcLines) <- runEmitter pctx (toZ3_ vc)
       -- FIXME: This nub is required, but I have no idea why.  Remove it when you figure it out.
       let _vcLines = L.nub vcLines
       let lines = prelude : _vcLines ++ ["(check-sat)"]
-      tempFile <-
-        Monad.liftIO $ Temp.writeTempFile dir "z3-vc.smt2" (L.unlines lines)
-      Q.debug ("Writing vc to file: " ++ tempFile)
+      files <- Lens.use Q.tempFiles
+      let file = dir ++ "/" ++ printf "vc-%04d" files ++ ".smt2"
+      Q.debug ("Writing vc to file: " ++ file)
+      Monad.liftIO $ writeFile file (L.unlines lines)
+      Q.tempFiles += 1
     checkWithZ3 :: VC -> Verify Bool
     checkWithZ3 vc = do
       write <- Lens.view Q.writeAllVCsToFile
@@ -944,7 +954,6 @@ checkVCs vcs = do
 -- ----------------------------------------------------------------------------
 -- Step
 -- ----------------------------------------------------------------------------
-
 -- | Quivela proofs are a series of equivalent expressions and a list of
 -- invariants that are needed to verify this step.
 data Step = Step
@@ -954,13 +963,9 @@ data Step = Step
   }
 
 stepNote :: Step -> String
-stepNote Step {hints} =
-  L.intercalate ":" $
-  Maybe.mapMaybe
-    (\case
-       Note n -> Just n
-       _ -> Nothing)
-    hints
+stepNote Step {hints = []} = "no-note"
+stepNote Step {hints = Note n : _} = n
+stepNote s@(Step {hints = _ : hs}) = stepNote s{hints = hs}
 
 checkEqv :: Expr -> Step -> Verify [(Var, [VC])]
 checkEqv _ Step {lhs, hints, rhs}

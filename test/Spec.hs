@@ -7,7 +7,7 @@ import qualified Control.DeepSeq as DeepSeq
 import qualified Control.Exception as Exception
 import Control.Exception (SomeException)
 import qualified Control.Lens as Lens
-import Control.Lens((&), (.~))
+import Control.Lens ((&), (.~))
 import qualified Data.Map as M
 import Prelude
 import Quivela
@@ -19,7 +19,8 @@ import Quivela.Language
   , ProofPart(..)
   , SymValue(..)
   , Type(..)
-  , Value(..))
+  , Value(..)
+  )
 import qualified Quivela.Language as Q
 import qualified Quivela.Parse as Q
 import qualified Quivela.SymEval as Q
@@ -42,7 +43,8 @@ assertVerified msg prefix proof =
 assertVerifiedDebug :: String -> Expr -> Proof -> Test
 assertVerifiedDebug msg prefix proof =
   let t = do
-        res <- prove' (Q.emptyVerifyEnv & Q.writeAllVCsToFile .~ True) prefix proof
+        res <-
+          prove' (Q.emptyVerifyEnv & Q.writeAllVCsToFile .~ True) prefix proof
         T.assertEqual msg 0 res
    in msg ~: TestCase t
 
@@ -296,10 +298,11 @@ new(i:int=0) {
     ]
 
 bug :: Test
-bug = assertVerifiedDebug "constant map comprehension" Q.nop $
-    [prog| new() { method f() { ([x ↦ 1 | 1])[5] } } |] ≈
-    [prog| new() { method f() { 1 } } |] :
-    []
+bug =
+  assertVerifiedDebug "constant map comprehension" Q.nop $
+  [prog| new() { method f() { ([x ↦ 1 | 1])[5] } } |] ≈
+  [prog| new() { method f() { 1 } } |] :
+  []
 
 tests :: Test
 tests =

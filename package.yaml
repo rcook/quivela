@@ -82,6 +82,7 @@ tests:
   envelope:
     main: examples/Envelope.hs
     dependencies:
+    - lens
     - quivela
   envelope-small:
     main: examples/EnvelopeSmall.hs

@@ -10,15 +10,18 @@ module Quivela.SymEval
   ( VerifyEnv
   , cacheFile
   , debugFlag
+  , jobName
+  , jobNote
+  , jobStep
+  , tempDir
   , writeAllVCsToFile
-    -- empty
   , emptyVerifyEnv
     -- * VerifyState
   , VerifyState
   , alreadyVerified
+  , tempFiles
   , verifyPrefixCtx
   , z3Proc
-    -- empty
   , newVerifyState
     -- * Verify
   , Verify
@@ -194,7 +197,11 @@ data VerifyEnv = VerifyEnv
     -- ^ Proof cache location
   , _debugFlag :: Bool
     -- ^ print debugging information
+  , _jobName :: String
+  , _jobNote :: String
+  , _jobStep :: Int
   , _splitEq :: Bool
+  , _tempDir :: Maybe FilePath
     -- ^ Split == operator into two paths during symbolic evaluation?
   , _writeAllVCsToFile :: Bool
     -- ^ For debugging, write all VCs to file, even if they succeed
@@ -205,9 +212,15 @@ emptyVerifyEnv =
   VerifyEnv
     { _cacheFile = Nothing
     , _debugFlag = True
+    , _jobName = "quivela"
+    , _jobNote = "no-note"
+    , _jobStep = 0
     , _splitEq = False
+    , _tempDir = Nothing
     , _writeAllVCsToFile = False
     }
+
+Lens.makeLenses ''VerifyEnv
 
 data VerifyState = VerifyState
   { _alreadyVerified :: Set (Expr, Expr)
@@ -216,12 +229,15 @@ data VerifyState = VerifyState
     -- in some cases
   , _nextVar :: Map String Integer
     -- ^ Map of already used integers for fresh variable prefix
+  , _tempFiles :: Int
   , _verifyPrefixCtx :: Context
     -- ^ The context returned by the "prefix" program of a proof that defines constructors,
     -- lists assumptions, etc.
   , _z3Proc :: (Handle, Handle, ProcessHandle)
     -- ^ For performance reasons, we spawn a Z3 process once and keep it around
   }
+
+Lens.makeLenses ''VerifyState
 
 -- | Return an initial state for the verifier monad
 newVerifyState :: VerifyEnv -> IO VerifyState
@@ -254,12 +270,10 @@ newVerifyState env = do
     VerifyState
       { _alreadyVerified = verificationCache
       , _nextVar = M.empty
+      , _tempFiles = 0
       , _verifyPrefixCtx = Q.emptyCtx
       , _z3Proc = (hin, hout, procHandle)
       }
-
--- Generate lenses for all types defined above:
-L.concat <$> Monad.mapM Lens.makeLenses [''VerifyEnv, ''VerifyState]
 
 -- | A monad for generating and discharging verification conditions, which
 -- allows generating free variables and calling external solvers.
@@ -886,7 +900,8 @@ symEvalCall (VRef addr) name (args, ctx, pathCond)
       ("Called non-existent method: " ++ name ++ "[" ++ show addr ++ "]")
       ctx
 symEvalCall VNil "Z" ([m], ctx, pathCond) = return [(Sym (Z m), ctx, pathCond)]
-symEvalCall VNil "rnd" ([], ctx, pathCond) = symEval (ENew [] ENop, ctx, pathCond)
+symEvalCall VNil "rnd" ([], ctx, pathCond) =
+  symEval (ENew [] ENop, ctx, pathCond)
 symEvalCall VNil "+" ([arg1, arg2], ctx, pathCond)
   | Q.isSym arg1 || Q.isSym arg2 = return [(Sym (Add arg1 arg2), ctx, pathCond)]
   | VInt n <- arg1
@@ -945,8 +960,10 @@ symEvalCall VNil name (args, ctx, pathCond)
     callMethod (ctx ^. Q.ctxThis) mtd (args, ctx, pathCond)
   | Just mtd <- Q.findMethod 0 name ctx = callMethod 0 mtd (args, ctx, pathCond)
   | Just funDecl <- ctx ^? Q.ctxFunDecls . Lens.ix name = do
-    Cond.unless (L.length args == L.length (funDecl ^. Q.funDeclArgs))
-      (error $ "Wrong number of arguments in call to uninterpreted function: " ++ show (name, args))
+    Cond.unless
+      (L.length args == L.length (funDecl ^. Q.funDeclArgs))
+      (error $ "Wrong number of arguments in call to uninterpreted function: " ++
+       show (name, args))
     return [(Sym (Call name args), ctx, pathCond)]
   | otherwise = error $ "Call to non-existent method: " ++ name
 symEvalCall (Sym sv) name (args, ctx, pathCond) = do
