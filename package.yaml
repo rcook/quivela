@@ -25,6 +25,7 @@ library:
   - Quivela.Diff
   - Quivela.Language
   - Quivela.Parse
+  - Quivela.Pretty
   - Quivela.QuasiQuote
   - Quivela.SymEval
   - Quivela.Util
@@ -55,6 +56,7 @@ library:
   - lens
   - mtl
   - parsec
+  - prettyprinter
   - process
   - syb
   - template-haskell

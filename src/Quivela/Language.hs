@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -137,7 +138,10 @@ import qualified Control.Monad as Monad
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Text.Prettyprint.Doc as P
+import Data.Text.Prettyprint.Doc (Doc, Pretty(pretty), (<+>), (<>))
 import Quivela.Prelude
+import qualified Quivela.Pretty as P
 import Quivela.Util (PartialEq(..))
 
 type Addr = Integer
@@ -158,6 +162,14 @@ data Type
 
 instance Serialize Type
 
+instance Pretty Type where
+  pretty TInt = pretty "Int"
+  pretty (TTuple ts) = P.tupled $ map pretty ts
+  pretty (TMap t1 t2) = pretty "Map" <+> pretty t1 <+> pretty t2
+  pretty TAny = pretty "Any"
+  pretty (TSet t) = pretty "Set" <+> pretty t
+  pretty (TNamed s) = pretty s
+
 -- ----------------------------------------------------------------------------
 -- Propositions
 -- ----------------------------------------------------------------------------
@@ -176,6 +188,18 @@ data Prop
   deriving (Eq, Show, Ord, Data, Generic)
 
 instance Serialize Prop
+
+instance Pretty Prop where
+  pretty (p1 :=: p2) = P.binop "≈" p1 p2
+  pretty (Not p) = pretty "¬" <+> pretty p
+  pretty (Forall xs p) =
+    pretty "∀" <> P.hsep (map (\(v, t) -> pretty v <> P.colon <+> pretty t) xs) <>
+    P.dot <+>
+    pretty p
+  pretty (p1 :=>: p2) = P.binop "⊃" p1 p2
+  pretty (p1 :&: p2) = P.binop "∧" p1 p2
+  pretty PTrue = pretty "⊤"
+  pretty PFalse = pretty "⊥"
 
 conjunction :: [Prop] -> Prop
 conjunction [] = PTrue
@@ -227,6 +251,7 @@ data Expr
            Expr
   | EIntersect Expr
                Expr
+  -- FIXME: We're losing the information about whether the initial values are const or not
   | ETypeDecl { _typedeclName :: String
               , _typedeclFormals :: [(Var, Bool, Type)]
               , _typedeclValues :: [(Var, Value)]
@@ -249,6 +274,73 @@ data Expr
   deriving (Eq, Show, Ord, Data, Generic)
 
 instance Serialize Expr
+
+prettyArgType :: (String, Type) -> Doc ann
+prettyArgType (x, TAny) = pretty x
+prettyArgType (x, t) = pretty x <> P.colon <+> pretty t
+
+-- FIXME: Add precedence parentheses
+instance Pretty Expr where
+  pretty ENop = error "pretty nop"
+  pretty (EAssign l r) = pretty l <+> pretty "≔" <+> pretty r
+  pretty (EVar x) = pretty x
+  pretty (EConst v) = pretty v
+  pretty (EProj e v) = pretty e <> P.dot <> pretty v
+  pretty (EIdx e1 e2) = pretty e1 <> P.lbracket <> pretty e2 <> P.rbracket
+  pretty (ENew fs e) =
+    P.nest
+      P.step
+      (pretty "new" <+> P.tupled (map pretty fs) <+> P.lbrace <> P.line <>
+       P.vcat (map pretty (seqToExprs e))) <>
+    P.line <>
+    P.rbrace
+  pretty (ENewConstr n xs) =
+    pretty "new" <+> pretty n <> P.tupled (map pretty xs)
+  pretty (EMethod f xs e k) =
+    P.nest
+      P.step
+      (pretty k <+> pretty f <> P.tupled (map prettyArgType xs) <+> P.lbrace <>
+       P.line <>
+       P.vsep (map pretty $ seqToExprs e)) <>
+    P.line <>
+    P.rbrace
+  pretty (ECall (EConst VNil) "&" xs) =
+    P.hsep (L.intersperse (pretty "&") (map pretty xs))
+  pretty (ECall (EConst VNil) m xs) = pretty m <> P.tupled (map pretty xs)
+  pretty (ECall e m xs) =
+    pretty e <> P.dot <> pretty m <> P.tupled (map pretty xs)
+  pretty (ETuple es) = P.encloseSep P.langle P.rangle P.comma (map pretty es)
+  pretty (ETupleProj e1 e2) = pretty e1 <> P.dot <> pretty e2
+  pretty (ESeq _ _) = error "pretty seq"
+  pretty (EIf e1 e2 e3) =
+    P.nest
+      P.step
+      ((pretty "if" <+> pretty e1) <> P.line <> (pretty "then" <+> pretty e2) <>
+       P.line <>
+       (pretty "else" <+> pretty e3))
+  pretty (EIn x s) = P.binop "∈" x s
+  pretty (ESubmap x y) = P.binop "⊆" x y
+  pretty (EUnion x y) = P.binop "∪" x y
+  pretty (EIntersect x y) = P.binop "∩" x y
+  pretty (ETypeDecl name xs vs e) =
+    P.nest
+      P.step
+      (pretty "type" <+> pretty name <>
+       P.tupled (L.map (\(x, imm, t) -> P.const imm <> prettyArgType (x, t)) xs) <+>
+       P.lbrace <>
+       P.line <>
+       P.vsep (map (uncurry (P.binop "=")) vs ++ map pretty (seqToExprs e))) <>
+    P.line <>
+    P.rbrace
+  pretty (ESetCompr _ e p) =
+    P.lbrace <+> pretty e <+> pretty "|" <+> pretty p <+> P.rbrace
+  pretty (EMapCompr x e p) =
+    P.lbracket <+> pretty x <+> pretty "↦" <+> pretty e <+> pretty "|" <+>
+    pretty p <+>
+    P.rbracket
+  pretty (EAssume e1 e2) =
+    pretty "assume" <+> pretty e1 <+> pretty "≈" <+> pretty e2
+  pretty (EFunDecl f xs) = pretty f <> P.tupled (map pretty xs)
 
 nop :: Expr
 nop = ENop
@@ -273,11 +365,20 @@ data Field = Field
 
 instance Serialize Field
 
+instance Pretty Field where
+  pretty (Field x e t imm) =
+    P.const imm <> prettyArgType (x, t) <+> P.equals <+> pretty e
+
 data MethodKind
   = NormalMethod
   | LocalMethod
   | Invariant
   deriving (Eq, Show, Ord, Data, Generic)
+
+instance Pretty MethodKind where
+  pretty NormalMethod = pretty "method"
+  pretty LocalMethod = pretty "local"
+  pretty Invariant = pretty "invariant"
 
 instance Serialize MethodKind
 
@@ -336,6 +437,41 @@ data SymValue
 
 instance Serialize SymValue
 
+instance Pretty SymValue where
+  pretty (SymVar x t) = pretty x <> P.colon <+> pretty t
+  pretty (Insert k v m) =
+    P.lbracket <> pretty k <+> pretty "↦" <+> pretty v <> P.rbracket <> pretty m
+  pretty (Proj v i) = pretty v <> P.dot <> pretty i
+  pretty (Lookup m x) = pretty m <> P.dot <> pretty x
+  pretty (AdversaryCall xs) =
+    pretty "adversary" <> P.tupled [P.list $ L.map (P.list . map pretty) xs]
+  pretty (Add x y) = P.binop "+" x y
+  pretty (Sub x y) = P.binop "-" x y
+  pretty (Mul x y) = P.binop "*" x y
+  pretty (Div x y) = P.binop "/" x y
+  pretty (Lt x y) = P.binop "<" x y
+  pretty (Le x y) = P.binop "≤" x y
+  pretty (SetCompr e x p) =
+    P.lbrace <> pretty e <+> pretty "|" <+> pretty x <+> pretty "∈" <+> pretty p <>
+    P.rbrace
+  pretty (ITE p v1 v2) =
+    pretty "if" <+> pretty p <+> pretty "then" <+> pretty v1 <+> pretty "else" <+>
+    pretty v2
+  pretty (MapCompr x e1 e2) =
+    P.lbracket <> pretty x <+> pretty "↦" <+> pretty e1 <+> pretty "|" <+>
+    pretty e2 <>
+    P.rbracket
+  pretty (In x s) = P.binop "∈" x s
+  pretty (Union x s) = P.binop "∪" x s
+  pretty (MapUnion m1 m2) = P.binop "∪" m1 m2
+  pretty (Intersect s1 s2) = P.binop "∩" s1 s2
+  pretty (Submap m1 m2) = P.binop "⊆" m1 m2
+  pretty (SymRef x) = pretty x
+  pretty (Ref x) = pretty "ref" <+> pretty x
+  pretty (Deref e m) = pretty e <> P.dot <> pretty m
+  pretty (Z v) = pretty "Z" <> P.tupled [pretty v]
+  pretty (Call f vs) = pretty f <> P.tupled (map pretty vs)
+
 -- Define how to insert into a symbolic value via a lens:
 type instance Lens.Index SymValue = Value
 
@@ -355,6 +491,14 @@ data Value
   deriving (Eq, Show, Ord, Data, Generic)
 
 instance Serialize Value
+
+instance Pretty Value where
+  pretty (VInt n) = pretty n
+  pretty (VMap m) = P.mapP m
+  pretty (VTuple vs) = P.tupled $ map pretty vs
+  pretty VNil = pretty "nil"
+  pretty (VSet s) = P.setP s
+  pretty (Sym v) = pretty v
 
 -- | Value to use to initialize new variables:
 defaultValue :: Value
@@ -386,6 +530,16 @@ data Method = Method
   , _methodKind :: MethodKind
   } deriving (Eq, Show, Ord, Data)
 
+instance Pretty Method where
+  pretty (Method n fs b k) =
+    P.nest
+      P.step
+      (pretty k <+> pretty n <> P.tupled (L.map prettyArgType fs) <+> P.lbrace <>
+       P.line <>
+       P.vcat (map pretty $ seqToExprs b)) <>
+    P.line <>
+    P.rbrace
+
 Lens.makeLenses ''Method
 
 data Object = Object
@@ -395,6 +549,21 @@ data Object = Object
     -- ^ Type of the object if it was constructed with a named type constructor
   , _objAdversary :: Bool -- ^ Is the object an adversary?
   } deriving (Eq, Show, Ord, Data)
+
+instance Pretty Object where
+  pretty (Object l m typ a) =
+    P.object
+      (L.concat
+         [ [ pretty "type" <+> P.equals <+> pretty typ
+           , pretty "adversary" <+> P.equals <+> pretty a
+           ]
+         , map
+             (\(x, (Local v t imm)) ->
+                P.const imm <> prettyArgType(x, t) <+> P.equals <+>
+                pretty v)
+             (M.toList l)
+         , map pretty (M.elems m)
+         ])
 
 emptyObject :: Object
 emptyObject = Object M.empty M.empty TAny False
@@ -420,6 +589,9 @@ data FunDecl = FunDecl
   { _funDeclName :: String
   , _funDeclArgs :: [Var]
   } deriving (Eq, Show, Ord, Data)
+
+instance Pretty FunDecl where
+  pretty (FunDecl f xs) = pretty f <> P.tupled (L.map pretty xs)
 
 Lens.makeLenses ''FunDecl
 
@@ -454,6 +626,35 @@ data Context = Context
   } deriving (Eq, Show, Ord, Data)
 
 Lens.makeLenses ''Context
+
+instance Pretty Context where
+  pretty (Context { _ctxObjs
+                  , _ctxThis
+                  , _ctxScope
+                  , _ctxAdvCalls
+                  , _ctxTypeDecls
+                  , _ctxAllocStrategy
+                  , _ctxAssumptions
+                  , _ctxFunDecls
+                  }) =
+    P.record
+      [ ("adversary-calls", P.list $ map (P.list . map pretty) _ctxAdvCalls)
+      , ("alloc-strategy", pretty $ show _ctxAllocStrategy)
+      , ( "assums"
+        , (P.align . P.vcat) $
+          L.map
+            (\(l, r) -> pretty l <+> pretty "≈" <+> pretty r)
+            _ctxAssumptions)
+      , ("fundecls", (P.align . P.vcat) $ L.map pretty (M.elems _ctxFunDecls))
+      , ("objects", P.mapP _ctxObjs)
+      , ( "scope"
+        , P.map $
+          L.map
+            (\(x, (v, t)) -> (pretty x, pretty v <> P.colon <+> pretty t))
+            (M.toList _ctxScope))
+      , ("this", pretty _ctxThis)
+      , ("typedecls", P.mapP _ctxTypeDecls)
+      ]
 
 emptyCtx :: Context
 emptyCtx =

@@ -5,6 +5,7 @@ module Quivela.Prelude
   , Bool(False, True)
   , Char
   , Data
+  , Double
   , Either(Left, Right)
   , Eq
   , FilePath
