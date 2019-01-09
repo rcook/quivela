@@ -14,6 +14,7 @@ import Quivela
 import Quivela.Language
   ( Context(..)
   , Expr(..)
+  , Method(..)
   , Proof
   , ProofHint(..)
   , ProofPart(..)
@@ -186,16 +187,15 @@ parserTests =
               { _newFields = []
               , _newBody =
                   ESeq
-                    (EMethod
-                       { _emethodName = "f"
-                       , _emethodArgs = [("x", TInt)]
-                       , _emethodBody =
-                           EAssign
-                             { _lhs = EVar "x"
-                             , _rhs = ETuple [EConst (VInt 1), EConst (VInt 2)]
-                             }
-                       , _emethodKind = Q.NormalMethod
-                       })
+                    (EMethod $
+                     Method
+                       "f"
+                       [("x", TInt)]
+                       (EAssign
+                          { _lhs = EVar "x"
+                          , _rhs = ETuple [EConst (VInt 1), EConst (VInt 2)]
+                          })
+                       Q.NormalMethod)
                     ENop
               }
         , _callName = "f"

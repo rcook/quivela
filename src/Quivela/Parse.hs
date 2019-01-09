@@ -24,6 +24,7 @@ import Quivela.Language
   ( Diff(..)
   , Expr(..)
   , Field(..)
+  , Method(..)
   , MethodKind(..)
   , ProofPart(..)
   , Type(..)
@@ -355,17 +356,20 @@ methodArg =
       return (x, ty)) <?>
   "method argument"
 
-methodExpr :: Parser Expr
-methodExpr =
+method :: Parser Method
+method =
   (do kind <-
         (reserved "method" *> pure NormalMethod) <|>
         (reserved "invariant" *> pure Invariant) <|>
         (reserved "local" *> pure LocalMethod)
-      EMethod <$> identifier <*>
+      Method <$> identifier <*>
         (symbol "(" *> methodArg `sepBy` symbol "," <* symbol ")") <*>
         (symbol "{" *> expr <* symbol "}") <*>
         pure kind) <?>
   "method definition"
+
+methodExpr :: Parser Expr
+methodExpr = EMethod <$> method
 
 -- | Split field declarations into formal parameters for type declarations
 -- and constant field initializations. Fails if there is a non-constant
@@ -420,7 +424,7 @@ program :: Parser Expr
 program = L.foldr1 ESeq <$> P.many1 expr
 
 overrideMethod :: Parser Diff
-overrideMethod = OverrideMethod <$> methodExpr
+overrideMethod = OverrideMethod <$> method
 
 deleteMethod :: Parser Diff
 deleteMethod = DeleteMethod <$> (reserved "delete" *> identifier)

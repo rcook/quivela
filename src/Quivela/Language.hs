@@ -45,11 +45,6 @@ module Quivela.Language
     -- EFunDecl
   , efunDeclArgs
   , efunDeclName
-    -- EMethod
-  , emethodArgs
-  , emethodBody
-  , emethodKind
-  , emethodName
     -- EASsign
   , lhs
   , rhs
@@ -228,10 +223,7 @@ data Expr
          , _newBody :: Expr }
   | ENewConstr { _newConstrName :: String
                , _newConstrArgs :: [(Var, Expr)] }
-  | EMethod { _emethodName :: String
-            , _emethodArgs :: [(String, Type)]
-            , _emethodBody :: Expr
-            , _emethodKind :: MethodKind }
+  | EMethod Method
   | ECall { _callObj :: Expr
           , _callName :: String
           , _callArgs :: [Expr] }
@@ -296,14 +288,7 @@ instance Pretty Expr where
     P.rbrace
   pretty (ENewConstr n xs) =
     pretty "new" <+> pretty n <> P.tupled (map pretty xs)
-  pretty (EMethod f xs e k) =
-    P.nest
-      P.step
-      (pretty k <+> pretty f <> P.tupled (map prettyArgType xs) <+> P.lbrace <>
-       P.line <>
-       P.vsep (map pretty $ seqToExprs e)) <>
-    P.line <>
-    P.rbrace
+  pretty (EMethod m) = pretty m
   pretty (ECall (EConst VNil) "&" xs) =
     P.hsep (L.intersperse (pretty "&") (map pretty xs))
   pretty (ECall (EConst VNil) m xs) = pretty m <> P.tupled (map pretty xs)
@@ -375,12 +360,31 @@ data MethodKind
   | Invariant
   deriving (Eq, Show, Ord, Data, Generic)
 
+instance Serialize MethodKind
+
 instance Pretty MethodKind where
   pretty NormalMethod = pretty "method"
   pretty LocalMethod = pretty "local"
   pretty Invariant = pretty "invariant"
 
-instance Serialize MethodKind
+data Method = Method
+  { _methodName :: String
+  , _methodFormals :: [(String, Type)]
+  , _methodBody :: Expr
+  , _methodKind :: MethodKind
+  } deriving (Eq, Show, Ord, Data, Generic)
+
+instance Serialize Method
+
+instance Pretty Method where
+  pretty (Method n fs b k) =
+    P.nest
+      P.step
+      (pretty k <+> pretty n <> P.tupled (L.map prettyArgType fs) <+> P.lbrace <>
+       P.line <>
+       P.vcat (map pretty $ seqToExprs b)) <>
+    P.line <>
+    P.rbrace
 
 -- | Symbolic values representing unknowns and operations on them
 -- Calls to the adversary are also symbolic.
@@ -523,25 +527,6 @@ data Local = Local
 
 Lens.makeLenses ''Local
 
-data Method = Method
-  { _methodName :: String
-  , _methodFormals :: [(String, Type)]
-  , _methodBody :: Expr
-  , _methodKind :: MethodKind
-  } deriving (Eq, Show, Ord, Data)
-
-instance Pretty Method where
-  pretty (Method n fs b k) =
-    P.nest
-      P.step
-      (pretty k <+> pretty n <> P.tupled (L.map prettyArgType fs) <+> P.lbrace <>
-       P.line <>
-       P.vcat (map pretty $ seqToExprs b)) <>
-    P.line <>
-    P.rbrace
-
-Lens.makeLenses ''Method
-
 data Object = Object
   { _objLocals :: Map Var Local
   , _objMethods :: Map Var Method
@@ -603,7 +588,7 @@ data Binding = Binding
 data Diff
   = NewField Field
   | DeleteField Var
-  | OverrideMethod Expr -- assumes expr is an EMethod
+  | OverrideMethod Method
   | DeleteMethod Var
   deriving (Show, Eq, Ord)
 
@@ -688,7 +673,8 @@ nextAddr ctx =
     Increase -> L.maximum (M.keys (ctx ^. ctxObjs)) + 1
     Decrease -> L.minimum (M.keys (ctx ^. ctxObjs)) - 1
 
-L.concat <$> Monad.mapM Lens.makeLenses [''Expr, ''Field, ''Object, ''Value]
+L.concat <$>
+  Monad.mapM Lens.makeLenses [''Expr, ''Field, ''Method, ''Object, ''Value]
 
 -- | Try to find a method of the given name in the object at that address
 findMethod :: Addr -> Var -> Context -> Maybe Method
@@ -834,9 +820,10 @@ varBindings (ENew fields body) =
 varBindings (EProj eobj _name) = varBindings eobj
 varBindings (EIdx base idx) = varBindings base `bindingSeq` varBindings idx
   -- Variables bound inside a method body are not visible outside:
-varBindings (EMethod _name args body _isInv) =
-  let (bodyFree, _bodyBound) = varBindings body
-   in (bodyFree `S.difference` S.fromList (fmap fst args), S.empty)
+varBindings (EMethod m) =
+  let (bodyFree, _bodyBound) = varBindings (m ^. methodBody)
+   in ( bodyFree `S.difference` S.fromList (fmap fst (m ^. methodFormals))
+      , S.empty)
 varBindings (ETuple elts) = varBindingsList (S.empty, S.empty) elts
 varBindings (ETupleProj base idx) =
   varBindings base `bindingSeq` varBindings idx

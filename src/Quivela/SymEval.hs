@@ -607,11 +607,12 @@ symEval (EIf cnd thn els, ctx, pathCond) = do
 symEval (ESeq e1 e2, ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(_, ctx', pathCond') ->
     symEval (e2, ctx', pathCond')
-symEval (EMethod name formals body kind, ctx, pathCond) =
+symEval (EMethod m, ctx, pathCond) =
   let ctx'
         | Just _ <- ctx ^? Q.ctxObjs . Lens.at (ctx ^. Q.ctxThis) =
-          Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objMethods . Lens.at name ?~
-          (Method name formals body kind) $
+          Q.ctxObjs . Lens.ix (ctx ^. Q.ctxThis) . Q.objMethods .
+          Lens.at (m ^. Q.methodName) ?~
+          m $
           ctx
         | otherwise = error "failed to define method"
    in return [(VNil, ctx', pathCond)]

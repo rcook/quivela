@@ -10,22 +10,23 @@ import qualified Control.Lens as Lens
 import Control.Lens ((^.))
 import qualified Data.List as L
 import qualified Quivela.Language as Q
-import Quivela.Language (Diff, Expr, Field, Var)
+import Quivela.Language (Diff, Expr, Field, Method, Var)
 import Quivela.Prelude
 
-replaceMethod :: Expr -> Expr -> Expr
+replaceMethod :: Method -> Expr -> Expr
 replaceMethod emtd ebody = Q.exprsToSeq (L.reverse exprs'')
   where
+    (changed, exprs') = L.foldl f (False, []) (Q.seqToExprs ebody)
     f (True, exprs) expr = (True, expr : exprs)
-    f (False, exprs) expr@(Q.EMethod {})
-      | expr ^. Q.emethodName == emtd ^. Q.emethodName = (True, emtd : exprs)
+    f (False, exprs) expr@(Q.EMethod m)
+      | m ^. Q.methodName == emtd ^. Q.methodName =
+        (True, Q.EMethod emtd : exprs)
       | otherwise = (False, expr : exprs)
     f (False, exprs) expr = (False, expr : exprs)
-    (changed, exprs') = L.foldl f (False, []) (Q.seqToExprs ebody)
     exprs'' =
       if changed
         then exprs'
-        else emtd : exprs'
+        else Q.EMethod emtd : exprs'
 
 replaceField :: Field -> [Field] -> [Field]
 replaceField newField oldFields = L.reverse fields''
@@ -47,7 +48,7 @@ deleteMethod mtdName = Q.exprsToSeq . f . Q.seqToExprs
     f =
       L.filter
         (\case
-           oldMtd@Q.EMethod {} -> oldMtd ^. Q.emethodName /= mtdName
+           Q.EMethod m -> m ^. Q.methodName /= mtdName
            _ -> True)
 
 applyDiff :: Diff -> Expr -> Expr
