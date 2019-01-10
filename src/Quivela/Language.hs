@@ -116,6 +116,12 @@ module Quivela.Language
   , singleResult
     -- * Type
   , Type(..)
+    -- * VC
+  , VC(..)
+  , assumptions
+  , conditionName
+  , emptyVC
+  , goal
     -- * Value
   , Value(..)
   , SymValue(..)
@@ -129,7 +135,6 @@ module Quivela.Language
 
 import qualified Control.Lens as Lens
 import Control.Lens ((<&>), (^.), (^?))
-import qualified Control.Monad as Monad
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -159,7 +164,7 @@ instance Serialize Type
 
 instance Pretty Type where
   pretty TInt = pretty "Int"
-  pretty (TTuple ts) = P.tupled $ map pretty ts
+  pretty (TTuple ts) = P.angled $ map pretty ts
   pretty (TMap t1 t2) = pretty "Map" <+> pretty t1 <+> pretty t2
   pretty TAny = pretty "Any"
   pretty (TSet t) = pretty "Set" <+> pretty t
@@ -184,11 +189,15 @@ data Prop
 
 instance Serialize Prop
 
+prettyArgType :: (String, Type) -> Doc ann
+prettyArgType (x, TAny) = pretty x
+prettyArgType (x, t) = pretty x <> P.colon <+> pretty t
+
 instance Pretty Prop where
   pretty (p1 :=: p2) = P.binop "≈" p1 p2
   pretty (Not p) = pretty "¬" <+> pretty p
   pretty (Forall xs p) =
-    pretty "∀" <> P.hsep (map (\(v, t) -> pretty v <> P.colon <+> pretty t) xs) <>
+    pretty "∀" <> P.hsep (map prettyArgType xs) <>
     P.dot <+>
     pretty p
   pretty (p1 :=>: p2) = P.binop "⊃" p1 p2
@@ -267,10 +276,6 @@ data Expr
 
 instance Serialize Expr
 
-prettyArgType :: (String, Type) -> Doc ann
-prettyArgType (x, TAny) = pretty x
-prettyArgType (x, t) = pretty x <> P.colon <+> pretty t
-
 -- FIXME: Add precedence parentheses
 instance Pretty Expr where
   pretty ENop = error "pretty nop"
@@ -294,9 +299,9 @@ instance Pretty Expr where
   pretty (ECall (EConst VNil) m xs) = pretty m <> P.tupled (map pretty xs)
   pretty (ECall e m xs) =
     pretty e <> P.dot <> pretty m <> P.tupled (map pretty xs)
-  pretty (ETuple es) = P.encloseSep P.langle P.rangle P.comma (map pretty es)
+  pretty (ETuple es) = P.angled (map pretty es)
   pretty (ETupleProj e1 e2) = pretty e1 <> P.dot <> pretty e2
-  pretty (ESeq _ _) = error "pretty seq"
+  pretty (ESeq e1 e2) = pretty e1 <> P.comma <+> pretty e2
   pretty (EIf e1 e2 e3) =
     P.nest
       P.step
@@ -442,7 +447,7 @@ data SymValue
 instance Serialize SymValue
 
 instance Pretty SymValue where
-  pretty (SymVar x t) = pretty x <> P.colon <+> pretty t
+  pretty (SymVar x t) = prettyArgType(x, t)
   pretty (Insert k v m) =
     P.lbracket <> pretty k <+> pretty "↦" <+> pretty v <> P.rbracket <> pretty m
   pretty (Proj v i) = pretty v <> P.dot <> pretty i
@@ -499,7 +504,7 @@ instance Serialize Value
 instance Pretty Value where
   pretty (VInt n) = pretty n
   pretty (VMap m) = P.mapP m
-  pretty (VTuple vs) = P.tupled $ map pretty vs
+  pretty (VTuple vs) = P.angled $ map pretty vs
   pretty VNil = pretty "nil"
   pretty (VSet s) = P.setP s
   pretty (Sym v) = pretty v
@@ -674,7 +679,7 @@ nextAddr ctx =
     Decrease -> L.minimum (M.keys (ctx ^. ctxObjs)) - 1
 
 L.concat <$>
-  Monad.mapM Lens.makeLenses [''Expr, ''Field, ''Method, ''Object, ''Value]
+  mapM Lens.makeLenses [''Expr, ''Field, ''Method, ''Object, ''Value]
 
 -- | Try to find a method of the given name in the object at that address
 findMethod :: Addr -> Var -> Context -> Maybe Method
@@ -893,3 +898,22 @@ type Results = [Result]
 singleResult :: Results -> Result
 singleResult [res@(_, _, _)] = res
 singleResult ress = error $ "Multiple results: " ++ show ress
+
+-- ----------------------------------------------------------------------------
+-- VC (Verification conditions)
+-- ----------------------------------------------------------------------------
+data VC = VC
+  { _conditionName :: String
+    -- ^ Purely for readability purposes when generating code for other solvers
+  , _assumptions :: [Prop]
+  , _goal :: Prop
+  } deriving (Data, Eq, Ord)
+
+instance Pretty VC where
+  pretty (VC name assms g) =
+    pretty name <> P.colon <+> pretty (conjunction assms :=>: g)
+
+emptyVC :: VC
+emptyVC = VC {_conditionName = "noop", _assumptions = [], _goal = PTrue}
+
+Lens.makeLenses ''VC

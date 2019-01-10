@@ -57,13 +57,10 @@ readFileCompileTime inFile = do
   TH.addDependentFile file
   TH.runIO (IO.readFile file) >>= heredocExpr
 
--- | Take a list of monadic actions producing lists and map another monadic function over
--- the list and concatenate all results. This is basically a monadic version of the
--- bind operator in the list monad.
 foreachM :: (Monad m) => m [a] -> (a -> m [b]) -> m [b]
 foreachM s act = do
   xs <- s
-  ys <- Monad.mapM act xs
+  ys <- mapM act xs
   return $ L.concat ys
 
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d

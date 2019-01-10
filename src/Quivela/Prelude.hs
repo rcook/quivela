@@ -50,16 +50,19 @@ module Quivela.Prelude
   , error
   , flip
   , fmap
+  , foldM
   , foldMap
   , fromInteger
   , fromIntegral
   , fst
   , id
-  , impossible
   , map
+  , mapM
+  , mapM_
   , mempty
   , not
   , otherwise
+  , printf
   , pure
   , putStrLn
   , return
@@ -70,6 +73,7 @@ module Quivela.Prelude
   , writeFile
   ) where
 
+import Control.Monad (foldM)
 import Data.Data (Data)
 import Data.Function ((&))
 import Data.Map (Map)
@@ -78,6 +82,4 @@ import Data.Set (Set)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import Prelude
-
-impossible :: a
-impossible = error "Impossible"
+import Text.Printf(printf)

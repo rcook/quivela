@@ -1,5 +1,6 @@
 module Quivela.Pretty
-  ( binop
+  ( angled
+  , binop
   , const
   , map
   , mapP
@@ -61,3 +62,6 @@ show :: Doc ann -> String
 show d =
   Doc.renderString $
   P.layoutPretty (P.LayoutOptions (P.AvailablePerLine width ribbon)) d
+
+angled :: [Doc ann] -> Doc ann
+angled = P.encloseSep P.langle P.rangle P.comma

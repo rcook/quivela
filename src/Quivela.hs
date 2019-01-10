@@ -40,5 +40,8 @@ x ≈ y = x : y
 infixr 5 ≈
 
 -- | A shorthand for rewriting using quivela terms written in concrete syntax.
+-- Note: We can only use rewriting as a single proof hint.  The rewritten result
+-- must be syntactically identical. No VCs are generated.  For example, you can't
+-- rewrite then apply other hints in the same step.
 rewrite :: String -> String -> ProofHint
 rewrite e1 e2 = Rewrite (parseExpr e1) (parseExpr e2)

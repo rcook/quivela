@@ -27,6 +27,7 @@ module Quivela.SymEval
   , Verify
   , debug
   , freshVar
+  , onlySimpleTypes
   , runVerify
   , useCache
     -- * Symbolic evaluation
@@ -42,6 +43,7 @@ import qualified Control.Monad.RWS.Strict as Monad
 import qualified Control.Monad.RWS.Strict as RWS
 import Control.Monad.RWS.Strict (MonadIO, MonadReader, MonadState, RWST)
 import qualified Data.ByteString as ByteString
+import qualified Data.Generics as Generics
 import qualified Data.List as L
 import Data.List ((!!))
 import qualified Data.Map as M
@@ -313,6 +315,17 @@ freshVar prefix = do
     Nothing -> do
       RWS.modify (nextVar . Lens.at prefix ?~ 0)
       freshVar prefix
+
+onlySimpleTypes :: Data p => p -> Verify ()
+onlySimpleTypes x =
+  Monad.unless
+    (L.null .
+     Generics.listify
+       (\case
+          TNamed _ -> True
+          _ -> False) $
+     x)
+    (error $ "Symbolic objects as method arguments not yet supported")
 
 -- ----------------------------------------------------------------------------
 -- Variables

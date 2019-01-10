@@ -30,6 +30,7 @@ library:
   - Quivela.SymEval
   - Quivela.Util
   - Quivela.Verify
+  - Quivela.Z3
   ghc-options:
   - -Werror
   - -Weverything
@@ -56,8 +57,10 @@ library:
   - lens
   - mtl
   - parsec
+  - pretty
   - prettyprinter
   - process
+  - smtLib
   - syb
   - template-haskell
   - temporary

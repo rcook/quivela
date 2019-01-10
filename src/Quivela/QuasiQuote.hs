@@ -58,7 +58,7 @@ prove' env prefix steps =
         Q.runVerify (Lens.set Q.jobNote (Q.stepNote step) (Lens.set Q.jobStep i env)) (Q.proveStep prefix step)
    in do (_, results) <-
            Timer.time $
-           Monad.mapM doCheck (L.zip [(0 :: Int) ..] (toSteps steps))
+           mapM doCheck (L.zip [(0 :: Int) ..] (toSteps steps))
          return $ L.sum results
 
 -- | Fail at first failure.  Return 0 if all succeed, 1 if there's a failure
@@ -71,8 +71,9 @@ proveFailFast env prefix steps = do
 
 proveFailFast' :: Q.VerifyEnv -> Q.Expr -> [Q.ProofPart] -> IO Int
 proveFailFast' env prefix steps =
-  let doCheck (i, step) =
+  let doCheck (i, step) = do
         Q.runVerify (Lens.set Q.jobNote (Q.stepNote step) (Lens.set Q.jobStep i env)) (Q.proveStep prefix step)
+        -- error "stopping"
    in Monad.foldM
         (\c s ->
            if c > 0
