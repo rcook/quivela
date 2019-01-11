@@ -41,7 +41,7 @@
 ;; Maps:
 
 ; ;;; Maps embedded as z3 arrays:
-(define-const empty-map (Array Value Value)
+(define-fun empty-map () (Array Value Value)
   ((as const (Array Value Value)) (VInt 0)))
 
 (declare-fun to-map (Value) (Array Value Value))
@@ -133,7 +133,7 @@
 
 ;; Sets:
 (declare-fun to-set (Value) (Array Value Bool))
-(define-const empty-set (Array Value Bool)
+(define-fun empty-set () (Array Value Bool)
   ((as const (Array Value Bool)) false))
 (assert (= (to-set (VInt 0)) empty-set))
 (assert (forall ((set (Array Value Bool)))
