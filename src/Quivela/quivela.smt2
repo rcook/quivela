@@ -66,7 +66,7 @@
                    (combine v w))))
 
 (define-fun munion ((k Value) (v Value)) Value
-  (VMap ((_ map (combine-decl (Value Value) Value)) (to-map k) (to-map v))))
+  (VMap ((_ map combine-decl) (to-map k) (to-map v))))
 
 (define-fun is-submap-internal ((m1 (Array Value Value)) (m2 (Array Value Value))) Bool
   (forall ((k Value))
