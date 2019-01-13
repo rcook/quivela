@@ -416,8 +416,8 @@ data SymValue
        Value
   | Le Value
        Value
-  | SetCompr Value
-             Var
+  | SetCompr Var
+             Value
              Prop
   | ITE Prop
         Value
@@ -460,7 +460,7 @@ instance Pretty SymValue where
   pretty (Div x y) = P.binop "/" x y
   pretty (Lt x y) = P.binop "<" x y
   pretty (Le x y) = P.binop "≤" x y
-  pretty (SetCompr e x p) =
+  pretty (SetCompr x e p) =
     P.lbrace <> pretty e <+> pretty "|" <+> pretty x <+> pretty "∈" <+> pretty p <>
     P.rbrace
   pretty (ITE p v1 v2) =

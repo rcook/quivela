@@ -754,53 +754,42 @@ symEval (expr@(ENewConstr typeName args), ctx, pathCond)
             ]
         _ -> return [(val, ctx', pathCond')] -- schoepe@: object creation may have returned 0.  FIXME: Check this
   | otherwise = error $ "No such type: " ++ typeName
-symEval (setCompr@ESetCompr {}, ctx, pathCond) = do
-  let x = setCompr ^. Q.comprVar
+symEval (ESetCompr x v e, ctx, pathCond)
   -- Get new symbolic variable for variable bound by comprehension:
-  fv <- (Sym . (`SymVar` TAny)) <$> freshVar x
+ = do
+  fv <- freshVar x
+  let fvExpr = Sym $ SymVar fv TAny
   -- Bind name in new context, in which we can evaluate predicate
   -- and function expression of comprehension
-  let newCtx = Lens.over Q.ctxScope (M.insert x (fv, TAny)) ctx
-  predPaths <-
-    symEval (Maybe.fromJust (setCompr ^? Q.comprPred), newCtx, pathCond)
+  let ctx' = Lens.over Q.ctxScope (M.insert x (fvExpr, TAny)) ctx
   comprs <-
-    Q.foreachM (pure predPaths) $ \(predVal, ctx', pathCond') ->
-      Q.foreachM
-        (symEval (Maybe.fromJust (setCompr ^? Q.comprValue), ctx', pathCond')) $ \(funVal, _ctx'', pathCond'') -> do
+    Q.foreachM (symEval (e, ctx', pathCond)) $ \(predVal, _, pathCond') ->
+      Q.foreachM (symEval (v, ctx', pathCond')) $ \(funVal, _, pathCond'') -> do
         return
           [ Sym
               (SetCompr
+                 fv
                  funVal
-                 x
                  (Q.conjunction $ Not (predVal :=: VInt 0) : pathCond''))
           ]
   return
-    [ ( L.foldr (\sc v -> Sym (Q.Union sc v)) (VSet S.empty) comprs
-      , ctx
-      , pathCond)
-    ]
-symEval (mapCompr@EMapCompr {}, ctx, pathCond) = do
-  let x = mapCompr ^. Q.comprVar
-  -- FIXME: factor out commonalities with ESetCompr case
+    [(L.foldr (\m k -> Sym (Q.Union m k)) (VSet S.empty) comprs, ctx, pathCond)]
+symEval (EMapCompr x v e, ctx, pathCond) = do
   fv <- freshVar x
-  let fvExpr = Sym (SymVar fv TAny)
-  let newCtx = Lens.over Q.ctxScope (M.insert x (fvExpr, TAny)) ctx
-  predPaths <-
-    symEval (Maybe.fromJust (mapCompr ^? Q.comprPred), newCtx, pathCond)
+  let fvExpr = Sym $ SymVar fv TAny
+  let ctx' = Lens.over Q.ctxScope (M.insert x (fvExpr, TAny)) ctx
   comprs <-
-    Q.foreachM (pure predPaths) $ \(predVal, _ctx', pathCond') ->
-      Q.foreachM
-        (symEval (Maybe.fromJust (mapCompr ^? Q.comprValue), newCtx, pathCond)) $ \(funVal, _ctx'', pathCond'') -> do
+    Q.foreachM (symEval (e, ctx', pathCond)) $ \(predVal, _, pathCond') ->
+      Q.foreachM (symEval (v, ctx', pathCond')) $ \(funVal, _, pathCond'') -> do
         return
           [ Sym
               (MapCompr
                  fv
                  funVal
-                 (Q.conjunction $ Not (predVal :=: VInt 0) : pathCond' ++
-                  pathCond''))
+                 (Q.conjunction $ Not (predVal :=: VInt 0) : pathCond''))
           ]
   return
-    [ ( L.foldr (\sc v -> Sym (MapUnion sc v)) (VMap M.empty) comprs
+    [ ( L.foldr (\m k -> Sym $ MapUnion m k) (VMap M.empty) comprs
       , ctx
       , pathCond)
     ]

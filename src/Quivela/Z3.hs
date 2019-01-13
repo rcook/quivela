@@ -168,7 +168,7 @@ sym (Q.MapCompr x v p) = do
   assert . forall x $ S.not p' ==> (S.select mapVar x' === vnum 0)
   return $ app "VMap" [mapVar]
 -- FIXME: Set comprehensions are a mess
-sym (Q.SetCompr (Q.Sym (Q.SymVar xV Q.TAny)) x p) = do
+sym (Q.SetCompr x (Q.Sym (Q.SymVar xV Q.TAny)) p) = do
   p' <- prop p
   setVar <- newVar ("setcompr_" ++ x) (S.tArray tValue S.tBool)
   assert . forall xV $ S.select setVar (vExpr xV) === p'
