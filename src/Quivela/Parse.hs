@@ -150,6 +150,7 @@ expr = do
   let table =
         [ [prefix "!" (ECall (EConst VNil) "!" . (: []))]
         , [postfix "++" (ECall (EConst VNil) "++" . (: []))]
+        , [prefix "++" (ECall (EConst VNil) Q.prefixIncrOp . (: []))]
         , [binary "`" ETupleProj AssocLeft]
         , [binary "∈" EIn AssocNone, binary "⊆" ESubmap AssocNone]
         , [ binary "*" (binCall "*") AssocLeft

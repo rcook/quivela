@@ -359,6 +359,10 @@ a.x.y |]
       [prog'| x = (new(a=1) { 2 }) , <x.a++, x.a> |]
       (VTuple [VInt 1, VInt 2])
   , assertEvalResult
+      "pre-increment on object field"
+      [prog'| x = (new(a=1) { 2 }) , <++x.a, x.a> |]
+      (VTuple [VInt 2, VInt 2])
+  , assertEvalResult
       "type declarations with parameters"
       [prog'| type T = new(x) { method f() { x } } , y = new T(x=5), y.f() |]
       (VInt 5)
@@ -467,6 +471,22 @@ new() {
     []
   , assertVerified "post-increment in a map index" Q.nop $
     [prog| new (m=0) { method f() { x = 0, m = 0, m[x++] = 42, m[0] } } |] ≈
+    [prog| new () { method f() { 42 } } |] :
+    []
+  , assertVerified "pre-increment example 1" Q.nop $
+    [prog| new () { method f() { x = 0 , ++x , x } } |] ≈
+    [prog| new () { method f() { 1 } } |] :
+    []
+  , assertVerified "pre-increment example 2" Q.nop $
+    [prog| new () { method f(x) { ++x } } |] ≈
+    [prog| new () { method f(x) { y = x + 1, x = x + 1 , y } } |] :
+    []
+  , assertVerified "pre-increment example 3" Q.nop $
+    [prog| new () { method f() { x = 0 , ++x } } |] ≈
+    [prog| new () { method f() { 1 } } |] :
+    []
+  , assertVerified "pre-increment in a map index" Q.nop $
+    [prog| new (m=0) { method f() { x = 0, m = 0, m[++x] = 42, m[1] } } |] ≈
     [prog| new () { method f() { 42 } } |] :
     []
   , assertVerified "less-than operator example" Q.nop $

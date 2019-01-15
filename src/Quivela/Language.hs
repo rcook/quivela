@@ -131,6 +131,8 @@ module Quivela.Language
   , symVal
   , valMap
   , valSet
+    -- * Operators
+  , prefixIncrOp
   ) where
 
 import qualified Control.Lens as Lens
@@ -214,6 +216,9 @@ conjunction ps = L.foldr1 (:&:) ps
 -- These could be stored as just one big conjunction instead, but representing
 -- them as a list simplifies reasoning about which paths are prefixes of others.
 type PathCond = [Prop]
+
+prefixIncrOp :: String
+prefixIncrOp = "++prefix"
 
 -- ----------------------------------------------------------------------------
 -- Expressions

@@ -639,6 +639,14 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
             , pathCond')
         return $ map (\(_, c, p) -> (oldVal, c, p)) updPaths
     _ -> error $ "Invalid l-value in post-increment: " ++ show lval
+symEval (ECall (EConst VNil) op [lval], ctx, pathCond) | op == Q.prefixIncrOp = do
+  Q.foreachM (findLValue lval ctx pathCond) $ \case
+    Just (_, ctx', pathCond', False) ->
+      symEval
+      ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
+      , ctx'
+      , pathCond')
+    _ -> error $ "Invalid l-value in pre-increment: " ++ show lval
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     Q.foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
