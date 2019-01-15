@@ -86,15 +86,16 @@ tests:
     main: examples/CppExample.hs
     dependencies:
     - quivela
-  envelope:
-    main: examples/Envelope.hs
-    dependencies:
-    - lens
-    - quivela
-  envelope-small:
-    main: examples/EnvelopeSmall.hs
-    dependencies:
-    - quivela
+  # FIXME: Add these back when we have propositions in concrete syntax
+  # envelope:
+  #   main: examples/Envelope.hs
+  #   dependencies:
+  #   - lens
+  #   - quivela
+  # envelope-small:
+  #   main: examples/EnvelopeSmall.hs
+  #   dependencies:
+  #   - quivela
   etm:
     main: examples/ETM.hs
     dependencies:
