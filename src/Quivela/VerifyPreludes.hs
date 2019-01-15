@@ -8,7 +8,7 @@ module Quivela.VerifyPreludes
   ) where
 
 import Quivela.Prelude
-import qualified Quivela.Util as Q
+import Quivela.Resources (quivelaSmt2Content, quivelaSmt2Path)
 import qualified System.IO as IO
 
 -- This file defines the preludes for the z3 backend so we don't
@@ -16,7 +16,7 @@ import qualified System.IO as IO
 -- files somewhere)
 -- | Z3 encoding for quivela values and operations on them
 z3Prelude :: IO String
-z3Prelude = IO.readFile "src/Quivela/quivela.smt2"
+z3Prelude = IO.readFile $quivelaSmt2Path
 
-z3PreludeCompiled :: (Monad m) => m String
-z3PreludeCompiled = return $(Q.readFileCompileTime "quivela.smt2")
+z3PreludeCompiled :: String
+z3PreludeCompiled = quivelaSmt2Content
