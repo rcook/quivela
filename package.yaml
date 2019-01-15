@@ -112,3 +112,12 @@ tests:
     main: examples/FIFOSmall.hs
     dependencies:
     - quivela
+  readme:
+    main: README.lhs
+    dependencies:
+    - base
+    - markdown-unlit
+    - quivela
+    ghc-options: -pgmL markdown-unlit
+    default-extensions:
+    - ImplicitPrelude
