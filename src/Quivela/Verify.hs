@@ -64,7 +64,6 @@ import qualified Quivela.Pretty as Doc
 import qualified Quivela.SymEval as Q
 import Quivela.SymEval (Verify)
 import qualified Quivela.Util as Q
-import qualified Quivela.VerifyPreludes as Q
 import qualified Quivela.Z3 as Q
 import qualified System.Directory as Directory
 import qualified System.IO as IO
@@ -609,12 +608,11 @@ checkVCs vcs = do
           tempDir
       let dir :: String = printf "%s/quivela/%s/step-%04d-%s" tmp job step note
       Monad.liftIO $ Directory.createDirectoryIfMissing True dir
-      prelude <- Monad.liftIO Q.z3Prelude
       pctx <- Lens.use Q.verifyPrefixCtx
       files <- Lens.use Q.tempFiles
       let file :: String = printf "%s/vc-%04d-%s.smt2" dir files (_conditionName vc)
       Q.debug $ printf "Writing %s" file
-      Monad.liftIO $ writeFile file (prelude ++ Q.vcToSmt pctx vc)
+      Monad.liftIO $ writeFile file (Q.renderCommands $ Q.prelude ++ Q.vcToSmt pctx vc)
       Q.tempFiles += 1
     checkWithZ3 :: VC -> Verify Bool
     checkWithZ3 vc = do
@@ -622,7 +620,7 @@ checkVCs vcs = do
       Monad.when write (writeToZ3File vc)
       pctx <- Lens.use Q.verifyPrefixCtx
       sendToZ3 "(push)"
-      sendToZ3 (Q.vcToSmt pctx vc)
+      sendToZ3 (Q.renderCommands $ Q.vcToSmt pctx vc)
       answer <- readLineFromZ3
       sendToZ3 "(pop)"
       return $ L.isInfixOf "unsat" answer

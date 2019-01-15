@@ -75,7 +75,7 @@ import Quivela.Language
   )
 import Quivela.Prelude
 import qualified Quivela.Util as Q
-import qualified Quivela.VerifyPreludes as Q
+import qualified Quivela.Z3 as Q
 import qualified System.Directory as Directory
 import qualified System.IO as IO
 import System.IO (Handle)
@@ -253,8 +253,7 @@ newVerifyState env = do
       }
   IO.hSetBuffering hin IO.NoBuffering
   IO.hSetBuffering hout IO.NoBuffering
-  prelude <- Q.z3Prelude
-  IO.hPutStrLn hin prelude
+  IO.hPutStrLn hin $ Q.renderCommands Q.prelude
   verificationCache <-
     case _cacheFile env of
       Nothing -> return S.empty

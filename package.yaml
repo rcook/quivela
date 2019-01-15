@@ -42,8 +42,6 @@ library:
   - -Wno-missed-specialisations # We don't want to add noisy INLINABLE pragmas as we aren't peformance sensitive
   other-modules:
   - Quivela.Prelude
-  - Quivela.Resources
-  - Quivela.VerifyPreludes
   - System.Timer
   dependencies:
   - HUnit
@@ -54,7 +52,6 @@ library:
   - containers
   - deepseq
   - directory
-  - file-embed
   - filepath
   - lens
   - mtl

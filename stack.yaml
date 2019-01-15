@@ -41,7 +41,7 @@ packages:
 # extra-deps: []
 extra-deps:
 - github: seanmcl/smtLib # forked from https://github.com/yav/smtLib
-  commit: bd67a067b3e6ec234587d93b2f797d6c20cb13c2
+  commit: 803b6a6d013c14a140234dfffd89c92bc07d8c7e
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

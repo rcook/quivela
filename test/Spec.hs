@@ -298,11 +298,7 @@ new(i:int=0) {
     ]
 
 bug :: Test
-bug =
-  assertVerifiedDebug "constant map comprehension" Q.nop $
-  [prog| new() { method f() { ([x ↦ 1 | 1])[5] } } |] ≈
-  [prog| new() { method f() { 1 } } |] :
-  []
+bug = TestList []
 
 tests :: Test
 tests =
