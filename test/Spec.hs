@@ -387,6 +387,10 @@ method f(x) { obj = (new() { method g(m) { 1 } }), obj.g(x) & 1 }
       "verification should detect extraneous methods on one side"
       Q.nop $
     [prog| new() { method f() { 1 } } |] ≈ [prog| new() { } |] : []
+  , assertVerifyError
+      "verification should detect extraneous methods on one side'"
+      Q.nop $
+    [prog| new() { } |] ≈ [prog| new() { method g() { 1 }} |] : []
   , doesntVerify "if expression equivalence differing on one branch" Q.nop $
     [prog| new() { method f(x) { if (x) { 7 } else { 8 } } } |] ≈
     [prog| new() { method f(x) { if (x) { 7 } else { 9 } } } |] :
