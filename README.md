@@ -1,25 +1,57 @@
 [![Build Status](https://travis-ci.org/awslabs/quivela.svg?branch=master)](https://travis-ci.org/awslabs/quivela)
 
-# quivela2 protocol verifier
+# Quivela2 protocol verifier
 
-`quivela2` is a tool to verify protocols modeled as object-oriented programs.
+Quivela2 is a tool to verify protocols modeled as object-oriented programs.
 
-## Installation
+## Prerequisites
 
-`Quivela2` is written in Haskell and requires the
-(stack)[https://docs.haskellstack.org/en/stable/README/] tool to be installed.
-To build Quivela, run `stack build` in the source directory. To get a GHCi REPL
-with the quivela modules loaded, run `stack ghci`.
+Quivela2 requires [Z3][z3] to be installed and available on the system search path (i.e. in a directory listed in `$PATH` on Linux/macOS systems).
 
-To run, `quivela2` requires (z3)[https://github.com/Z3Prover/z3] to be installed
-and executable (i.e. the binary should be in a directory listed in `$PATH` on
-Linux/Mac systems).
+### Installing Z3 on Ubuntu
+
+```bash
+mkdir -p ~/.local/bin
+export PATH=$HOME/.local/bin:$PATH
+curl -L https://github.com/Z3Prover/z3/releases/download/z3-4.8.3/z3-4.8.3.7f5d66c3c299-x64-ubuntu-16.04.zip -o z3.zip
+unzip -j z3.zip z3-4.8.3.7f5d66c3c299-x64-ubuntu-16.04/bin/z3 -d ~/.local/bin
+rm z3.zip
+```
+
+### Installing Z3 on macOS
+
+ ```bash
+mkdir -p ~/.local/bin
+export PATH=$HOME/.local/bin:$PATH
+curl -L https://github.com/Z3Prover/z3/releases/download/z3-4.8.3/z3-4.8.3.7f5d66c3c299-x64-osx-10.13.6.zip -o z3.zip
+unzip -j z3.zip z3-4.8.3.7f5d66c3c299-x64-osx-10.13.6/bin/z3 -d ~/.local/bin
+rm z3.zip
+```
+
+## Building
+
+Quivela2 is written in Haskell and requires the [Haskell Stack][haskell-stack] build tool to be installed.
+
+To build Quivela2:
+
+```bash
+cd /path/to/source
+stack build
+```
+
+To open a GHCi REPL with the Quivela2 modules loaded:
+
+```bash
+cd /path/to/source
+stack ghci
+```
 
 ## Usage
 
 **Note that this document is a [Literate Haskell][literate-haskell] source file that you can compile and run as follows:**
 
 ```bash
+cd /path/to/source
 stack test quivela:readme
 ```
 
@@ -105,35 +137,24 @@ main = do
     else exitSuccess
 ```
 
-For a larger proof, please refer to [`ETM.hs`](src/ETM.hs).
+For a larger proof, please refer to [`ETM.hs`](examples/ETM.hs).
 
 ## Open issues
 
 There are number of side conditions that are currently not checked:
 
-- Programs are not checked for termination
-
-- Adversaries should also get access to the method name that was called on
-  an adversary object.
-
-- Previous proof steps are cached upon successful verification, but currently
-  the cache does not include invariants were used to verify something. As a
-  result, when changing invariants but not the programs in a proof step, the
-  step will not be rechecked. This does not affect soundness, since the two
-  programs are equivalent and the invariants are only used during this
-  verification step.
-
-- The concrete syntax is somewhat ugly in that semicolons are required as
-  separators in between expressions, and methods need to be prefixed by the
-  keyword "method".
-
-- Rewriting with an assumption currently doesn't take bound variables into
-  account. Also, assumptions are now implicit in the rewrite steps that
-  are performed instead of stated upfront.
+* Programs are not checked for termination.
+* Adversaries should also get access to the method name that was called on an adversary object.
+* Previous proof steps are cached upon successful verification, but currently the cache does not include invariants were used to verify something. As a result, when changing invariants but not the programs in a proof step, the step will not be rechecked. This does not affect soundness, since the two programs are equivalent and the invariants are only used during this verification step.
+* The concrete syntax is somewhat ugly in that semicolons are required as separators in between expressions, and methods need to be prefixed by the keyword `method`.
+* Rewriting with an assumption currently doesn't take bound variables into account. Also, assumptions are now implicit in the rewrite steps that are performed instead of stated upfront.
 
 ## Style guide
 
-- Either import by name or qualify all imported identifiers.
-- Run hindent (we use all default settings) before creating pull request.
+* Either import by name or qualify all imported identifiers.
+* Run [hindent][hindent] (we use all default settings) before creating pull requests.
 
+[haskell-stack]: https://docs.haskellstack.org/en/stable/README/
+[hindent]: https://github.com/chrisdone/hindent
 [literate-haskell]: https://wiki.haskell.org/Literate_programming
+[z3]: https://github.com/Z3Prover/z3
