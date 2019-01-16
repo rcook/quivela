@@ -1,6 +1,7 @@
 -- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-} -- Parser has lots of intermediate parsers with complex types
 
 module Quivela.Parse
@@ -27,6 +28,7 @@ import Quivela.Language
   , Method(..)
   , MethodKind(..)
   , ProofPart(..)
+  , Prop(..)
   , Type(..)
   , Value(..)
   , Var
@@ -51,20 +53,23 @@ languageDef =
     , Token.identStart = P.letter <|> P.char '_'
     , Token.identLetter = P.alphaNum <|> P.char '_'
     , Token.reservedNames =
-        [ "if"
-        , "then"
+        [ "assume"
+        , "delete"
         , "else"
-        , "new"
+        , "false"
+        , "forall"
+        , "function"
+        , "if"
+        , "in"
         , "invariant"
         , "local"
-        , "method"
-        , "type"
         , "map"
-        , "delete"
-        , "in"
+        , "method"
+        , "new"
         , "set"
-        , "function"
-        , "assume"
+        , "then"
+        , "true"
+        , "type"
         ]
     , Token.reservedOpNames =
         [ "+"
@@ -77,6 +82,7 @@ languageDef =
         , "&"
         , "|"
         , "!"
+        , "!="
         , "."
         , "["
         , "]"
@@ -141,6 +147,48 @@ withState f action = do
   P.putState oldState
   return res
 
+all :: Parser Prop
+all = do
+  (symbol "∀" <|> symbol "forall")
+  vars <- P.many1 identifier
+  symbol "."
+  p <- prop
+  return $ Forall (map (, Q.TAny) vars) p
+
+atom :: Parser Value
+atom = do
+  f <- identifier
+  args <-
+    (symbol "(" *>
+     withState (Lens.set inArgs True) (identifier `sepBy` symbol ",") <*
+     symbol ")") <?>
+    "prop arguments"
+  return . Sym . Q.Call f $ map (\x -> Sym $ Q.SymVar x TAny) args
+
+peq :: Parser Prop
+peq = do
+  l <- atom <|> value
+  f <- (symbol "=" *> pure id) <|> (symbol "!=" *> pure Not)
+  r <- atom <|> value
+  return . f $ l :=: r
+
+-- ∀ k a m. skenc(k, a, m) != 0
+prop :: Parser Prop
+prop = do
+  let table = [[binary "=>" (:=>:) AssocRight], [binary "&" (:&:) AssocRight]]
+  E.buildExpressionParser table term
+  where
+    term = do
+      try (parens prop) <|> (reserved "true" *> pure PTrue) <|>
+        (reserved "false" *> pure PFalse) <|>
+        peq <|>
+        all
+    binary name fun assoc =
+      Infix
+        (do reservedOp name
+            return fun)
+        assoc
+
 expr :: Parser Expr
 expr = do
   inTup <- (^. inTuple) <$> P.getState
@@ -179,6 +227,7 @@ expr = do
   where
     term = do
       base <-
+        assertExpr <|>
         parens
           (withState
              (Lens.set pipeAsOr True .
@@ -225,6 +274,9 @@ comprSuffix = do
 
 assumeExpr :: Parser Expr
 assumeExpr = reserved "assume" *> (EAssume <$> expr <*> (symbol "≈" *> expr))
+
+assertExpr :: Parser Expr
+assertExpr = reserved "assert" *> (EAssert <$> prop)
 
 setComprExpr :: Parser Expr
 setComprExpr = do

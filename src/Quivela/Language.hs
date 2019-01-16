@@ -19,6 +19,7 @@ module Quivela.Language
   , AllocStrategy(..)
   , ctxAdvCalls
   , ctxAllocStrategy
+  , ctxAssertions
   , ctxAssumptions
   , ctxFunDecls
   , ctxObjs
@@ -272,6 +273,7 @@ data Expr
               , _comprValue :: Expr
               , _comprPred :: Expr -- map comprehensions
                }
+  | EAssert Prop
   | EAssume Expr
             Expr
   | EFunDecl { _efunDeclName :: String
@@ -333,6 +335,7 @@ instance Pretty Expr where
     P.lbracket <+> pretty x <+> pretty "↦" <+> pretty e <+> pretty "|" <+>
     pretty p <+>
     P.rbracket
+  pretty (EAssert p) = pretty "assert" <+> pretty p
   pretty (EAssume e1 e2) =
     pretty "assume" <+> pretty e1 <+> pretty "≈" <+> pretty e2
   pretty (EFunDecl f xs) = pretty f <> P.tupled (map pretty xs)
@@ -616,6 +619,7 @@ data Context = Context
     -- ^ Map from type names to typedecl expressions (all values in this
     -- map can be assumed to be of the form (ETypeDecl ...)
   , _ctxAllocStrategy :: AllocStrategy
+  , _ctxAssertions :: [Prop]
   , _ctxAssumptions :: [(Expr, Expr)]
   , _ctxFunDecls :: Map String FunDecl
   } deriving (Eq, Show, Ord, Data)
@@ -629,12 +633,16 @@ instance Pretty Context where
                   , _ctxAdvCalls
                   , _ctxTypeDecls
                   , _ctxAllocStrategy
+                  , _ctxAssertions
                   , _ctxAssumptions
                   , _ctxFunDecls
                   }) =
     P.record
       [ ("adversary-calls", P.list $ map (P.list . map pretty) _ctxAdvCalls)
       , ("alloc-strategy", pretty $ show _ctxAllocStrategy)
+      , ( "asserts"
+        , (P.align . P.vcat) $
+          L.map pretty _ctxAssertions )
       , ( "assums"
         , (P.align . P.vcat) $
           L.map
@@ -669,6 +677,7 @@ emptyCtx =
     , _ctxScope = M.empty
     , _ctxTypeDecls = M.empty
     , _ctxAllocStrategy = Increase
+    , _ctxAssertions = []
     , _ctxAssumptions = []
     , _ctxFunDecls = M.empty
     }
@@ -796,6 +805,7 @@ varBindings :: Expr -> (Set Var, Set Binding)
 varBindings ENop = (S.empty, S.empty)
 varBindings (EFunDecl _ _) = (S.empty, S.empty)
 varBindings (EAssume e1 e2) = combine e1 e2
+varBindings (EAssert _) = (S.empty, S.empty)
 varBindings (EVar x) = (S.singleton x, S.empty)
 varBindings (EConst _) = (S.empty, S.empty)
 varBindings (EAssign (EVar x) eRhs) =

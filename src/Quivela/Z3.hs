@@ -421,7 +421,7 @@ prelude' = do
              S.CmdDeclareFun (N f) (L.map (const tValue) args) tValue)
           (Map.elems (ctx ^. Q.ctxFunDecls))
         comment name
-        mapM_ (\a -> prop a >>= assert) assms
+        mapM_ (\a -> prop a >>= assert) (ctx ^. Q.ctxAssertions ++ assms)
         prop goal >>= \g -> assert (S.not g)
   S v cs <- get
   unless (Map.null v) (error "nonempty vars in prelude")

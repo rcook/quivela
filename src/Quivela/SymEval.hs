@@ -830,6 +830,8 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
                  show (v1, v2)
 symEval (EAssume e1 e2, ctx, pathCond) =
   return [(VNil, Lens.over Q.ctxAssumptions ((e1, e2) :) ctx, pathCond)]
+symEval (EAssert p, ctx, pathCond) =
+  return [(VNil, Lens.over Q.ctxAssertions (p :) ctx, pathCond)]
 symEval (funDecl@EFunDecl {}, ctx, pathCond) =
   let funName = funDecl ^. Q.efunDeclName
    in return
