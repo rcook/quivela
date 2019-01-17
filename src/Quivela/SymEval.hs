@@ -665,6 +665,8 @@ symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
         else if v1 == v2 -- FIXME: Is this sound?  If the values are Haskell-equal, 1 makes sense, but it's not obvious to me that non-Haskell-equal values are definitely not Quivela-equal.
                then return [(VInt 1, ctx'', pathCond'')]
                else return [(VInt 0, ctx'', pathCond'')]
+symEval (ECall (EConst VNil) "!=" [e1, e2], ctx, pathCond) =
+  symEval (ECall (EConst VNil) "!" [ECall (EConst VNil) "==" [e1, e2]], ctx, pathCond)
 symEval (ECall (EConst VNil) "!" [e], ctx, pathCond) = do
   Q.foreachM (symEval (e, ctx, pathCond)) $ \(v, ctx', pathCond') ->
     case v of

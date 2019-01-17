@@ -209,6 +209,7 @@ expr = do
           ]
         , [ binary "<" (binCall "<") AssocNone
           , binary "==" (binCall "==") AssocNone
+          , binary "!=" (binCall "!=") AssocNone
           , binary "<=" (binCall "<=") AssocNone
           ] ++
           (if inTup
