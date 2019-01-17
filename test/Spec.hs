@@ -6,8 +6,7 @@
 import qualified Control.DeepSeq as DeepSeq
 import qualified Control.Exception as Exception
 import Control.Exception (SomeException)
-import qualified Control.Lens as Lens
-import Control.Lens ((&), (.~))
+import Control.Lens ((&), (.~), set)
 import qualified Data.Map as M
 import Prelude
 import Quivela
@@ -26,10 +25,9 @@ import qualified Quivela.Language as Q
 import qualified Quivela.Parse as Q
 import qualified Quivela.SymEval as Q
 import qualified Quivela.Util as Q
-import qualified Quivela.Verify as Q
 import qualified System.Environment as Environment
 import qualified Test.HUnit as T
-import Test.HUnit (Assertion, Counts(..), Test(TestCase, TestList), (~:))
+import Test.HUnit (Counts(..), Test(TestCase, TestList), (~:))
 
 -- Don't print garbage during tests.  If a test fails, debug it separately.
 env = Q.emptyVerifyEnv & Q.debugFlag .~ False
@@ -808,6 +806,15 @@ new() {
       method F(e) { new (const e=e) { method foo() { <t> = e.foo() , <1> }}}
       _e = adversary() |]) $
     [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
+  , assertVerified "fieldOppEqual test 1" Q.nop $
+    [prog| new (h=0,k=0) {
+           method enc() { k=(!h) & h=3 & k}
+         } |] ≈
+    Hint [fieldOppEqual ["h"]] :
+    [prog| new (h=0,k=0) {
+           method enc() { k=(!h) & h=2 & k}
+         } |] :
+    []
   ]
 
 main :: IO ()

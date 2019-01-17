@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE Rank2Types #-}
@@ -105,8 +106,11 @@ module Quivela.Language
   , Proof
   , ProofPart(..)
   , ProofHint(..)
+  , isEqualInv
   , fieldEqual
   , fieldsEqual
+  , fieldOppEqual
+  , fieldsOppEqual
    -- * Prop
   , Prop(..)
   , PathCond
@@ -737,6 +741,9 @@ data ProofHint
   | Note String
   deriving (Generic)
 
+isEqualInv :: ProofHint -> Bool
+isEqualInv = \case (EqualInv _ _) -> True; _ -> False
+
 instance PartialEq ProofHint where
   NoInfer === NoInfer = Just True
   NoInfer === _ = Just False
@@ -760,22 +767,32 @@ instance PartialEq ProofHint where
 -- up a series of fields. @[a, b, c]@ represents looking up field @a.b.c@.
 fieldsEqual :: [Var] -> [Var] -> ProofHint
 fieldsEqual fieldsL fieldsR = EqualInv (getField fieldsL) (getField fieldsR)
-  where
-    getField :: [Var] -> Addr -> Context -> Value
-    getField [] _ _ = error "Empty list of fields"
-    getField [x] addr ctx
-      | Just v <-
-         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x . localValue = v
-      | otherwise = error $ "getField: No such field: " ++ x
-    getField (x:xs) addr ctx
-      | Just (VRef addr') <-
-         ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x . localValue =
-        getField xs addr' ctx
-      | otherwise = error $ "Non-reference in field lookup"
 
 -- | Like 'fieldsEqual' but looking up the same fields on both sides.
 fieldEqual :: [Var] -> ProofHint
 fieldEqual fields = fieldsEqual fields fields
+
+-- | Like 'fieldsEqual' but negating both of the arguments.
+fieldsOppEqual :: [Var] -> [Var] -> ProofHint
+fieldsOppEqual fieldsL fieldsR = EqualInv (\a -> opp . getField fieldsL a) (\a -> opp . getField fieldsR a)
+ where
+   opp v = Sym $ ITE (v :=: VInt 0) (VInt 1) (VInt 0)
+
+-- | Like 'fieldsOppEqual' but looking up the same fields on both sides.
+fieldOppEqual :: [Var] -> ProofHint
+fieldOppEqual fields = fieldsOppEqual fields fields
+
+getField :: [Var] -> Addr -> Context -> Value
+getField [] _ _ = error "Empty list of fields"
+getField [x] addr ctx
+  | Just v <-
+     ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x . localValue = v
+  | otherwise = error $ "getField: No such field: " ++ x
+getField (x:xs) addr ctx
+  | Just (VRef addr') <-
+     ctx ^? ctxObjs . Lens.ix addr . objLocals . Lens.ix x . localValue =
+    getField xs addr' ctx
+  | otherwise = error $ "Non-reference in field lookup"
 
 -- | One part of a quivela proof, which is either an expression, or a proof hint.
 -- An followed by a hint and another expression is verified using that hint,

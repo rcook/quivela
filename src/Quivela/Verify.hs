@@ -526,6 +526,7 @@ checkEqv prefix step@Step {lhs, rhs} = do
 inferFieldEqualities :: Expr -> Step -> Verify Step
 inferFieldEqualities prefix step@Step {lhs, hints, rhs}
   | Q.elemPartial NoInfer hints = return step
+  | L.any Q.isEqualInv hints = return step -- if someone explicitly specifies equalities, don't try to infer others
   | otherwise = do
     (_, prefixCtx, _) <- Q.singleResult <$> Q.symEval (prefix, Q.emptyCtx, [])
     (VRef addrL, ctxL, _) <- Q.singleResult <$> Q.symEval (lhs, prefixCtx, [])

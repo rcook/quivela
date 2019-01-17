@@ -22,6 +22,8 @@ module Quivela
   , ProofHint(Admit, NoAddressBijection, NoInfer, Note)
   , fieldEqual
   , fieldsEqual
+  , fieldOppEqual
+  , fieldsOppEqual
   , rewrite
   -- * Proof parts
   , ProofPart(Hint)
