@@ -266,18 +266,7 @@ invalidCases =
 failingTests :: Test
 failingTests =
   TestList
-    [ assertVerified "map comprehension to modify existing map" Q.nop $
-      [prog|
-new(i:int=0) {
-  method f(y) { m = 0, m[y] = i, i++, m = [x ↦ m[x]+1 | m[x]], m[y] }
-}|] ≈
-      Hint [NoInfer, fieldEqual ["i"]] :
-      [prog|
-new(i:int=0) {
-  method f(y) { if (!(0 == i)) { i++ } else { i++, 0 } }
-} |] :
-      []
-    , assertVerified
+    [ assertVerified
         "assignment of tuple 4"
         ([prog'|
       method F(e) { new (const e=e) { method foo(m) { m & <t> = e.foo(m) }}}
