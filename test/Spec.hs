@@ -814,6 +814,30 @@ new() {
     [prog| new () { method enc(m) { <t> = m }} |] ≈
     [prog| new () { method enc(m) { <t> = (<tg>=m & <tg>)  }} |] :
     []
+  , assertVerified "zero tuple 1" Q.nop $
+    [prog| new () {
+        method foo(d) { Z(<Z(d)>) }}
+      |] ≈
+    [prog| new () {
+        method foo(d) { Z(<d>) }}
+      |] :
+    []
+  , assertVerified "zero tuple 2" Q.nop $
+    [prog| new () {
+        method foo(d1, d2) { Z(<Z(d1), Z(d2)>) }}
+      |] ≈
+    [prog| new () {
+        method foo(d1, d2) { Z(<d1, d2>) }}
+      |] :
+    []
+  , assertVerified "zero tuple 3" Q.nop $
+    [prog| new () {
+        method foo(d1, d2, d3) { Z(<Z(d1), Z(d2), Z(d3)>) }}
+      |] ≈
+    [prog| new () {
+        method foo(d1, d2, d3) { Z(<d1, d2, d3>) }}
+      |] :
+    []
   ]
 
 bug :: Test

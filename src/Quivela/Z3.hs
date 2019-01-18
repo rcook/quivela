@@ -61,6 +61,10 @@ forall2 :: (String, S.Type) -> (String, S.Type) -> Expr -> Expr
 forall2 (x1, t1) (x2, t2) =
   S.Quant S.Forall [S.Bind (N x1) t1, S.Bind (N x2) t2]
 
+forall3 :: (String, S.Type) -> (String, S.Type) -> (String, S.Type) -> Expr -> Expr
+forall3 (x1, t1) (x2, t2) (x3, t3) =
+  S.Quant S.Forall [S.Bind (N x1) t1, S.Bind (N x2) t2, S.Bind (N x3) t3]
+
 -- Z3 has a generic mapping function, syntax ((_ map f) a b c)
 -- for a method f of arity 3.  This is a hack to get
 -- around the lack of generic (E1 E2) syntax in SMTLIB, used
@@ -279,6 +283,9 @@ prelude' = do
   z <- defineFun "Z" [("v", tValue)] tValue $ zeros [length [e "v"]]
   comment "Tuples"
   proj <- declareFun "proj" [tValue, tValue] tValue
+  assert . forall1 ("v", tValue) $ length [vtuple [cons [e "v", nil[]]]] === length [vtuple [cons [z[e "v"], nil[]]]]
+  assert . forall2 ("v1", tValue) ("v2", tValue) $ length [vtuple [cons [e "v1", cons [e "v2", nil[]]]]] === length [vtuple [cons [z[e "v1"], cons [z[e "v2"], nil[]]]]]
+  assert . forall3 ("v1", tValue) ("v2", tValue) ("v3", tValue) $ length [vtuple [cons [e "v1", cons [e "v2", cons [e "v3", nil[]]]]]] === length [vtuple [cons [z[e "v1"], cons [z[e "v2"], cons [z[e "v3"], nil[]]]]]]
   comment "Sets"
   toSet <- declareFun "to-set" [tValue] tArrayVB
   emptySet <- defineFun "empty-set" [] tArrayVB $ constExpr tArrayVB [S.false]
