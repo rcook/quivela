@@ -25,6 +25,7 @@ library:
   - Quivela.Diff
   - Quivela.Language
   - Quivela.Parse
+  - Quivela.Prelude
   - Quivela.Pretty
   - Quivela.QuasiQuote
   - Quivela.SymEval
@@ -41,7 +42,6 @@ library:
   - -Wno-all-missed-specialisations # We don't want to add noisy INLINABLE pragmas as we aren't peformance sensitive
   - -Wno-missed-specialisations # We don't want to add noisy INLINABLE pragmas as we aren't peformance sensitive
   other-modules:
-  - Quivela.Prelude
   - System.Timer
   dependencies:
   - HUnit
@@ -78,6 +78,7 @@ tests:
     - containers
     - deepseq
     - lens
+    - prettyprinter
     - quivela
   cpp-example:
     main: examples/CppExample.hs

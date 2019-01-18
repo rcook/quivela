@@ -42,6 +42,7 @@ module Quivela.Prelude
   , (==)
   , (>)
   , (>=)
+  , (>>)
   , (>>=)
   , (||)
   , (<>)
@@ -62,12 +63,15 @@ module Quivela.Prelude
   , mempty
   , not
   , otherwise
+  , pretty
   , printf
   , pure
   , putStrLn
   , return
   , show
   , snd
+  , trace
+  , traceShow
   , uncurry
   , undefined
   , writeFile
@@ -79,7 +83,9 @@ import Data.Function ((&))
 import Data.Map (Map)
 import Data.Serialize (Serialize)
 import Data.Set (Set)
+import Data.Text.Prettyprint.Doc (Pretty(pretty))
 import Data.Typeable (Typeable)
+import Debug.Trace(trace, traceShow)
 import GHC.Generics (Generic)
 import Prelude
 import Text.Printf(printf)

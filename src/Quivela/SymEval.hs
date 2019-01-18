@@ -563,32 +563,36 @@ symEval (EAssign (ETuple pat) rhs, ctx, pathCond)
           EVar x -> Just x
           _ -> Nothing)
        pat =
-    Q.foreachM (symEval (rhs, ctx, pathCond)) $ \(vrhs, _ctx', _pathCond') ->
-      let (lvalues, ctx'') =
-            L.foldr
-              (\var (places, cx) ->
-                 case findVar var cx of
-                   (place, cx', _) -> (place : places, cx'))
-              ([], ctx)
-              vars
-          (rhsVals, projEq) =
-            case vrhs of
-              Sym _ ->
-                ( map
-                    (Sym . Proj vrhs . VInt . fromIntegral)
-                    [0 .. L.length pat - 1]
-                , [vrhs :=: VTuple rhsVals])
-              VTuple rhsVals'
-                | L.length rhsVals' == L.length vars -> (rhsVals', [])
-              _ ->
-                error $ "Invalid concrete value for pattern-match expression: " ++
-                show (pat, rhs, vrhs)
-          ctx''' =
-            L.foldr
-              (\(place, proj) cx -> Lens.set (place ^. Q.placeLens) proj cx)
-              ctx''
-              (L.zip lvalues rhsVals)
-       in return [(vrhs, ctx''', projEq ++ pathCond)]
+    Q.foreachM (symEval (rhs, ctx, pathCond)) $ \case
+      (VInt 0, ctx', pathCond') -> return [(VInt 0, ctx', pathCond')]
+      (vrhs, ctx', pathCond') ->
+        let (rhsVals, projEq) =
+              case vrhs of
+                Sym _ ->
+                  ( map
+                      (Sym . Proj vrhs . VInt . fromIntegral)
+                      [0 .. L.length pat - 1]
+                  , [vrhs :=: VTuple rhsVals])
+                VTuple rhsVals'
+                  | L.length rhsVals' == L.length vars -> (rhsVals', [])
+                _ ->
+                  error $
+                  printf
+                    "Invalid concrete value for pattern-match expression: %s"
+                    (show $ pretty (ctx, pat, (rhs, vrhs)))
+            (lvalues, ctx'') =
+              L.foldr
+                (\var (places, cx) ->
+                   case findVar var cx of
+                     (place, cx', _) -> (place : places, cx'))
+                ([], ctx')
+                vars
+            ctx''' =
+              L.foldr
+                (\(place, proj) cx -> Lens.set (place ^. Q.placeLens) proj cx)
+                ctx''
+                (L.zip lvalues rhsVals)
+         in return [(vrhs, ctx''', projEq ++ pathCond')]
   | otherwise =
     error $ "Nested patterns not supported yet: " ++ show pat ++ " = " ++
     show rhs
@@ -639,14 +643,15 @@ symEval (ECall (EConst VNil) "++" [lval], ctx, pathCond) = do
             , pathCond')
         return $ map (\(_, c, p) -> (oldVal, c, p)) updPaths
     _ -> error $ "Invalid l-value in post-increment: " ++ show lval
-symEval (ECall (EConst VNil) op [lval], ctx, pathCond) | op == Q.prefixIncrOp = do
-  Q.foreachM (findLValue lval ctx pathCond) $ \case
-    Just (_, ctx', pathCond', False) ->
-      symEval
-      ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
-      , ctx'
-      , pathCond')
-    _ -> error $ "Invalid l-value in pre-increment: " ++ show lval
+symEval (ECall (EConst VNil) op [lval], ctx, pathCond)
+  | op == Q.prefixIncrOp = do
+    Q.foreachM (findLValue lval ctx pathCond) $ \case
+      Just (_, ctx', pathCond', False) ->
+        symEval
+          ( EAssign lval (ECall (EConst VNil) "+" [lval, EConst (VInt 1)])
+          , ctx'
+          , pathCond')
+      _ -> error $ "Invalid l-value in pre-increment: " ++ show lval
 symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \(v1, ctx', pathCond') ->
     Q.foreachM (symEval (e2, ctx', pathCond')) $ \(v2, ctx'', pathCond'') -> do
@@ -666,7 +671,8 @@ symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
                then return [(VInt 1, ctx'', pathCond'')]
                else return [(VInt 0, ctx'', pathCond'')]
 symEval (ECall (EConst VNil) "!=" [e1, e2], ctx, pathCond) =
-  symEval (ECall (EConst VNil) "!" [ECall (EConst VNil) "==" [e1, e2]], ctx, pathCond)
+  symEval
+    (ECall (EConst VNil) "!" [ECall (EConst VNil) "==" [e1, e2]], ctx, pathCond)
 symEval (ECall (EConst VNil) "!" [e], ctx, pathCond) = do
   Q.foreachM (symEval (e, ctx, pathCond)) $ \(v, ctx', pathCond') ->
     case v of
@@ -679,13 +685,13 @@ symEval (ECall (EConst VNil) "!" [e], ctx, pathCond) = do
       _ -> return [((VInt 0), ctx', pathCond')]
 symEval (ECall (EConst VNil) "&" [e1, e2], ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \case
-    ((VInt 0), ctx', pathCond') -> return [((VInt 0), ctx', pathCond')]
+    (VInt 0, ctx', pathCond') -> return [(VInt 0, ctx', pathCond')]
     (v1, ctx', pathCond')
       | Q.isSym v1
       -- TODO: ask verifier if v can be proven to be 0/non-0
        -> do
         results <- symEval (e2, ctx', Not (v1 :=: VInt 0) : pathCond')
-        return $ ((VInt 0), ctx', v1 :=: VInt 0 : pathCond') : results
+        return $ (VInt 0, ctx', v1 :=: VInt 0 : pathCond') : results
     (_, ctx', pathCond') -> symEval (e2, ctx', pathCond')
 symEval (ECall (EConst VNil) "|" [e1, e2], ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \case

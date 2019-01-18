@@ -8,7 +8,8 @@ import qualified Control.Exception as Exception
 import Control.Exception (SomeException)
 import Control.Lens ((&), (.~), set)
 import qualified Data.Map as M
-import Prelude
+import qualified Data.Text.Prettyprint.Doc as P
+import Data.Text.Prettyprint.Doc (Pretty(pretty))
 import Quivela
 import Quivela.Language
   ( Context(..)
@@ -23,6 +24,7 @@ import Quivela.Language
   )
 import qualified Quivela.Language as Q
 import qualified Quivela.Parse as Q
+import Quivela.Prelude
 import qualified Quivela.SymEval as Q
 import qualified Quivela.Util as Q
 import qualified System.Environment as Environment
@@ -260,32 +262,6 @@ invalidCases =
                   method g(x) { y = 6, (y = 5, y + x) + x } } |] :
         [])
     ]
-
--- Tests that should work but are currently broken.  We don't run these as
--- part of "stack test"
-failingTests :: Test
-failingTests =
-  TestList
-    [ assertVerified
-        "assignment of tuple 4"
-        ([prog'|
-      method F(e) { new (const e=e) { method foo(m) { m & <t> = e.foo(m) }}}
-      _e = adversary() |]) $
-      [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
-    , assertVerified
-        "assignment of tuple 5"
-        ([prog'|
-      method F(e) { new (const e=e) { method foo() { <t> = e.foo() & <1> }}}
-      _e = adversary() |]) $
-      [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
-    , assertVerified "assignment of tuple 6" ([prog'| 1 |]) $
-      [prog| new () { method enc(m) { <t> = m }} |] ≈
-      [prog| new () { method enc(m) { <t> = (<tg>=m & <tg>)  }} |] :
-      []
-    ]
-
-bug :: Test
-bug = TestList []
 
 tests :: Test
 tests =
@@ -804,7 +780,44 @@ new() {
            method enc() { k=(!h) & h=2 & k}
          } |] :
     []
+  , assertVerified
+      "& tuple assignment 1"
+      [prog'|
+      method F(e) {
+        new (const e=e) {
+          method foo(m) {
+            m & (<t> = e.foo(m))
+          }
+        }
+      }
+      _e = adversary() |] $
+    [prog| F(_e) |] ≈ [prog| F(_e) |] : []
+  , assertVerified
+      "& tuple assignment 2"
+      [prog'|
+      method F(e) {
+        new (const e=e) {
+          method foo(m) {
+            m & (<t> = e.foo(m))
+          }
+        }
+      }
+      _e = adversary() |] $
+    [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
+  , assertVerified
+      "& tuple assignment 3"
+      ([prog'|
+      method F(e) { new (const e=e) { method foo() { <t> = e.foo() & <1> }}}
+      _e = adversary() |]) $
+    [prog| F(F(_e)) |] ≈ [prog| F(F(_e)) |] : []
+  , assertVerified "& tuple assignment 4" Q.nop $
+    [prog| new () { method enc(m) { <t> = m }} |] ≈
+    [prog| new () { method enc(m) { <t> = (<tg>=m & <tg>)  }} |] :
+    []
   ]
+
+bug :: Test
+bug = TestList []
 
 main :: IO ()
 main = do
@@ -813,7 +826,6 @@ main = do
         case args of
           [] -> tests
           ["bug"] -> bug
-          ["failing"] -> failingTests
           _ -> error "Illegal arguments"
   counts@Counts {cases, tried, errors, failures} <- T.runTestTT t
   if failures > 0 || errors > 0

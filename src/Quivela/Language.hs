@@ -289,7 +289,7 @@ instance Serialize Expr
 
 -- FIXME: Add precedence parentheses
 instance Pretty Expr where
-  pretty ENop = error "pretty nop"
+  pretty ENop = pretty "·"
   pretty (EAssign l r) = pretty l <+> pretty "≔" <+> pretty r
   pretty (EVar x) = pretty x
   pretty (EConst v) = pretty v

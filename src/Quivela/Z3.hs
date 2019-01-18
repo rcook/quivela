@@ -180,6 +180,7 @@ setOption k v =
 
 prelude' :: M (Q.Context -> Q.VC -> M (), [S.Command])
 prelude' = do
+  comment "Begin prelude"
   comment
     "Disable automatic self configuration in favor of pattern/trigger-based instantiation"
   setOption "smt.auto-config" False
@@ -293,6 +294,7 @@ prelude' = do
   vintersect <-
     defineFun "vintersect" [("v", tValue), ("w", tValue)] tValue $
     vset [amap and [toSet [e "v"], toSet [e "w"]]]
+  comment "End prelude"
   let typ :: Q.Type -> S.Type
       typ Q.TInt = S.tInt
       typ _ = tValue
