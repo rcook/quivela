@@ -836,8 +836,19 @@ new() {
       |] ≈
     [prog| new () {
         method foo(d1, d2, d3) { Z(<d1, d2, d3>) }}
-      |] :
-    []
+      |] : []
+  , assertVerified "only negated field" Q.nop $
+    [prog| new (r=0) {
+           method snd(d) { d & r=d & 1 }
+           method rcv() { !r }
+         }
+      |]
+      ≈
+      Hint [fieldOppEqual ["r"]] :
+      [prog| new (r=0) {
+        method snd(d) { d & r=1 & 1 }
+        method rcv() { !r }}
+      |] : []
   ]
 
 bug :: Test
