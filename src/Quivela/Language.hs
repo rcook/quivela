@@ -145,6 +145,7 @@ import Control.Lens ((<&>), (^.), (^?))
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.Set.Ordered (OSet)
 import qualified Data.Text.Prettyprint.Doc as P
 import Data.Text.Prettyprint.Doc (Doc, Pretty(pretty), (<+>), (<>))
 import Quivela.Prelude
@@ -212,15 +213,13 @@ instance Pretty Prop where
   pretty PTrue = pretty "⊤"
   pretty PFalse = pretty "⊥"
 
-conjunction :: [Prop] -> Prop
-conjunction [] = PTrue
-conjunction [p] = p
-conjunction ps = L.foldr1 (:&:) ps
-
 -- | A path condition is a list of propositions that all hold on a given path
 -- These could be stored as just one big conjunction instead, but representing
 -- them as a list simplifies reasoning about which paths are prefixes of others.
-type PathCond = [Prop]
+type PathCond = OSet Prop
+
+conjunction :: PathCond -> Prop
+conjunction = foldr (:&:) PTrue
 
 prefixIncrOp :: String
 prefixIncrOp = "++prefix"
@@ -623,7 +622,7 @@ data Context = Context
     -- ^ Map from type names to typedecl expressions (all values in this
     -- map can be assumed to be of the form (ETypeDecl ...)
   , _ctxAllocStrategy :: AllocStrategy
-  , _ctxAssertions :: [Prop]
+  , _ctxAssertions :: PathCond
   , _ctxAssumptions :: [(Expr, Expr)]
   , _ctxFunDecls :: Map String FunDecl
   } deriving (Eq, Show, Ord, Data)
@@ -646,7 +645,7 @@ instance Pretty Context where
       , ("alloc-strategy", pretty $ show _ctxAllocStrategy)
       , ( "asserts"
         , (P.align . P.vcat) $
-          L.map pretty _ctxAssertions )
+          L.map pretty $ toList _ctxAssertions )
       , ( "assums"
         , (P.align . P.vcat) $
           L.map
@@ -681,7 +680,7 @@ emptyCtx =
     , _ctxScope = M.empty
     , _ctxTypeDecls = M.empty
     , _ctxAllocStrategy = Increase
-    , _ctxAssertions = []
+    , _ctxAssertions = mempty
     , _ctxAssumptions = []
     , _ctxFunDecls = M.empty
     }
@@ -937,7 +936,7 @@ singleResult ress = error $ "Multiple results: " ++ show ress
 data VC = VC
   { _conditionName :: String
     -- ^ Purely for readability purposes when generating code for other solvers
-  , _assumptions :: [Prop]
+  , _assumptions :: PathCond
   , _goal :: Prop
   } deriving (Data, Eq, Ord)
 
@@ -946,6 +945,6 @@ instance Pretty VC where
     pretty name <> P.colon <+> pretty (conjunction assms :=>: g)
 
 emptyVC :: VC
-emptyVC = VC {_conditionName = "noop", _assumptions = [], _goal = PTrue}
+emptyVC = VC {_conditionName = "noop", _assumptions = mempty, _goal = PTrue}
 
 Lens.makeLenses ''VC

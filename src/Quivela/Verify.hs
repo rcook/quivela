@@ -35,6 +35,7 @@ import qualified Data.Map.Merge.Lazy as Merge
 import qualified Data.Maybe as Maybe
 import qualified Data.Serialize as Serialize
 import qualified Data.Set as S
+import qualified Data.Set.Ordered as OSet
 import qualified Data.Text.Prettyprint.Doc as P
 import Data.Text.Prettyprint.Doc (pretty)
 import qualified Debug.Trace as Trace
@@ -239,14 +240,19 @@ applyAddressBijection addrMap =
     replaceAddress v = v
 
 -- FIXME: This is just a cleaned up version of the original code.  The lhs is never recursed on.  Can this be correct?
+-- FIXME: Eliminate the repeated conversions of PathCond to [Prop].
+-- There is probably some really elegant way of expressing this as a
+-- fold without the explicit recursion.
 findContradictingBijection :: PathCond -> PathCond -> Maybe AddrBijection
-findContradictingBijection [] _ = Nothing
-findContradictingBijection _ [] = Nothing
-findContradictingBijection ls@(Not propL:_) (propR:rs) =
-  unifyAddrsExactProp propL propR M.empty <|> findContradictingBijection ls rs
-findContradictingBijection ls@(propL:_) (Not propR:rs) =
-  unifyAddrsExactProp propL propR M.empty <|> findContradictingBijection ls rs
-findContradictingBijection ls (_:rs) = findContradictingBijection ls rs
+findContradictingBijection l r = go (toList l) (toList r)
+  where
+    go [] _ = Nothing
+    go _ [] = Nothing
+    go ls@(Not propL:_) (propR:rs) =
+      unifyAddrsExactProp propL propR M.empty <|> go ls rs
+    go ls@(propL:_) (Not propR:rs) =
+      unifyAddrsExactProp propL propR M.empty <|> go ls rs
+    go ls (_:rs) = go ls rs
 
 -- ----------------------------------------------------------------------------
 -- Step
@@ -282,7 +288,9 @@ checkEqv _ Step {lhs, hints, rhs}
 -- Note: We can only rewrite as a single step.  The result must be syntactically
 -- identical, so no VCs are generated.
 checkEqv prefix Step {lhs, rhs, hints = [Rewrite from to]} = do
-  (_, prefixCtx, []) <- fmap Q.singleResult $ Q.symEval (prefix, Q.emptyCtx, [])
+  (_, prefixCtx, props) <- fmap Q.singleResult $ Q.symEval (prefix, Q.emptyCtx, mempty)
+  Monad.unless (null props) $
+    Monad.fail "A non-empty set of propositions was returned"
   let assms = prefixCtx ^. Q.ctxAssumptions
   Monad.unless (L.elem (from, to) assms || L.elem (to, from) assms) $
     Monad.fail ("No such assumption: " ++ show (pretty from) ++ " ≈ " ++ show (pretty to))
@@ -310,20 +318,20 @@ checkEqv prefix step@Step {lhs, rhs} = do
       Q.debug "Skipping cached verification step"
       return []
     else do
-      (_, prefixCtx, []) <-
-        Q.singleResult <$> Q.symEval (prefix, Q.emptyCtx, [])
+      (_, prefixCtx, _) <-
+        Q.singleResult <$> Q.symEval (prefix, Q.emptyCtx, mempty)
       Q.verifyPrefixCtx .= prefixCtx
       -- lhs path condition should be empty
-      resL@(VRef aL, ctxL, []) <-
-        Q.singleResult <$> Q.symEval (lhs, prefixCtx, [])
+      resL@(VRef aL, ctxL, _) <-
+        Q.singleResult <$> Q.symEval (lhs, prefixCtx, mempty)
       -- rhs path condition should be empty
-      resR@(VRef aR, ctxR, []) <-
-        Q.singleResult <$> Q.symEval (rhs, prefixCtx, [])
+      resR@(VRef aR, ctxR, _) <-
+        Q.singleResult <$> Q.symEval (rhs, prefixCtx, mempty)
       -- check that invariants hold initially
-      invLHS <- invariantMethodVCs [] aL ctxL []
-      invRHS <- invariantMethodVCs [] aR ctxR []
+      invLHS <- invariantMethodVCs mempty aL ctxL mempty
+      invRHS <- invariantMethodVCs mempty aR ctxR mempty
       invsRel <-
-        L.concat <$> mapM (invToVC [] (aL, ctxL, []) (aR, ctxR, [])) hints
+        L.concat <$> mapM (invToVC mempty (aL, ctxL, mempty) (aR, ctxR, mempty)) hints
       remainingInvVCs <- checkVCs (invLHS ++ invRHS ++ invsRel)
       let mtds = sharedMethods aL ctxL aR ctxR
       -- check that there are no other methods except invariants:
@@ -412,7 +420,7 @@ checkEqv prefix step@Step {lhs, rhs} = do
                        (VRef addr1, ctxH1, pathCond1)
                        (VRef addr2, ctxH2, pathCond2))
                     invs
-                return $ L.concat (assms1 : assms2 : assms3)
+                return $ foldMap OSet.fromList (assms1 : assms2 : assms3)
            -- Invariant methods aren't relational and hence we don't need to check them for each pair of
            -- of paths:
            lhsInvVCs <-
@@ -454,7 +462,7 @@ checkEqv prefix step@Step {lhs, rhs} = do
                  -- that the allocator chose.
                  let vcRes =
                        VC
-                         { _assumptions = applyBij $ L.nub $ assms ++ pc1 ++ pc2 -- FIXME: nub is annoying here
+                         { _assumptions = applyBij $ assms <> pc1 <> pc2
                          , _conditionName = "resultsEq"
                          , _goal = id (v1 :=: applyBij v2)
                          }
@@ -469,7 +477,7 @@ checkEqv prefix step@Step {lhs, rhs} = do
                  -- Require that adversary was called with same values:
                  let vcAdv =
                        VC
-                         { _assumptions = applyBij $ L.nub $ assms ++ pc1 ++ pc2 -- FIXME: nub
+                         { _assumptions = applyBij $ assms <> pc1 <> pc2
                          , _conditionName = "advCallsEq"
                          , _goal =
                              Sym (AdversaryCall (c1 ^. Q.ctxAdvCalls)) :=:
@@ -509,16 +517,16 @@ checkEqv prefix step@Step {lhs, rhs} = do
     triviallyTrue vc
       | v1 :=: v1' <- vc ^. Q.goal =
         return $ (v1 == v1') || assumptionsContradictory (vc ^. Q.assumptions)
-      | (vc ^. Q.goal) `L.elem` (vc ^. Q.assumptions) = return True
+      | (vc ^. Q.goal) `OSet.member` (vc ^. Q.assumptions) = return True
       | otherwise = return False
-    assumptionsContradictory :: [Prop] -> Bool
-    -- FIXME: this probably shouldn't be quadratic
+    assumptionsContradictory :: PathCond -> Bool
+    -- O(N log(N))
     assumptionsContradictory assms =
       L.any
         (\case
-           Not p -> L.any (== p) assms
+           Not p -> p `OSet.member` assms -- O(log(N))
            _ -> False)
-        assms
+        assms -- O(N)
 
 -- | When mutable fields with the same name, type, and value are shared between two
 --   expressions in a Step, infer they should be equal.
@@ -528,9 +536,9 @@ inferFieldEqualities prefix step@Step {lhs, hints, rhs}
   | Q.elemPartial NoInfer hints = return step
   | L.any Q.isEqualInv hints = return step -- if someone explicitly specifies equalities, don't try to infer others
   | otherwise = do
-    (_, prefixCtx, _) <- Q.singleResult <$> Q.symEval (prefix, Q.emptyCtx, [])
-    (VRef addrL, ctxL, _) <- Q.singleResult <$> Q.symEval (lhs, prefixCtx, [])
-    (VRef addrR, ctxR, _) <- Q.singleResult <$> Q.symEval (rhs, prefixCtx, [])
+    (_, prefixCtx, _) <- Q.singleResult <$> Q.symEval (prefix, Q.emptyCtx, mempty)
+    (VRef addrL, ctxL, _) <- Q.singleResult <$> Q.symEval (lhs, prefixCtx, mempty)
+    (VRef addrR, ctxR, _) <- Q.singleResult <$> Q.symEval (rhs, prefixCtx, mempty)
     if ctxL == ctxR
       then Q.debug $ "Same context: " ++ Doc.show (pretty ctxL)
       else do
@@ -635,13 +643,13 @@ checkVCs vcs = do
       Monad.liftIO $ IO.hGetLine hout
 
 -- | Compute all relational proof obligations generated by an invariant
-invToVC :: [Prop] -> PathCtx Addr -> PathCtx Addr -> ProofHint -> Verify [VC]
+invToVC :: PathCond -> PathCtx Addr -> PathCtx Addr -> ProofHint -> Verify [VC]
 invToVC assms (addrL, ctxL, pathCondL) (addrR, ctxR, pathCondR) inv =
   case inv of
     EqualInv f g ->
       return
         [ Q.emptyVC
-            { _assumptions = L.nub $ pathCondL ++ pathCondR ++ assms -- FIXME: Maintain `nub` invariant in data structure, not at each record update.
+            { _assumptions = pathCondL <> pathCondR <> assms
             , _conditionName = "equalInvPreserved"
             , _goal = f addrL ctxL :=: g addrR ctxR
             }
@@ -676,11 +684,11 @@ invariantMethodVCs assms addr ctx pathCond = do
       Q.symEval
         ( univInv ^. Q.methodBody
         , ctx' {Q._ctxScope = scope, Q._ctxThis = addr}
-        , pathCond' ++ pathCond)
+        , pathCond' <> pathCond)
     Q.foreachM (return paths) $ \(r, _, c) ->
       return
         [ VC
-            { _assumptions = L.nub $ c ++ assms -- FIXME: nub is annoying here
+            { _assumptions = c <> assms
             , _conditionName = "univInvPreserved_" ++ (univInv ^. Q.methodName)
             , _goal = Not (r :=: VInt 0)
             }
@@ -700,7 +708,7 @@ universalInvariantAssms addr ctx pathCond =
       Q.symEval
         ( invariantMethod ^. Q.methodBody
         , Lens.set Q.ctxThis addr (Lens.set Q.ctxScope scope ctx)
-        , pathCond' ++ pathCond)
+        , pathCond' <> pathCond)
     let destVar (Sym (SymVar n t)) = (n, t)
         destVar _ = error "Not a var"
     let argNames = map destVar args
@@ -763,7 +771,7 @@ universalInvariantAssms addr ctx pathCond =
     -- variables x occurring in one assumption of the form (x = E) by replacing x by E in the
     -- rest of the formula.
     onePointTransform ::
-         [(Var, Type)] -> [Prop] -> Prop -> ([(Var, Type)], [Prop], Prop)
+         [(Var, Type)] -> PathCond -> Prop -> ([(Var, Type)], PathCond, Prop)
     onePointTransform vs assms conseq =
       L.foldr removeVar (vs, assms, conseq) spuriousAssms
       where
@@ -784,11 +792,11 @@ universalInvariantAssms addr ctx pathCond =
                           then Just (x, e, assm)
                           else Nothing
                       _ -> Nothing)
-                 assms)
+                 (toList assms))
             (map fst vs)
         removeVar (spurVar, spurExpr, origAssm) (vs', assms', conseq') =
           ( L.filter ((/= spurVar) . fst) vs'
-          , map (substSymVar spurVar spurExpr) . L.filter (/= origAssm) $ assms'
+          , OSet.map (substSymVar spurVar spurExpr) . OSet.filter (/= origAssm) $ assms'
           , substSymVar spurVar spurExpr conseq')
         -- | Substitute x by v in p
         substSymVar :: Var -> Value -> Prop -> Prop

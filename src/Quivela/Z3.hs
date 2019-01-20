@@ -27,7 +27,7 @@ import qualified SMTLib2.Core as S
 import SMTLib2.Core ((===), (==>), tBool)
 import qualified SMTLib2.Int as S
 import SMTLib2.Int (tInt)
-import Text.PrettyPrint as PP
+import qualified Text.PrettyPrint as PP
 
 -- ----------------------------------------------------------------------------
 -- SMT-LIB builtins
@@ -430,7 +430,7 @@ prelude' = do
              S.CmdDeclareFun (N f) (L.map (const tValue) args) tValue)
           (Map.elems (ctx ^. Q.ctxFunDecls))
         comment name
-        mapM_ (\a -> prop a >>= assert) (ctx ^. Q.ctxAssertions ++ assms)
+        mapM_ (\a -> prop a >>= assert) (toList $ ctx ^. Q.ctxAssertions <> assms)
         prop goal >>= \g -> assert (S.not g)
   S v cs <- get
   unless (Map.null v) (error "nonempty vars in prelude")

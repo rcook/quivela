@@ -50,6 +50,8 @@ import qualified Data.Map as M
 import qualified Data.Maybe as Maybe
 import qualified Data.Serialize as Serialize
 import qualified Data.Set as S
+import qualified Data.Set.Ordered as OSet
+import Data.Set.Ordered ((|<))
 import qualified Quivela.Language as Q
 import Quivela.Language
   ( Addr
@@ -572,9 +574,9 @@ symEval (EAssign (ETuple pat) rhs, ctx, pathCond)
                   ( map
                       (Sym . Proj vrhs . VInt . fromIntegral)
                       [0 .. L.length pat - 1]
-                  , [vrhs :=: VTuple rhsVals])
+                  , OSet.singleton $ vrhs :=: VTuple rhsVals)
                 VTuple rhsVals'
-                  | L.length rhsVals' == L.length vars -> (rhsVals', [])
+                  | L.length rhsVals' == L.length vars -> (rhsVals', mempty)
                 _ ->
                   error $
                   printf
@@ -592,7 +594,7 @@ symEval (EAssign (ETuple pat) rhs, ctx, pathCond)
                 (\(place, proj) cx -> Lens.set (place ^. Q.placeLens) proj cx)
                 ctx''
                 (L.zip lvalues rhsVals)
-         in return [(vrhs, ctx''', projEq ++ pathCond')]
+         in return [(vrhs, ctx''', projEq <> pathCond')]
   | otherwise =
     error $ "Nested patterns not supported yet: " ++ show pat ++ " = " ++
     show rhs
@@ -615,8 +617,8 @@ symEval (EIf cnd thn els, ctx, pathCond) = do
   where
     handle (cndVal, c, p)
       | Q.isSym cndVal = do
-        thnPaths <- symEval (thn, c, Not (cndVal :=: VInt 0) : p)
-        elsPaths <- symEval (els, c, cndVal :=: VInt 0 : p)
+        thnPaths <- symEval (thn, c, Not (cndVal :=: VInt 0) |< p)
+        elsPaths <- symEval (els, c, cndVal :=: VInt 0 |< p)
         return $ thnPaths ++ elsPaths
       | cndVal == VInt 0 = symEval (els, c, p)
       | otherwise = symEval (thn, c, p)
@@ -659,8 +661,8 @@ symEval (ECall (EConst VNil) "==" [e1, e2], ctx, pathCond) =
       if (Q.isSym v1 || Q.isSym v2) && (v1 /= v2)
         then if doSplit
                then return
-                      [ (VInt 0, ctx'', Not (v1 :=: v2) : pathCond'')
-                      , (VInt 1, ctx'', v1 :=: v2 : pathCond'')
+                      [ (VInt 0, ctx'', Not (v1 :=: v2) |< pathCond'')
+                      , (VInt 1, ctx'', v1 :=: v2 |< pathCond'')
                       ]
                else return
                       [ ( Sym (ITE (v1 :=: v2) (VInt 1) (VInt 0))
@@ -678,8 +680,8 @@ symEval (ECall (EConst VNil) "!" [e], ctx, pathCond) = do
     case v of
       Sym _ ->
         return
-          [ (VInt 1, ctx', v :=: VInt 0 : pathCond')
-          , (VInt 0, ctx', Not (v :=: (VInt 0)) : pathCond')
+          [ (VInt 1, ctx', v :=: VInt 0 |< pathCond')
+          , (VInt 0, ctx', Not (v :=: (VInt 0)) |< pathCond')
           ]
       VInt 0 -> return [(VInt 1, ctx', pathCond')]
       _ -> return [((VInt 0), ctx', pathCond')]
@@ -690,16 +692,16 @@ symEval (ECall (EConst VNil) "&" [e1, e2], ctx, pathCond) = do
       | Q.isSym v1
       -- TODO: ask verifier if v can be proven to be 0/non-0
        -> do
-        results <- symEval (e2, ctx', Not (v1 :=: VInt 0) : pathCond')
-        return $ (VInt 0, ctx', v1 :=: VInt 0 : pathCond') : results
+        results <- symEval (e2, ctx', Not (v1 :=: VInt 0) |< pathCond')
+        return $ (VInt 0, ctx', v1 :=: VInt 0 |< pathCond') : results
     (_, ctx', pathCond') -> symEval (e2, ctx', pathCond')
 symEval (ECall (EConst VNil) "|" [e1, e2], ctx, pathCond) = do
   Q.foreachM (symEval (e1, ctx, pathCond)) $ \case
     ((VInt 0), ctx', pathCond') -> symEval (e2, ctx', pathCond')
     (v1, ctx', pathCond')
       | Q.isSym v1 -> do
-        results <- symEval (e2, ctx', (v1 :=: VInt 0) : pathCond')
-        return $ (v1, ctx', Not (v1 :=: VInt 0) : pathCond') : results
+        results <- symEval (e2, ctx', (v1 :=: VInt 0) |< pathCond')
+        return $ (v1, ctx', Not (v1 :=: VInt 0) |< pathCond') : results
     (v, ctx', pathCond') -> return [(v, ctx', pathCond')]
 symEval (ECall (EConst VNil) "adversary" [], ctx, pathCond) =
   return
@@ -785,7 +787,7 @@ symEval (ESetCompr x v e, ctx, pathCond)
               (SetCompr
                  fv
                  funVal
-                 (Q.conjunction $ Not (predVal :=: VInt 0) : pathCond''))
+                 (Q.conjunction $ Not (predVal :=: VInt 0) |< pathCond''))
           ]
   return
     [(L.foldr (\m k -> Sym (Q.Union m k)) (VSet S.empty) comprs, ctx, pathCond)]
@@ -801,7 +803,7 @@ symEval (EMapCompr x v e, ctx, pathCond) = do
               (MapCompr
                  fv
                  funVal
-                 (Q.conjunction $ Not (predVal :=: VInt 0) : pathCond''))
+                 (Q.conjunction $ Not (predVal :=: VInt 0) |< pathCond''))
           ]
   return
     [ ( L.foldr (\m k -> Sym $ MapUnion m k) (VMap M.empty) comprs
@@ -839,7 +841,7 @@ symEval (ESubmap e1 e2, ctx, pathCond) = do
 symEval (EAssume e1 e2, ctx, pathCond) =
   return [(VNil, Lens.over Q.ctxAssumptions ((e1, e2) :) ctx, pathCond)]
 symEval (EAssert p, ctx, pathCond) =
-  return [(VNil, Lens.over Q.ctxAssertions (p :) ctx, pathCond)]
+  return [(VNil, Lens.over Q.ctxAssertions (p |<) ctx, pathCond)]
 symEval (funDecl@EFunDecl {}, ctx, pathCond) =
   let funName = funDecl ^. Q.efunDeclName
    in return
@@ -1042,14 +1044,14 @@ force (v@(Sym (Lookup k m)), ctx, pathCond)
    = do
     (fv, ctx', pathCond') <- typedValue "sym_lookup" tv ctx
     return
-      [ (VInt 0, ctx, (v :=: VInt 0) : pathCond)
-      , (fv, ctx', (v :=: fv) : Not (v :=: VInt 0) : pathCond' ++ pathCond)
+      [ (VInt 0, ctx, (v :=: VInt 0) |< pathCond)
+      , (fv, ctx', (v :=: fv) |< Not (v :=: VInt 0) |< pathCond' <> pathCond)
       ]
 force (v@(Sym (SymVar _ (TNamed t))), ctx, _)
   -- Allocate a new object of the required type
  = do
   (VRef a', ctx', pathCond') <- typedValue "sym_obj" (TNamed t) ctx
-  return [(VRef a', ctx', v :=: VRef a' : pathCond')]
+  return [(VRef a', ctx', v :=: VRef a' |< pathCond')]
 force (v, ctx, pathCond) = return [(v, ctx, pathCond)]
 
 -- | Produce a list of symbolic values to use for method calls.
@@ -1058,9 +1060,9 @@ symArgs ctx args =
   Monad.foldM
     (\(vals, ctx', pathCond) (name, typ) -> do
        (val, ctx'', pathCond') <- typedValue name typ ctx'
-       return (vals ++ [val], ctx'', pathCond' ++ pathCond) -- FIXME: vals ++ [val] is quadratic.  Also weird that path conditions are in reverse order from values.
+       return (vals ++ [val], ctx'', pathCond' <> pathCond) -- FIXME: vals ++ [val] is quadratic.  Also weird that path conditions are in reverse order from values.
      )
-    ([], ctx, [])
+    ([], ctx, mempty)
     args
 
 typedValue :: Var -> Type -> Context -> Verify Result
@@ -1081,16 +1083,16 @@ typedValue _ (TNamed typ) ctx
                (map EConst args))
         , ctx'
         , pathCond')
-    let pathCondEqs =
+    let pathCondEqs = OSet.fromList $
           L.zipWith
             (\(x, _, _) argVal -> Sym (Deref val x) :=: argVal)
             (tdecl ^. Q.typedeclFormals)
             args
-    return (val, ctx'', pathCondEqs ++ pathCond'')
+    return (val, ctx'', pathCondEqs <> pathCond'')
   | otherwise = error $ "No such type: " ++ typ
 typedValue name t ctx = do
   freshName <- freshVar name
-  return (Sym (SymVar freshName t), ctx, [])
+  return (Sym (SymVar freshName t), ctx, mempty)
 
 evalError :: String -> Context -> a
 evalError s c = error (s ++ "\nContext:\n" ++ printContext c)

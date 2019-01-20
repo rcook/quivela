@@ -53,6 +53,7 @@ module Quivela.Prelude
   , fmap
   , foldM
   , foldMap
+  , foldr
   , fromInteger
   , fromIntegral
   , fst
@@ -62,6 +63,7 @@ module Quivela.Prelude
   , mapM_
   , mempty
   , not
+  , null
   , otherwise
   , pretty
   , printf
@@ -70,6 +72,7 @@ module Quivela.Prelude
   , return
   , show
   , snd
+  , toList
   , trace
   , traceShow
   , uncurry
@@ -79,6 +82,7 @@ module Quivela.Prelude
 
 import Control.Monad (foldM)
 import Data.Data (Data)
+import Data.Foldable (foldr, null, toList)
 import Data.Function ((&))
 import Data.Map (Map)
 import Data.Serialize (Serialize)

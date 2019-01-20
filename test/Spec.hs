@@ -64,13 +64,13 @@ assertError msg x =
 
 assertEvalError :: String -> Expr -> Test
 assertEvalError msg e =
-  assertError msg . Q.runVerify env $ Q.symEval (e, Q.emptyCtx, [])
+  assertError msg . Q.runVerify env $ Q.symEval (e, Q.emptyCtx, mempty)
 
 assertEvalResult' :: String -> Context -> Expr -> Value -> Test
 assertEvalResult' msg ctx e v =
   let a = do
         (res, _, _) <-
-          Q.singleResult <$> (Q.runVerify env $ (Q.symEval (e, ctx, [])))
+          Q.singleResult <$> (Q.runVerify env $ (Q.symEval (e, ctx, mempty)))
         T.assertEqual msg res v
    in msg ~: TestCase a
 

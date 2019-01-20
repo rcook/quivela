@@ -55,6 +55,7 @@ library:
   - filepath
   - lens
   - mtl
+  - oset
   - parsec
   - pretty
   - prettyprinter
