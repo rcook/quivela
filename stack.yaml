@@ -44,7 +44,7 @@ extra-deps:
   commit: 803b6a6d013c14a140234dfffd89c92bc07d8c7e
   # Use rcook/oset instead of ordered-containers until issues are resolved (https://github.com/dmwit/ordered-containers/issues)
 - github: rcook/oset
-  commit: 1eb6d88270c0fd0307312e4422abc17cb097e066
+  commit: a809059c899e782e38bad77fb6554eab91bd7546
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

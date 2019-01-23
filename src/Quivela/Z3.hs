@@ -16,6 +16,7 @@ import Control.Monad.State (State, get, modify)
 import qualified Data.List as L
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Data.Set.Ordered as OSet
 import qualified Quivela.Language as Q
 import Quivela.Language (Prop((:&:), (:=:), (:=>:)))
 import Quivela.Prelude
@@ -430,7 +431,7 @@ prelude' = do
              S.CmdDeclareFun (N f) (L.map (const tValue) args) tValue)
           (Map.elems (ctx ^. Q.ctxFunDecls))
         comment name
-        mapM_ (\a -> prop a >>= assert) (toList $ ctx ^. Q.ctxAssertions <> assms)
+        mapM_ (\a -> prop a >>= assert) (OSet.toSeq $ ctx ^. Q.ctxAssertions <> assms)
         prop goal >>= \g -> assert (S.not g)
   S v cs <- get
   unless (Map.null v) (error "nonempty vars in prelude")

@@ -19,7 +19,6 @@ module Quivela.Verify
   , stepNote
   ) where
 
-import Control.Applicative ((<|>))
 import qualified Control.Arrow as Arrow
 import qualified Control.Conditional as Cond
 import qualified Control.Lens as Lens
@@ -239,21 +238,6 @@ applyAddressBijection addrMap =
       | otherwise = Ref addr -- error $ "No mapping for address: " ++ show addr ++ " in " ++ show addrMap
     replaceAddress v = v
 
--- FIXME: This is just a cleaned up version of the original code.  The lhs is never recursed on.  Can this be correct?
--- FIXME: Eliminate the repeated conversions of PathCond to [Prop].
--- There is probably some really elegant way of expressing this as a
--- fold without the explicit recursion.
-findContradictingBijection :: PathCond -> PathCond -> Maybe AddrBijection
-findContradictingBijection l r = go (toList l) (toList r)
-  where
-    go [] _ = Nothing
-    go _ [] = Nothing
-    go ls@(Not propL:_) (propR:rs) =
-      unifyAddrsExactProp propL propR M.empty <|> go ls rs
-    go ls@(propL:_) (Not propR:rs) =
-      unifyAddrsExactProp propL propR M.empty <|> go ls rs
-    go ls (_:rs) = go ls rs
-
 -- ----------------------------------------------------------------------------
 -- Step
 -- ----------------------------------------------------------------------------
@@ -448,10 +432,7 @@ checkEqv prefix step@Step {lhs, rhs} = do
                            m
                          [] -> M.empty
                          _ -> error "More than one address bijection hint"
-                 let addrMap =
-                       Maybe.fromMaybe
-                         (findAddressBijection baseMap res1 res2)
-                         (findContradictingBijection pc1 pc2)
+                 let addrMap = findAddressBijection baseMap res1 res2
                      applyBij :: Data p => p -> p
                      applyBij =
                        if NoAddressBijection `Q.elemPartial` invs
@@ -792,6 +773,10 @@ universalInvariantAssms addr ctx pathCond =
                           then Just (x, e, assm)
                           else Nothing
                       _ -> Nothing)
+                -- Interesting aside: one could define
+                -- Seq.catMaybes = fmap fromJust . Seq.filter isJust
+                -- This could operate directly on the sequence: its runtime
+                -- would still be O(N), so there'd be no point
                  (toList assms))
             (map fst vs)
         removeVar (spurVar, spurExpr, origAssm) (vs', assms', conseq') =
