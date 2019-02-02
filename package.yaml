@@ -1,22 +1,22 @@
 name:                quivela
 version:             0.1.0.0
-github:              ""
-license:             BSD3
-author:              "Daniel Schoepe and Sean McLaughlin"
+github:              awslabs/quivela
+license:             Apache
+author:              Daniel Schoepe and Sean McLaughlin
 maintainer:          ""
-copyright:           "2018 AWS Labs"
+copyright:           2018-2019 AWS Labs
 
 extra-source-files:
 - README.md
 - ChangeLog.md
 
-description:         Please see the README on GitHub at <https://github.com/githubuser/quivela#readme>
+description:         Please see the README on GitHub at <https://github.com/awslabs/quivela#readme>
 
 dependencies:
 - base >= 4.7 && < 5
 
 default-extensions:
-  - NoImplicitPrelude
+- NoImplicitPrelude
 
 library:
   source-dirs: src
