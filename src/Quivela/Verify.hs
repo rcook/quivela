@@ -298,9 +298,9 @@ checkEqv prefix Step {lhs, rhs, hints = [Rewrite from to]} = do
   if lhs' == rhs
     then return []
     else error $ "Invalid rewrite step:" ++ show lhs' ++ " = " ++ show rhs
-  -- | @'rewriteExpr' from to e@ rewrites all occurrences of @from@ in @e@ by @to@
-  -- FIXME: This is unsound.  It must take bound variables into account. Write unit tests for this
   where
+    -- | @'rewriteExpr' from to e@ rewrites all occurrences of @from@ in @e@ by @to@
+    -- FIXME: This is unsound.  It must take bound variables into account. Write unit tests for this
     rewriteExpr :: Expr -> Expr
     rewriteExpr e = Generics.everywhere (Generics.mkT replace) e
       where
@@ -497,7 +497,7 @@ checkEqv prefix step@Step {lhs, rhs} = do
     havocObj :: Object -> Verify Object
     havocObj obj
       | obj ^. Q.objAdversary = return obj
-      -- ^ this is a hack, since we currently don't support const annotations on global variables
+      -- The above is a hack, since we currently don't support const annotations on global variables
       | otherwise = do
         newLocals <-
           mapM
@@ -742,9 +742,9 @@ universalInvariantAssms addr ctx pathCond =
               pathCondI
               (Not (res :=: VInt 0))
       return $ replaceAllRefs [Forall vs (Q.conjunction assms :=>: conseq)]
-  -- | Collect all free symbolic variables occurring in some data
-  -- Only forall statements are considered as variable binders.
   where
+    -- | Collect all free symbolic variables occurring in some data
+    -- Only forall statements are considered as variable binders.
     collectRefs :: Data p => p -> [Value]
     collectRefs = Generics.listify isRef
       where

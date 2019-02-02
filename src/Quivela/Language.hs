@@ -10,8 +10,9 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Quivela.Language
+  (
     -- * Abbrevs
-  ( Addr
+    Addr
   , Config
   , PathCtx
   , Var

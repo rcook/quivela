@@ -6,8 +6,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Quivela.SymEval
+  (
     -- * VerifyEnv
-  ( VerifyEnv
+    VerifyEnv
   , cacheFile
   , debugFlag
   , jobName
