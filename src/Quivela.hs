@@ -18,6 +18,7 @@ module Quivela
   , writeAllVCsToFile
   -- * Proof steps
   , (≈)
+  , (~~)
   -- * Proof hints
   , ProofHint(Admit, NoAddressBijection, NoInfer, Note)
   , fieldEqual
@@ -35,11 +36,15 @@ import Quivela.Prelude
 import Quivela.QuasiQuote
 import Quivela.SymEval
 
--- | Like '~~' but using a nicer-looking unicode operator instead.
+-- | Cons: like '~~' but using a nicer-looking Unicode operator instead.
 (≈) :: a -> [a] -> [a]
 x ≈ y = x : y
-
 infixr 5 ≈
+
+-- | Cons: like '≈' but using regular ASCII characters instead.
+(~~) :: a -> [a] -> [a]
+x ~~ y = x : y
+infixr 5 ~~
 
 -- | A shorthand for rewriting using quivela terms written in concrete syntax.
 -- Note: We can only use rewriting as a single proof hint.  The rewritten result
