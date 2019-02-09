@@ -145,7 +145,7 @@ import Control.Lens ((<&>), (^.), (^?))
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Data.Set.Ordered (OSet)
+import Data.Set.Ordered (OSetL)
 import qualified Data.Text.Prettyprint.Doc as P
 import Data.Text.Prettyprint.Doc (Doc, Pretty(pretty), (<+>), (<>))
 import Quivela.Prelude
@@ -216,7 +216,7 @@ instance Pretty Prop where
 -- | A path condition is a list of propositions that all hold on a given path
 -- These could be stored as just one big conjunction instead, but representing
 -- them as a list simplifies reasoning about which paths are prefixes of others.
-type PathCond = OSet Prop
+type PathCond = OSetL Prop
 
 conjunction :: PathCond -> Prop
 conjunction = foldr (:&:) PTrue

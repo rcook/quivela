@@ -420,7 +420,7 @@ checkEqv prefix step@Step {lhs, rhs} = do
                        (VRef addr1, ctxH1, pathCond1)
                        (VRef addr2, ctxH2, pathCond2))
                     invs
-                return $ foldMap OSet.fromList (assms1 : assms2 : assms3)
+                return $ foldMap OSet.fromListL (assms1 : assms2 : assms3)
            -- Invariant methods aren't relational and hence we don't need to check them for each pair of
            -- of paths:
            lhsInvVCs <-

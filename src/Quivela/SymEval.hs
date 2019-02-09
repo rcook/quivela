@@ -568,7 +568,8 @@ symEval (EAssign (ETuple pat) rhs, ctx, pathCond)
     Q.foreachM (symEval (rhs, ctx, pathCond)) $ \case
       (VInt 0, ctx', pathCond') -> return [(VInt 0, ctx', pathCond')]
       (vrhs, ctx', pathCond') ->
-        let (rhsVals, projEq) =
+        let projEq :: PathCond
+            (rhsVals, projEq) =
               case vrhs of
                 Sym _ ->
                   ( map
@@ -1083,7 +1084,8 @@ typedValue _ (TNamed typ) ctx
                (map EConst args))
         , ctx'
         , pathCond')
-    let pathCondEqs = OSet.fromList $
+    let pathCondEqs :: PathCond
+        pathCondEqs = OSet.fromListL $
           L.zipWith
             (\(x, _, _) argVal -> Sym (Deref val x) :=: argVal)
             (tdecl ^. Q.typedeclFormals)
